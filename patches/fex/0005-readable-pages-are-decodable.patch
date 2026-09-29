@@ -1,0 +1,21 @@
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -251,7 +251,17 @@
+ FEXCore::HLE::ExecutableRangeInfo InvalidationTracker::QueryExecutableRange(uint64_t Address) {
+   std::shared_lock Lock(IntervalsLock);
+   const auto XResult = XIntervals.Query(Address);
+   if (!XResult.Enclosed) {
++    // ios-wine: x64-out images (libcef, ~212MB) are mapped into plain readable
++    // memory outside the blessed JIT arena, so they never enter XIntervals and
++    // every entry block there was rejected as "NoExec instruction in entry
++    // block" -> C0000005 in the webhelper. FEX only READS the guest bytes to
++    // translate them, so a committed, readable, non-guard page is decodable.
++    MEMORY_BASIC_INFORMATION Info;
++    if (!NtQueryVirtualMemory(NtCurrentProcess(), reinterpret_cast<void*>(Address), MemoryBasicInformation, &Info, sizeof(Info), nullptr) &&
++        Info.State == MEM_COMMIT && Info.Protect && !(Info.Protect & (PAGE_GUARD | PAGE_NOACCESS))) {
++      return {reinterpret_cast<uint64_t>(Info.BaseAddress), Info.RegionSize, false};
++    }
+     return {};
+   }
+   const auto RWXResult = RWXIntervals.Query(Address);

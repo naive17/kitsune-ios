@@ -1,0 +1,521 @@
+diff --git a/src/airconv/airconv_context.cpp b/src/airconv/airconv_context.cpp
+index ffa2596..4c74d68 100644
+--- a/src/airconv/airconv_context.cpp
++++ b/src/airconv/airconv_context.cpp
+@@ -1,3 +1,4 @@
++#include <TargetConditionals.h>
+ #include "llvm/IR/Constants.h"
+ #include "llvm/IR/DerivedTypes.h"
+ #include "llvm/IR/IRBuilder.h"
+@@ -39,14 +40,34 @@ namespace dxmt {
+ 
+ void initializeModule(llvm::Module &M) {
+   M.setSourceFileName("airconv_generated.metal");
++  /*
++   * The target triple of the AIR this converter GENERATES at run time, which is
++   * a different thing from the platform airconv itself was compiled for -- and
++   * the reason it is easy to miss. Everything else about an iOS build can be
++   * right and Metal will still refuse every shader, because a metallib carrying
++   * a macosx triple does not load on iOS.
++   *
++   * Taken from the Metal compiler rather than guessed:
++   *   metal -std=metal3.1 --target=air64-apple-ios17.0 -> air64-apple-ios17.0.0
++   */
++#if TARGET_OS_OSX
+   M.setTargetTriple("air64-apple-macosx14.0.0");
++#else
++  M.setTargetTriple("air64-apple-ios17.0.0");
++#endif
+   M.setDataLayout(
+     "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:"
+     "64:64-v16:16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-"
+     "v128:128:128-v192:256:256-v256:256:256-v512:512:512-v1024:1024:1024-n8:"
+     "16:32"
+   );
++#if TARGET_OS_OSX
+   M.setSDKVersion(VersionTuple(15, 0));
++#else
++  /* Kept in step with the triple above. If a metallib is ever rejected with a
++   * version complaint rather than a platform one, this is the number. */
++  M.setSDKVersion(VersionTuple(17, 0));
++#endif
+   M.addModuleFlag(Module::ModFlagBehavior::Error, "wchar_size", 4);
+   M.addModuleFlag(Module::ModFlagBehavior::Max, "frame-pointer", 2);
+   M.addModuleFlag(Module::ModFlagBehavior::Max, "air.max_device_buffers", 31);
+diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
+index db5b795..19c317d 100644
+--- a/src/airconv/dxbc_converter.cpp
++++ b/src/airconv/dxbc_converter.cpp
+@@ -1,3 +1,4 @@
++#include <TargetConditionals.h>
+ #include "dxbc_converter.hpp"
+ #include "DXBCParser/BlobContainer.h"
+ #include "DXBCParser/ShaderBinary.h"
+@@ -389,7 +390,12 @@ void setup_metal_version(llvm::Module &module, SM50_SHADER_METAL_VERSION metal_v
+     airLangVersion->addOperand(MDTuple::get(
+         context, {createString("Metal"), createUnsignedInteger(3), createUnsignedInteger(2), createUnsignedInteger(0)}
+     ));
++#if TARGET_OS_OSX
+     module.setTargetTriple("air64-apple-macosx15.0.0");
++#else
++    /* Metal 3.2 is iOS 18. See airconv_context.cpp for why this matters. */
++    module.setTargetTriple("air64-apple-ios18.0.0");
++#endif
+     break;
+   }
+   default: {
+diff --git a/src/dxgi/dxgi.cpp b/src/dxgi/dxgi.cpp
+index cb1a6cf..cc27e54 100644
+--- a/src/dxgi/dxgi.cpp
++++ b/src/dxgi/dxgi.cpp
+@@ -53,9 +53,30 @@ static void InitializeMetalCachePath() {
+   if (env::getEnvVar("DXMT_USE_DEFAULT_METAL_CACHE") == "1")
+     return;
+   // This is the framework cache (mainly for PSOs), not managed by DXMT
+-  auto metal_cache_path = str::format("dxmt/", env::getExeName(), "/com.apple.metal");
++  //
++  // A relative path is resolved by the unix half against
++  // confstr(_CS_DARWIN_USER_CACHE_DIR), which is a macOS per-user cache
++  // directory. Where that is unavailable -- an iOS app sandbox -- the resolve
++  // yields nil and this reports failure with no way to tell that apart from the
++  // framework simply refusing the path. DXMT_SHADER_CACHE_PATH already names an
++  // absolute directory for DXMT's own shader database; when it is set, put the
++  // framework cache beside it so neither depends on confstr.
++  std::string metal_cache_path;
++  auto base = env::getEnvVar("DXMT_SHADER_CACHE_PATH");
++  if (!base.empty() && base.starts_with("/")) {
++    if (!base.ends_with('/'))
++      base += "/";
++    metal_cache_path = base + "com.apple.metal";
++  } else {
++    metal_cache_path = str::format("dxmt/", env::getExeName(), "/com.apple.metal");
++  }
++  // Name the path in both outcomes. Without it "failed" is indistinguishable
++  // from "resolved to nowhere", and the two have different fixes.
+   if (!WMTSetMetalShaderCachePath(metal_cache_path.c_str())) {
+-    Logger::info("Failed to set Metal cache path, fallback to system default");
++    Logger::info(str::format("Failed to set Metal cache path (", metal_cache_path,
++                             "), fallback to system default"));
++  } else {
++    Logger::info(str::format("Metal cache path: ", metal_cache_path));
+   }
+ }
+ 
+diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
+index 4744692..eaa97c5 100644
+--- a/src/winemetal/unix/winemetal_unix.c
++++ b/src/winemetal/unix/winemetal_unix.c
+@@ -1,13 +1,52 @@
+ #include <stdatomic.h>
+ #include <dlfcn.h>
++#import <TargetConditionals.h>
++#if TARGET_OS_OSX
+ #import <Cocoa/Cocoa.h>
+ #import <ColorSync/ColorSync.h>
++#else
++/*
++ * iOS has neither.
++ *
++ * Cocoa is AppKit, and every use of it in this file is display description --
++ * NSScreen for EDR headroom, NSView for "which screen is this layer on". A
++ * phone has one screen and this port does not do HDR, so those questions have
++ * constant answers. ColorSync does not exist on iOS at all, so the ICC profile
++ * walk that derives the display's colour primaries is replaced by the sRGB
++ * primaries it would have found on an sRGB display.
++ *
++ * Deliberately degrading rather than stubbing to zero: a WMTDisplayDescription
++ * full of zeroes is not "no HDR", it is a display with no colour gamut, and
++ * DXMT divides by those numbers.
++ */
++#import <Foundation/Foundation.h>
++#import <UIKit/UIKit.h>
++#endif
+ #import <CoreFoundation/CFRunLoop.h>
+ #import <Metal/Metal.h>
+ #import <MetalFX/MetalFX.h>
+ #import <QuartzCore/QuartzCore.h>
+-#include "objc/objc-runtime.h"
++/* objc/objc-runtime.h is a macOS-only legacy umbrella and is absent from the
++ * iPhoneOS SDK. The two things this file needs from it -- objc_msgSend and
++ * objc_lookUpClass, for the private _CADeveloperHUDProperties class -- live in
++ * these, on both platforms. */
++#include "objc/message.h"
++#include "objc/runtime.h"
++#if TARGET_OS_OSX
+ #include <bootstrap.h>
++#else
++/*
++ * The iPhoneOS SDK does not ship bootstrap.h, and it is right not to: the
++ * bootstrap server is how two PROCESSES hand each other a mach port, and this
++ * port is single-process by construction -- no fork, no exec of unsigned
++ * binaries. DXMT uses it to share Metal events and textures across processes,
++ * which cannot happen here.
++ *
++ * name_t alone, so the two entry points below still compile. They are stubbed
++ * to failure rather than left calling a private API that does not exist.
++ */
++typedef char name_t[128];
++#endif
+ #include <mach/mach_port.h>
+ #define WINEMETAL_API
+ #include "../winemetal_thunks.h"
+@@ -52,10 +91,61 @@ _NSArray_count(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
++/*
++ * Name every selector this file sends to an MTLDevice that the live device does
++ * not implement -- once, at enumeration, before anything can call one.
++ *
++ * An unrecognised selector on iOS is not a recoverable error. It raises
++ * NSInvalidArgumentException, nothing in DXMT or Wine catches it, and the app
++ * dies with no Wine-side diagnostic at all -- the log simply stops. That cost a
++ * full device round trip for ONE selector
++ * (setShouldMaximizeConcurrentCompilation:, now guarded above), and the same
++ * shape was already known here: the displaySyncEnabled guard a few hundred
++ * lines down says the same thing about CAMetalLayer.
++ *
++ * So enumerate the risk instead of discovering it one crash at a time. The list
++ * is the MTLDevice API that is macOS-only or has a later iOS availability than
++ * the deployment target; a device that answers all of them prints nothing.
++ */
++static void
++ios_audit_device_selectors(id<MTLDevice> dev) {
++#if !TARGET_OS_OSX
++  static const char *const names[] = {
++      "setShouldMaximizeConcurrentCompilation:",
++      "newSharedEventWithMachPort:",
++      "recommendedMaxWorkingSetSize",
++      "supportsBCTextureCompression",
++      "hasUnifiedMemory",
++      "isLowPower",
++      "isHeadless",
++      "isRemovable",
++      "maxTransferRate",
++      "registryID",
++  };
++  unsigned i;
++
++  if (!dev) return;
++  for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
++    SEL sel = sel_getUid(names[i]);
++    if (![(id)dev respondsToSelector:sel])
++      fprintf(stderr, "winemetal: device does NOT implement -%s (calling it would kill the process)\n", names[i]);
++  }
++#else
++  (void)dev;
++#endif
++}
++
+ static NTSTATUS
+ _MTLCopyAllDevices(void *obj) {
+   struct unixcall_generic_obj_ret *params = obj;
+-  params->ret = (obj_handle_t)MTLCopyAllDevices();
++  NSArray *devices = MTLCopyAllDevices();
++  static int audited;
++
++  if (!audited && devices.count) {
++    audited = 1;
++    ios_audit_device_selectors(devices[0]);
++  }
++  params->ret = (obj_handle_t)devices;
+   return STATUS_SUCCESS;
+ }
+ 
+@@ -1218,8 +1308,16 @@ _MTLTexture_replaceRegion(void *obj) {
+ 
+ static NTSTATUS
+ _MTLBuffer_didModifyRange(void *obj) {
++#if TARGET_OS_OSX
+   struct unixcall_generic_obj_uint64_uint64_ret *params = obj;
+   [(id<MTLBuffer>)params->handle didModifyRange:NSMakeRange(params->arg, params->ret)];
++#else
++  /* Managed storage does not exist on iOS -- there is one physical copy of the
++   * buffer and the GPU already sees the write. The selector is marked
++   * unavailable, not merely deprecated, so this cannot be left to fail at
++   * runtime. A no-op is the correct implementation, not a stub. */
++  (void)obj;
++#endif
+   return STATUS_SUCCESS;
+ }
+ 
+@@ -1521,7 +1619,12 @@ _MetalLayer_setProps(void *obj) {
+     layer.opaque = props->opaque;
+     layer.framebufferOnly = props->framebuffer_only;
+     layer.contentsScale = props->contents_scale;
++#if TARGET_OS_OSX
++    /* macOS only. On iOS this is an unrecognised selector, i.e. an immediate
++     * crash the first time a swapchain is configured -- and presentation is
++     * paced by the display there regardless. */
+     layer.displaySyncEnabled = props->display_sync_enabled;
++#endif
+     layer.drawableSize = CGSizeMake(props->drawable_width, props->drawable_height);
+     layer.pixelFormat = to_metal_pixel_format(props->pixel_format);
+   });
+@@ -1537,7 +1640,11 @@ _MetalLayer_getProps(void *obj) {
+   props->opaque = layer.opaque;
+   props->framebuffer_only = layer.framebufferOnly;
+   props->contents_scale = layer.contentsScale;
++#if TARGET_OS_OSX
+   props->display_sync_enabled = layer.displaySyncEnabled;
++#else
++  props->display_sync_enabled = true;   /* iOS always presents on the display clock */
++#endif
+   props->drawable_height = layer.drawableSize.height;
+   props->drawable_width = layer.drawableSize.width;
+   props->pixel_format = layer.pixelFormat;
+@@ -1746,7 +1853,24 @@ _MTLCommandEncoder_setLabel(void *args) {
+ static NTSTATUS
+ _MTLDevice_setShouldMaximizeConcurrentCompilation(void *args) {
+   struct unixcall_generic_obj_uint64_noret *params = args;
++#if TARGET_OS_OSX
+   [(id<MTLDevice>)params->handle setShouldMaximizeConcurrentCompilation:(BOOL)params->arg];
++#else
++  /*
++   * macOS only. AGXG14Device (A15) does not implement it, and an unrecognised
++   * selector is an NSException -- which is not a failure DXMT can handle, it
++   * terminates the process:
++   *
++   *   *** Terminating app due to uncaught exception 'NSInvalidArgumentException',
++   *       reason: '-[AGXG14Device setShouldMaximizeConcurrentCompilation:]:
++   *       unrecognized selector sent to instance'
++   *
++   * That is what killed the D3D11 test on device, AFTER the swapchain window
++   * was up and the device had reported feature level 11_0. It is a compiler
++   * throughput hint and nothing depends on its effect, so dropping it is free.
++   */
++  (void)params;
++#endif
+   return STATUS_SUCCESS;
+ }
+ 
+@@ -2152,6 +2276,149 @@ _MetalLayer_setColorSpace(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
++/*
++ * ---------------------------------------------------------------------------
++ * Display description: one screen, sRGB, no EDR.
++ *
++ * Everything from here to the end of _WMTQueryDisplaySettingForLayer answers
++ * questions about the physical display -- which one, what primaries, how much
++ * headroom above white. On macOS those are answered with CGDirectDisplayID,
++ * NSScreen and an ICC profile read through ColorSync. iOS has one screen, no
++ * ColorSync, and no AppKit, so the answers are constants.
++ *
++ * IOSWINE_DISPLAY_ID is a made-up non-zero id: DXMT treats 0 as "no display".
++ * ---------------------------------------------------------------------------
++ */
++/* Nothing to do with the display, and it sat in the middle of this block
++ * upstream. Hoisted out so it is compiled on BOTH platforms -- left where it
++ * was, iOS lost it and the two dispatch tables at the bottom of this file
++ * failed to resolve it. */
++static NTSTATUS
++_MTLLibrary_newFunctionWithConstants(void *obj) {
++  struct unixcall_mtllibrary_newfunction_with_constants *params = obj;
++  id<MTLLibrary> library = (id<MTLLibrary>)params->library;
++  NSString *name = [[NSString alloc] initWithCString:(char *)params->name.ptr encoding:NSUTF8StringEncoding];
++  struct WMTFunctionConstant *constants = (struct WMTFunctionConstant *)params->constants.ptr;
++  NSError *err = NULL;
++  MTLFunctionConstantValues *values = [[MTLFunctionConstantValues alloc] init];
++  for (uint64_t i = 0; i < params->num_constants; i++)
++    [values setConstantValue:constants[i].data.ptr type:(MTLDataType)constants[i].type atIndex:constants[i].index];
++
++  params->ret = (obj_handle_t)[library newFunctionWithName:name constantValues:values error:&err];
++  params->ret_error = (obj_handle_t)err;
++  [name release];
++  [values release];
++  return STATUS_SUCCESS;
++}
++
++#if !TARGET_OS_OSX
++#define IOSWINE_DISPLAY_ID 1
++
++static NTSTATUS
++_WMTGetPrimaryDisplayId(void *obj) {
++  struct unixcall_generic_obj_ret *params = obj;
++  params->ret = IOSWINE_DISPLAY_ID;
++  return STATUS_SUCCESS;
++}
++
++static NTSTATUS
++_WMTGetSecondaryDisplayId(void *obj) {
++  struct unixcall_generic_obj_ret *params = obj;
++  params->ret = 0;   /* no second display; AirPlay mirrors, it does not extend */
++  return STATUS_SUCCESS;
++}
++
++/* sRGB / Rec.709 chromaticities with a D65 white point. What the ColorSync
++ * path would have produced from a generic RGB profile, which is the fallback
++ * macOS itself takes when a display has no usable profile. */
++static void
++ioswine_fill_srgb_gamut(struct WMTDisplayDescription *d) {
++  d->white_points[0] = 0.3127f; d->white_points[1] = 0.3290f;
++  d->red_primaries[0] = 0.6400f; d->red_primaries[1] = 0.3300f;
++  d->green_primaries[0] = 0.3000f; d->green_primaries[1] = 0.6000f;
++  d->blue_primaries[0] = 0.1500f; d->blue_primaries[1] = 0.0600f;
++}
++
++static NTSTATUS
++_WMTGetDisplayDescription(void *obj) {
++  struct unixcall_generic_obj_ptr_noret *params = obj;
++  struct WMTDisplayDescription *desc_out = params->arg.ptr;
++
++  ioswine_fill_srgb_gamut(desc_out);
++  /* 1.0 is "white is the brightest thing there is", i.e. SDR. Not 0.0, which
++   * would tell DXMT the display cannot render white. */
++  desc_out->maximum_edr_color_component_value = 1.0;
++  desc_out->maximum_reference_edr_color_component_value = 0.0;
++  desc_out->maximum_potential_edr_color_component_value = 1.0;
++  return STATUS_SUCCESS;
++}
++
++struct DisplaySetting {
++  uint64_t version;
++  enum WMTColorSpace colorspace;
++  struct WMTHDRMetadata hdr_metadata;
++};
++
++static struct DisplaySetting g_display_settings[2] = {{0, 0, {}}, {0, 0, {}}};
++
++static NTSTATUS
++_MetalLayer_getEDRValue(void *obj) {
++  struct unixcall_generic_obj_ptr_noret *params = obj;
++  struct WMTEDRValue *value = params->arg.ptr;
++  value->maximum_edr_color_component_value = 1.0;
++  value->maximum_potential_edr_color_component_value = 1.0;
++  return STATUS_SUCCESS;
++}
++
++static NTSTATUS
++_WMTQueryDisplaySetting(void *obj) {
++  struct unixcall_query_display_setting *params = obj;
++  struct WMTHDRMetadata *value = params->hdr_metadata.ptr;
++  struct DisplaySetting *setting = &g_display_settings[1];
++
++  params->ret = false;
++  if (setting->version) {
++    *value = setting->hdr_metadata;
++    params->colorspace = setting->colorspace;
++    params->ret = true;
++  }
++  return STATUS_SUCCESS;
++}
++
++static NTSTATUS
++_WMTUpdateDisplaySetting(void *obj) {
++  struct unixcall_update_display_setting *params = obj;
++  const struct WMTHDRMetadata *value = params->hdr_metadata.ptr;
++  struct DisplaySetting *setting = &g_display_settings[1];
++
++  if (value) {
++    setting->hdr_metadata = *value;
++    setting->colorspace = params->colorspace;
++    setting->version++;
++  } else {
++    setting->version = 0;
++  }
++  return STATUS_SUCCESS;
++}
++
++static NTSTATUS
++_WMTQueryDisplaySettingForLayer(void *obj) {
++  struct unixcall_query_display_setting_for_layer *params = obj;
++  struct WMTHDRMetadata *hdr_metadata_out = params->hdr_metadata.ptr;
++  struct DisplaySetting *setting = &g_display_settings[1];
++
++  /* No NSView to walk to a screen: on iOS the layer belongs to the one
++   * display, so the per-layer answer is the global one. */
++  *hdr_metadata_out = setting->hdr_metadata;
++  params->version = setting->version;
++  params->colorspace = setting->colorspace;
++  params->edr_value.maximum_edr_color_component_value = 1.0;
++  params->edr_value.maximum_potential_edr_color_component_value = 1.0;
++  return STATUS_SUCCESS;
++}
++
++#else   /* TARGET_OS_OSX */
++
+ static NTSTATUS
+ _WMTGetPrimaryDisplayId(void *obj) {
+   struct unixcall_generic_obj_ret *params = obj;
+@@ -2298,23 +2565,6 @@ _MetalLayer_getEDRValue(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
+-static NTSTATUS
+-_MTLLibrary_newFunctionWithConstants(void *obj) {
+-  struct unixcall_mtllibrary_newfunction_with_constants *params = obj;
+-  id<MTLLibrary> library = (id<MTLLibrary>)params->library;
+-  NSString *name = [[NSString alloc] initWithCString:(char *)params->name.ptr encoding:NSUTF8StringEncoding];
+-  struct WMTFunctionConstant *constants = (struct WMTFunctionConstant *)params->constants.ptr;
+-  NSError *err = NULL;
+-  MTLFunctionConstantValues *values = [[MTLFunctionConstantValues alloc] init];
+-  for (uint64_t i = 0; i < params->num_constants; i++)
+-    [values setConstantValue:constants[i].data.ptr type:(MTLDataType)constants[i].type atIndex:constants[i].index];
+-
+-  params->ret = (obj_handle_t)[library newFunctionWithName:name constantValues:values error:&err];
+-  params->ret_error = (obj_handle_t)err;
+-  [name release];
+-  [values release];
+-  return STATUS_SUCCESS;
+-}
+ 
+ static NTSTATUS
+ _WMTQueryDisplaySetting(void *obj) {
+@@ -2379,6 +2629,8 @@ _WMTQueryDisplaySettingForLayer(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
++#endif  /* TARGET_OS_OSX -- end of the display description block */
++
+ static NTSTATUS
+ _MTLCommandBuffer_encodeWaitForEvent(void *obj) {
+   struct unixcall_generic_obj_obj_uint64_noret *params = obj;
+@@ -2510,8 +2762,13 @@ static NTSTATUS
+ _MTLBuffer_updateContents(void *obj) {
+   struct unixcall_mtlbuffer_updatecontents *params = obj;
+   memcpy((void *)((char *)[(id<MTLBuffer>)params->buffer contents] + params->offset), params->data.ptr, params->length);
++#if TARGET_OS_OSX
++  /* iOS has no MTLStorageModeManaged; the enumerator itself is unavailable, so
++   * the test cannot be left in and evaluate to false. See
++   * _MTLBuffer_didModifyRange. */
+   if ([(id<MTLBuffer>)params->buffer storageMode] == MTLStorageModeManaged)
+     [(id<MTLBuffer>)params->buffer didModifyRange:NSMakeRange(params->offset, params->length)];
++#endif
+   return STATUS_SUCCESS;
+ }
+ 
+@@ -2602,6 +2859,8 @@ _MTLDevice_newSharedTexture(void *obj) {
+   return STATUS_SUCCESS;
+ }
+ 
++#if TARGET_OS_OSX
++
+ /* Private API to register a mach port with the bootstrap server */
+ extern kern_return_t bootstrap_register2(mach_port_t bp, name_t service_name, mach_port_t sp, int flags);
+ 
+@@ -2632,6 +2891,23 @@ _WMTBootstrapLookUp(void *obj) {
+   return ret;
+ }
+ 
++#else   /* iOS: no bootstrap server, and nothing to share a port with */
++
++static NTSTATUS
++_WMTBootstrapRegister(void *obj) {
++  (void)obj;
++  return STATUS_UNSUCCESSFUL;
++}
++
++static NTSTATUS
++_WMTBootstrapLookUp(void *obj) {
++  struct unixcall_bootstrap *params = obj;
++  params->mach_port = 0;
++  return STATUS_UNSUCCESSFUL;
++}
++
++#endif
++
+ @protocol MTLDeviceSPI <MTLDevice>
+ 
+ - (id<MTLSharedEvent>)newSharedEventWithMachPort:(mach_port_t)machPort;

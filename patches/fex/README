@@ -1,0 +1,22 @@
+FEX port
+========
+
+Base: FEX_SHA in pins.env. scripts/06-fex-arm64ec.sh resets the checkout and
+applies 0001..0011 in order; that stack is the source of truth. 0002 applies
+inside the External/rpmalloc submodule, the rest at the top of the tree.
+
+0001  dual-mapped JIT memory: code is written through the arena's RW alias;
+      the TEB lives in x28 (FEX's STATE moves to x14); no raw Linux syscalls
+      on Darwin (FEX_HOST_DARWIN); C++ exception state without x18 TLS
+0002  rpmalloc: aligned reservations through VirtualAlloc2, 16 MB spans
+0003  a thread's lookup cache is allocated (committed) at its first x86 block
+0004  unaligned TSO loads and stores are checked inline (FEX_IOS)
+0005  committed, readable pages outside FEX's executable ranges are decodable
+0006  FEX's own VM calls skip Wine's ARM64EC memory notifications
+0007  IOSWINE_FEX_CODE_MB sizes the dual-mapped code buffer (16..128 MB)
+0008  call-ret stack guard pages are whole host pages (64 KB)
+0009  lookup cache sized to about 24 MB per thread
+0010  FEX debug-level log lines are dropped unless IOSWINE_FEX_DEBUGLOG is set
+0011  superseded code buffers are purged, then freed after a 5 s grace period
+
+06 builds with -DFEX_HOST_DARWIN -DFEX_IOS.

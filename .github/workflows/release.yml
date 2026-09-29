@@ -1,0 +1,107 @@
+# Builds the sideloadable IPA: scripts/setup.sh, then scripts/app.sh ipa. A v*
+# tag publishes it as a release; a manual run keeps it as a workflow artifact.
+#
+# The toolchains (llvm-mingw, LLVM 15 for macOS and iOS, FreeType, GnuTLS)
+# change only with pins.env or their scripts, so a separate job builds them
+# once and caches them, and each job gets its own 6-hour limit. The repository
+# variable IOSWINE_RUNNER picks another runner, such as a self-hosted Mac.
+name: Release IPA
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+env:
+  # What setup.sh's toolchain steps leave behind, stamps included, so that
+  # setup.sh in the ipa job finds them done.
+  TOOLCHAIN_CACHE: |
+    toolchains/llvm-mingw-*
+    toolchains/llvm15-macos
+    toolchains/llvm15-ios
+    out/freetype-macos
+    out/freetype-ios
+    out/gnutls-ios
+    build/setup/llvm-mingw
+    build/setup/llvm15-macos
+    build/setup/llvm15-ios
+    build/setup/freetype
+    build/setup/gnutls
+
+jobs:
+  toolchain:
+    runs-on: ${{ vars.IOSWINE_RUNNER || 'xcode-27' }}
+    timeout-minutes: 360
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: key
+        run: echo "key=toolchain-${{ hashFiles('pins.env', 'scripts/01-toolchain.sh', 'scripts/03-llvm15.sh', 'scripts/04-freetype.sh', 'scripts/05-gnutls-ios.sh') }}" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: ${{ env.TOOLCHAIN_CACHE }}
+          lookup-only: true
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bash .github/free-disk.sh
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: scripts/setup.sh --toolchain
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: ${{ env.TOOLCHAIN_CACHE }}
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-logs
+          path: build/setup/*.log
+
+  ipa:
+    needs: toolchain
+    runs-on: ${{ vars.IOSWINE_RUNNER || 'xcode-27' }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash .github/free-disk.sh
+      - uses: actions/cache/restore@v4
+        with:
+          key: ${{ needs.toolchain.outputs.key }}
+          path: ${{ env.TOOLCHAIN_CACHE }}
+          fail-on-cache-miss: true
+      - run: scripts/setup.sh
+      - name: Package
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}" name="ioswine-$GITHUB_REF_NAME.ipa"
+          else
+            version="" name="ioswine-$(git rev-parse --short HEAD).ipa"
+          fi
+          IOSWINE_VERSION="$version" scripts/app.sh ipa "build/$name"
+          echo "IPA=build/$name" >> "$GITHUB_ENV"
+      # A tag's IPA goes to its release; artifacts count against the storage quota.
+      - if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: ${{ env.IPA }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "$IPA" --title "$GITHUB_REF_NAME" --generate-notes
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build/setup/*.log

@@ -1,0 +1,25 @@
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -487,9 +487,9 @@
+   // Start with 8k entries in L1 to give 128KB of L1 cache to each thread.
+   // Max out at 1 million entries to give each thread 16MB of L1 cache maximum.
+   constexpr static size_t MIN_L1_ENTRIES = 8 * 1024;        // Must be a power of 2
+-  constexpr static size_t MAX_L1_ENTRIES = 1 * 1024 * 1024; // Must be a power of 2
++  constexpr static size_t MAX_L1_ENTRIES = 256 * 1024; // Must be a power of 2. ios-wine: 4MB per thread (was 16MB)
+ 
+-  constexpr static size_t CODE_SIZE = 128 * 1024 * 1024;
++  constexpr static size_t CODE_SIZE = 16 * 1024 * 1024;   /* ios-wine: per-thread VA is the scarce resource on iOS; 256 code pages before a clear */
+   constexpr static size_t SIZE_PER_PAGE = FEXCore::Utils::FEX_PAGE_SIZE * sizeof(LookupCacheEntry);
+   constexpr static size_t MAX_L1_SIZE = MAX_L1_ENTRIES * sizeof(LookupCacheEntry);
+ 
+--- a/FEXCore/Source/Interface/Context/Context.h
++++ b/FEXCore/Source/Interface/Context/Context.h
+@@ -336,7 +336,7 @@
+   TrackingStructure BlockDebuggerTracker {};
+ public:
+   struct {
+-    uint64_t VirtualMemSize {1ULL << 36};
++    uint64_t VirtualMemSize {1ULL << 31};   /* ios-wine: L2 map is a HASH (Address & (size-1)); 2GB -> 4MB per thread */
+     uint64_t TSCScale = 0;
+ 
+     // Used if the JIT needs to have its interrupt fault code emitted.

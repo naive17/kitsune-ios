@@ -1,0 +1,22 @@
+# Meson cross file: Windows PE, plain ARM64.
+#
+# For native ARM64 Windows applications. The x86_64-game path uses the arm64ec
+# cross file instead; this one exists so we can A/B the two and measure the
+# thunking cost rather than assume it.
+
+[binaries]
+c       = 'aarch64-w64-mingw32-clang'
+cpp     = 'aarch64-w64-mingw32-clang++'
+ar      = 'llvm-ar'
+strip   = 'llvm-strip'
+windres = 'aarch64-w64-mingw32-windres'
+dlltool = 'aarch64-w64-mingw32-dlltool'
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system     = 'windows'
+cpu_family = 'aarch64'
+cpu        = 'aarch64'
+endian     = 'little'

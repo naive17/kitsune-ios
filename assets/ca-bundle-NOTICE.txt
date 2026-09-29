@@ -1,0 +1,16 @@
+Mozilla CA Root Certificates (PEM conversion), 2026-08-13
+
+Source and update information: https://curl.se/docs/caextract.html
+Unmodified conversion: https://curl.se/ca/cacert-2026-08-13.pem
+SHA256: f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9
+
+This certificate data is available under the Mozilla Public License 2.0:
+https://www.mozilla.org/MPL/2.0/
+Upstream source: Mozilla security/nss/lib/ckfw/builtins/certdata.txt,
+linked by the conversion's header and the curl CA Extract page above.
+
+The PEM conversion does not carry Firefox's out-of-band CA name constraints
+or other browser-specific policy. It is not equivalent to Firefox's complete
+trust policy or to iOS native trust evaluation. Certificate signatures,
+encoded constraints, hostname and normal chain checks remain Wine/app duties.
+No user iPhone system certificates are added or modified by this resource.

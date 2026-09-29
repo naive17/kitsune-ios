@@ -1,0 +1,157 @@
+diff --git a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+index 849df0f..1836600 100644
+--- a/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MemoryOps.cpp
+@@ -776,6 +776,81 @@ DEF_OP(LoadMemTSO) {
+     LOGMAN_THROW_A_FMT(Op->OffsetType == IR::MemOffsetType::SXTX, "unexpected offset type");
+   }
+ 
++#ifdef FEX_IOS
++  if (Op->Class == IR::RegClass::GPR) {
++    /*
++     * Normal x86 loads may be unaligned.  Upstream FEX emits an acquire load
++     * followed by a NOP and repairs an alignment exception by rewriting that
++     * pair to LDR+DMB.  That is a good adaptive strategy on an RWX JIT, but an
++     * iOS JIT page is RX while it executes: the repair path faults while
++     * taking the block-tail lock and again while changing the instructions.
++     *
++     * Select the same two implementations before the access instead.  The
++     * aligned path retains the atomic acquire load.  The unaligned path uses
++     * an ordinary (unaligned-capable) load and the half barrier that FEX would
++     * otherwise back-patch.  TB(N)Z does not alter NZCV, so guest flags remain
++     * live across this test.
++     */
++    auto EffectiveAddr = MemReg;
++    if (!Op->Offset.IsInvalid()) {
++      uint64_t Offset {};
++      const bool IsInline = IsInlineConstant(Op->Offset, &Offset);
++      LOGMAN_THROW_A_FMT(IsInline, "expected immediate");
++      const auto SignedOffset = static_cast<int64_t>(Offset);
++      if (SignedOffset > 0) {
++        add(ARMEmitter::Size::i64Bit, TMP1, MemReg, static_cast<uint64_t>(SignedOffset));
++        EffectiveAddr = TMP1;
++      } else if (SignedOffset < 0) {
++        sub(ARMEmitter::Size::i64Bit, TMP1, MemReg, static_cast<uint64_t>(-SignedOffset));
++        EffectiveAddr = TMP1;
++      }
++    }
++
++    const auto Dst = GetReg(Node);
++    if (OpSize == IR::OpSize::i8Bit) {
++      ldarb(Dst, EffectiveAddr);
++      return;
++    }
++
++    ARMEmitter::ForwardLabel Unaligned {};
++    ARMEmitter::ForwardLabel Done {};
++    switch (OpSize) {
++    case IR::OpSize::i16Bit:
++      (void)tbnz(EffectiveAddr, 0, &Unaligned);
++      break;
++    case IR::OpSize::i32Bit:
++      (void)tbnz(EffectiveAddr, 0, &Unaligned);
++      (void)tbnz(EffectiveAddr, 1, &Unaligned);
++      break;
++    case IR::OpSize::i64Bit:
++      (void)tbnz(EffectiveAddr, 0, &Unaligned);
++      (void)tbnz(EffectiveAddr, 1, &Unaligned);
++      (void)tbnz(EffectiveAddr, 2, &Unaligned);
++      break;
++    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); return;
++    }
++
++    switch (OpSize) {
++    case IR::OpSize::i16Bit: ldarh(Dst, EffectiveAddr); break;
++    case IR::OpSize::i32Bit: ldar(Dst.W(), EffectiveAddr); break;
++    case IR::OpSize::i64Bit: ldar(Dst.X(), EffectiveAddr); break;
++    default: FEX_UNREACHABLE;
++    }
++    (void)b(&Done);
++
++    (void)Bind(&Unaligned);
++    switch (OpSize) {
++    case IR::OpSize::i16Bit: ldrh(Dst, EffectiveAddr); break;
++    case IR::OpSize::i32Bit: ldr(Dst.W(), EffectiveAddr); break;
++    case IR::OpSize::i64Bit: ldr(Dst.X(), EffectiveAddr); break;
++    default: FEX_UNREACHABLE;
++    }
++    dmb(ARMEmitter::BarrierScope::ISHLD);
++    (void)Bind(&Done);
++    return;
++  }
++#endif
++
+   if (CTX->HostFeatures.SupportsTSOImm9 && Op->Class == IR::RegClass::GPR) {
+     const auto Dst = GetReg(Node);
+     uint64_t Offset = 0;
+@@ -1787,6 +1862,70 @@ DEF_OP(StoreMemTSO) {
+     LOGMAN_THROW_A_FMT(Op->OffsetType == IR::MemOffsetType::SXTX, "unexpected offset type");
+   }
+ 
++#ifdef FEX_IOS
++  if (Op->Class == IR::RegClass::GPR) {
++    /* See LoadMemTSO above.  Avoid fault-driven RX code rewriting on iOS,
++     * while preserving the fast atomic release store for aligned addresses. */
++    auto EffectiveAddr = MemReg;
++    if (!Op->Offset.IsInvalid()) {
++      uint64_t Offset {};
++      const bool IsInline = IsInlineConstant(Op->Offset, &Offset);
++      LOGMAN_THROW_A_FMT(IsInline, "expected immediate");
++      const auto SignedOffset = static_cast<int64_t>(Offset);
++      if (SignedOffset > 0) {
++        add(ARMEmitter::Size::i64Bit, TMP1, MemReg, static_cast<uint64_t>(SignedOffset));
++        EffectiveAddr = TMP1;
++      } else if (SignedOffset < 0) {
++        sub(ARMEmitter::Size::i64Bit, TMP1, MemReg, static_cast<uint64_t>(-SignedOffset));
++        EffectiveAddr = TMP1;
++      }
++    }
++
++    const auto Src = GetZeroableReg(Op->Value);
++    if (OpSize == IR::OpSize::i8Bit) {
++      stlrb(Src, EffectiveAddr);
++      return;
++    }
++
++    ARMEmitter::ForwardLabel Unaligned {};
++    ARMEmitter::ForwardLabel Done {};
++    switch (OpSize) {
++    case IR::OpSize::i16Bit:
++      (void)tbnz(EffectiveAddr, 0, &Unaligned);
++      break;
++    case IR::OpSize::i32Bit:
++      (void)tbnz(EffectiveAddr, 0, &Unaligned);
++      (void)tbnz(EffectiveAddr, 1, &Unaligned);
++      break;
++    case IR::OpSize::i64Bit:
++      (void)tbnz(EffectiveAddr, 0, &Unaligned);
++      (void)tbnz(EffectiveAddr, 1, &Unaligned);
++      (void)tbnz(EffectiveAddr, 2, &Unaligned);
++      break;
++    default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); return;
++    }
++
++    switch (OpSize) {
++    case IR::OpSize::i16Bit: stlrh(Src, EffectiveAddr); break;
++    case IR::OpSize::i32Bit: stlr(Src.W(), EffectiveAddr); break;
++    case IR::OpSize::i64Bit: stlr(Src.X(), EffectiveAddr); break;
++    default: FEX_UNREACHABLE;
++    }
++    (void)b(&Done);
++
++    (void)Bind(&Unaligned);
++    dmb(ARMEmitter::BarrierScope::ISH);
++    switch (OpSize) {
++    case IR::OpSize::i16Bit: strh(Src, EffectiveAddr); break;
++    case IR::OpSize::i32Bit: str(Src.W(), EffectiveAddr); break;
++    case IR::OpSize::i64Bit: str(Src.X(), EffectiveAddr); break;
++    default: FEX_UNREACHABLE;
++    }
++    (void)Bind(&Done);
++    return;
++  }
++#endif
++
+   if (CTX->HostFeatures.SupportsTSOImm9 && Op->Class == IR::RegClass::GPR) {
+     const auto Src = GetZeroableReg(Op->Value);
+     uint64_t Offset = 0;

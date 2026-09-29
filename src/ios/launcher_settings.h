@@ -1,0 +1,104 @@
+/*
+ * The launcher's persisted choices, and how they become launch options.
+ *
+ * NSUserDefaults rather than a launch json, and for a measured reason: the
+ * screen snapshot in wine_surface.m runs when the view is created, BEFORE any
+ * launch request's env is applied, so a setting that shapes the desktop must
+ * be readable that early. Everything else lives here too so there is one place
+ * to look.
+ */
+#ifndef IOSWINE_LAUNCHER_SETTINGS_H
+#define IOSWINE_LAUNCHER_SETTINGS_H
+
+#import <Foundation/Foundation.h>
+#include <math.h>
+#include "launch_profile.h"
+
+#define IOSWINE_KEY_OTHER_LANDSCAPE @"IOSWineOtherProgramsLandscape" /* orientation for programs that aren't games */
+#define IOSWINE_KEY_RENDER_SCALE   @"IOSWineRenderScale"
+#define IOSWINE_KEY_SAFE_AREA      @"IOSWineSafeArea"        /* keep the desktop off the notch */
+#define IOSWINE_KEY_FRAME_CAP      @"IOSWineFrameCap"        /* 0, 30, 40, 60 */
+#define IOSWINE_KEY_TEXTURES       @"IOSWineTextureMode"     /* IOSWineTextureMode */
+#define IOSWINE_KEY_STEAM_VISIBLE  @"IOSWineSteamVisible"
+#define IOSWINE_KEY_LOW_POWER_AUTO @"IOSWineLowPowerAuto"    /* Battery mode while Low Power Mode is on */
+#define IOSWINE_KEY_FILL_SCREEN    @"IOSWineFillScreen"      /* set known games to the desktop resolution */
+#define IOSWINE_KEY_PERF_HUD       @"IOSWinePerfHUD"         /* fps and memory readout in session */
+#define IOSWINE_KEY_POINTER_MODE   @"IOSWinePointerMode"     /* WinePointerMode last used */
+#define IOSWINE_KEY_LOOK_SENS      @"IOSWineLookSensitivity" /* look-mode gain */
+#define IOSWINE_KEY_METAL_HUD      @"IOSWineMetalHUD"        /* Apple's Metal performance HUD, next launch */
+#define IOSWINE_KEY_TOUCH_PAD      @"IOSWineTouchPad"        /* on-screen controller for Steam games */
+
+/* Landscape scale for games; 0 when none was chosen. 1.6 is the smallest that
+ * keeps 800x600 inside a 844x390 pt screen (1350x624); the safe-area desktop is
+ * smaller and needs more, see IOSWineMinimumScaleForPoints. */
+static inline double IOSWineRenderScaleStored(NSUserDefaults *ud) {
+  double v = [ud doubleForKey:IOSWINE_KEY_RENDER_SCALE];
+  return v >= 1.0 ? v : 0.0;
+}
+
+static inline BOOL IOSWineSafeAreaStored(NSUserDefaults *ud) {
+  return [ud objectForKey:IOSWINE_KEY_SAFE_AREA] ? [ud boolForKey:IOSWINE_KEY_SAFE_AREA] : YES;
+}
+
+static inline BOOL IOSWineFillScreenStored(NSUserDefaults *ud) {
+  return [ud objectForKey:IOSWINE_KEY_FILL_SCREEN] ? [ud boolForKey:IOSWINE_KEY_FILL_SCREEN] : YES;
+}
+
+static inline BOOL IOSWinePerfHUDStored(NSUserDefaults *ud) {
+  return [ud objectForKey:IOSWINE_KEY_PERF_HUD] ? [ud boolForKey:IOSWINE_KEY_PERF_HUD] : YES;
+}
+
+static inline double IOSWineLookSensitivityStored(NSUserDefaults *ud) {
+  double v = [ud doubleForKey:IOSWINE_KEY_LOOK_SENS];
+  return v > 0 ? v : 1.0;
+}
+
+static inline BOOL IOSWineTouchPadStored(NSUserDefaults *ud) {
+  return [ud objectForKey:IOSWINE_KEY_TOUCH_PAD] ? [ud boolForKey:IOSWINE_KEY_TOUCH_PAD] : YES;
+}
+
+static inline BOOL IOSWineSteamVisibleStored(NSUserDefaults *ud) {
+  return [ud objectForKey:IOSWINE_KEY_STEAM_VISIBLE] ? [ud boolForKey:IOSWINE_KEY_STEAM_VISIBLE] : YES;
+}
+
+static inline BOOL IOSWineLowPowerAutoStored(NSUserDefaults *ud) {
+  return [ud objectForKey:IOSWINE_KEY_LOW_POWER_AUTO] ? [ud boolForKey:IOSWINE_KEY_LOW_POWER_AUTO] : YES;
+}
+
+static inline int IOSWineFrameCapStored(NSUserDefaults *ud) {
+  NSInteger v = [ud integerForKey:IOSWINE_KEY_FRAME_CAP];
+  return (v == 30 || v == 40 || v == 60) ? (int)v : 0;
+}
+
+static inline IOSWineTextureMode IOSWineTextureModeStored(NSUserDefaults *ud) {
+  NSInteger v = [ud integerForKey:IOSWINE_KEY_TEXTURES];
+  if (v < IOSWineTexturesDownscaled512 || v > IOSWineTexturesNative) return IOSWineTexturesDownscaled512;
+  return (IOSWineTextureMode)v;
+}
+
+/* The smallest landscape scale at which an 800x600 mode still fits a desktop
+ * cut from `points` (the safe-area rect in points). Games such as Dark Souls
+ * Remastered keep only modes that fit SM_CXSCREEN x SM_CYSCREEN and are at
+ * least 800x600, so both sides must clear it; rounded up to 0.1. */
+static inline double IOSWineMinimumScaleForPoints(double width, double height) {
+  if (width <= 0 || height <= 0) return 1.0;
+  double s = 800.0 / width;
+  if (600.0 / height > s) s = 600.0 / height;
+  s = ceil(s * 10.0 - 1e-9) / 10.0;
+  return s < 1.0 ? 1.0 : s;
+}
+
+/* The options a Steam launch uses. Low Power Mode is not among them: the
+ * power modes apply it live (power.h). */
+static inline IOSWineLaunchOptions IOSWineLaunchOptionsFromSettings(NSUserDefaults *ud) {
+  IOSWineLaunchOptions o = IOSWineDefaultLaunchOptions();
+  o.diag = IOSWineDiagLevelStored(ud);
+  o.console = (o.diag == IOSWineDiagFull);
+  o.steamVisible = IOSWineSteamVisibleStored(ud);
+  o.textures = IOSWineTextureModeStored(ud);
+  o.frameCap = IOSWineFrameCapStored(ud);
+  o.landscape = YES;   /* games need the long side wide; the client copes */
+  return o;
+}
+
+#endif

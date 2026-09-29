@@ -1,0 +1,999 @@
+diff --git a/CodeEmitter/CodeEmitter/Buffer.h b/CodeEmitter/CodeEmitter/Buffer.h
+index 602eeb6..b0d8463 100644
+--- a/CodeEmitter/CodeEmitter/Buffer.h
++++ b/CodeEmitter/CodeEmitter/Buffer.h
+@@ -5,6 +5,8 @@
+ #include <cstring>
+ #include <type_traits>
+ 
++#include <FEXCore/Utils/JITWriteAlias.h>
++
+ namespace ARMEmitter {
+ class Buffer {
+ public:
+@@ -22,10 +24,29 @@ public:
+     Size = BaseSize;
+   }
+ 
++  /*
++   * Dual-mapped JIT memory (iOS 26+).
++   *
++   * BufferBase/CurrentOffset are always EXECUTABLE addresses, so every
++   * GetCursorAddress() consumer -- the ~20 dispatcher entry points, block entry
++   * points, branch targets -- keeps working untouched. Only the actual stores
++   * are redirected through the writable alias.
++   *
++   * Intercepting here rather than at each call site matters: emitted code is
++   * written from dozens of places, and missing one would not fail cleanly. It
++   * would write to an RX page, which under an attached debugger HANGS.
++   *
++   * FEXCore::JIT::WriteAliasDelta is 0 everywhere else, so this compiles down
++   * to the original stores on other platforms.
++   */
++  uint8_t* WriteCursor() const {
++    return FEXCore::JIT::Write(CurrentOffset);
++  }
++
+   template<typename T>
+   requires (std::is_trivially_copyable_v<T>)
+   void dcn(const T& Data) {
+-    std::memcpy(CurrentOffset, &Data, sizeof(Data));
++    std::memcpy(WriteCursor(), &Data, sizeof(Data));
+     CurrentOffset += sizeof(Data);
+   }
+   void dc8(uint8_t Data) {
+@@ -43,7 +64,7 @@ public:
+ 
+   void EmitString(const char* String) {
+     const auto StringLength = strlen(String);
+-    memcpy(CurrentOffset, String, StringLength);
++    memcpy(WriteCursor(), String, StringLength);
+     CurrentOffset += StringLength;
+   }
+ 
+@@ -53,7 +74,7 @@ public:
+     if (!CurrentAlignment) {
+       return;
+     }
+-    std::memset(CurrentOffset, 0, Size - CurrentAlignment);
++    std::memset(WriteCursor(), 0, Size - CurrentAlignment);
+     CurrentOffset += Size - CurrentAlignment;
+   }
+ 
+diff --git a/CodeEmitter/CodeEmitter/Emitter.h b/CodeEmitter/CodeEmitter/Emitter.h
+index 001adcb..00c43d1 100644
+--- a/CodeEmitter/CodeEmitter/Emitter.h
++++ b/CodeEmitter/CodeEmitter/Emitter.h
+@@ -660,7 +660,13 @@ public:
+     // Patch up the instructions
+     switch (Label->Type) {
+     case ForwardLabel::InstType::ADR: {
+-      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // are computed from it and must stay exec-relative -- but the read-modify-write
++      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
++      // does not cover this path: it only sees stores at the CURSOR, and label
++      // backpatching writes behind the cursor. Identity when WriteAliasDelta == 0.
++      uint32_t* const Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      uint32_t* const InstructionWrite = FEXCore::JIT::Write(Instruction);
+       int64_t Imm = reinterpret_cast<int64_t>(CurrentAddress) - reinterpret_cast<int64_t>(Instruction);
+       if (!IsADRRange(Imm)) {
+         // Can't bind.
+@@ -668,14 +674,20 @@ public:
+       }
+       uint32_t InstMask = 0b11 << 29 | 0b1111'1111'1111'1111'111 << 5;
+       uint32_t Offset = static_cast<uint32_t>(Imm) & 0x3F'FFFF;
+-      uint32_t Inst = *Instruction & ~InstMask;
++      uint32_t Inst = *InstructionWrite & ~InstMask;
+       Inst |= (Offset & 0b11) << 29;
+       Inst |= (Offset >> 2) << 5;
+-      *Instruction = Inst;
++      *InstructionWrite = Inst;
+       break;
+     }
+     case ForwardLabel::InstType::ADRP: {
+-      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // are computed from it and must stay exec-relative -- but the read-modify-write
++      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
++      // does not cover this path: it only sees stores at the CURSOR, and label
++      // backpatching writes behind the cursor. Identity when WriteAliasDelta == 0.
++      uint32_t* const Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      uint32_t* const InstructionWrite = FEXCore::JIT::Write(Instruction);
+       int64_t Imm = reinterpret_cast<int64_t>(CurrentAddress) - reinterpret_cast<int64_t>(Instruction);
+ 
+       if (!(IsADRPRange(Imm) && IsADRPAligned(Imm))) {
+@@ -686,14 +698,20 @@ public:
+       Imm >>= 12;
+       uint32_t InstMask = 0b11 << 29 | 0b1111'1111'1111'1111'111 << 5;
+       uint32_t Offset = static_cast<uint32_t>(Imm) & 0x3F'FFFF;
+-      uint32_t Inst = *Instruction & ~InstMask;
++      uint32_t Inst = *InstructionWrite & ~InstMask;
+       Inst |= (Offset & 0b11) << 29;
+       Inst |= (Offset >> 2) << 5;
+-      *Instruction = Inst;
++      *InstructionWrite = Inst;
+       break;
+     }
+     case ForwardLabel::InstType::B: {
+-      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // are computed from it and must stay exec-relative -- but the read-modify-write
++      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
++      // does not cover this path: it only sees stores at the CURSOR, and label
++      // backpatching writes behind the cursor. Identity when WriteAliasDelta == 0.
++      uint32_t* const Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      uint32_t* const InstructionWrite = FEXCore::JIT::Write(Instruction);
+       int64_t Imm = reinterpret_cast<int64_t>(CurrentAddress) - reinterpret_cast<int64_t>(Instruction);
+       if (!(Imm >= -134217728 && Imm <= 134217724 && ((Imm & 0b11) == 0))) {
+         // Can't bind.
+@@ -702,14 +720,20 @@ public:
+       Imm >>= 2;
+       uint32_t InstMask = 0x3FF'FFFF;
+       uint32_t Offset = static_cast<uint32_t>(Imm) & InstMask;
+-      uint32_t Inst = *Instruction & ~InstMask;
++      uint32_t Inst = *InstructionWrite & ~InstMask;
+       Inst |= Offset;
+-      *Instruction = Inst;
++      *InstructionWrite = Inst;
+ 
+       break;
+     }
+     case ForwardLabel::InstType::TEST_BRANCH: {
+-      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // are computed from it and must stay exec-relative -- but the read-modify-write
++      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
++      // does not cover this path: it only sees stores at the CURSOR, and label
++      // backpatching writes behind the cursor. Identity when WriteAliasDelta == 0.
++      uint32_t* const Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      uint32_t* const InstructionWrite = FEXCore::JIT::Write(Instruction);
+       int64_t Imm = reinterpret_cast<int64_t>(CurrentAddress) - reinterpret_cast<int64_t>(Instruction);
+       if (!(Imm >= -32768 && Imm <= 32764 && ((Imm & 0b11) == 0))) {
+         // Can't bind.
+@@ -718,15 +742,21 @@ public:
+       Imm >>= 2;
+       uint32_t InstMask = 0x3FFF;
+       uint32_t Offset = static_cast<uint32_t>(Imm) & InstMask;
+-      uint32_t Inst = *Instruction & ~(InstMask << 5);
++      uint32_t Inst = *InstructionWrite & ~(InstMask << 5);
+       Inst |= Offset << 5;
+-      *Instruction = Inst;
++      *InstructionWrite = Inst;
+ 
+       break;
+     }
+     case ForwardLabel::InstType::BC:
+     case ForwardLabel::InstType::RELATIVE_LOAD: {
+-      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // are computed from it and must stay exec-relative -- but the read-modify-write
++      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
++      // does not cover this path: it only sees stores at the CURSOR, and label
++      // backpatching writes behind the cursor. Identity when WriteAliasDelta == 0.
++      uint32_t* const Instruction = reinterpret_cast<uint32_t*>(Label->Location);
++      uint32_t* const InstructionWrite = FEXCore::JIT::Write(Instruction);
+       int64_t Imm = reinterpret_cast<int64_t>(CurrentAddress) - reinterpret_cast<int64_t>(Instruction);
+       if (!(Imm >= -1048576 && Imm <= 1048575 && ((Imm & 0b11) == 0))) {
+         // Can't bind.
+@@ -735,9 +765,9 @@ public:
+       Imm >>= 2;
+       uint32_t InstMask = 0x7'FFFF;
+       uint32_t Offset = static_cast<uint32_t>(Imm) & InstMask;
+-      uint32_t Inst = *Instruction & ~(InstMask << 5);
++      uint32_t Inst = *InstructionWrite & ~(InstMask << 5);
+       Inst |= Offset << 5;
+-      *Instruction = Inst;
++      *InstructionWrite = Inst;
+       break;
+     }
+     case ForwardLabel::InstType::LONG_ADDRESS_GEN: {
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+index 729aa63..78cea90 100644
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.cpp
+@@ -143,16 +143,31 @@ namespace x64 {
+     ARMEmitter::Reg::r4, ARMEmitter::Reg::r5, ARMEmitter::Reg::r8,
+   };
+ 
+-  constexpr std::array<ARMEmitter::Register, 6> RA = {
+-    ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r30,
++  /*
++   * ios-wine: r14 is no longer a dynamic register -- it is STATE now.
++   *
++   * The TEB must live in x28 on Darwin (x18 is zeroed by preemption; see the
++   * long note in Arm64Emitter.h), x28 was STATE, and x14 is the only other
++   * register that survives arbitrary ARM64EC code and was not already
++   * load-bearing. The dynamic GPR pool therefore drops from 6 to 5.
++   *
++   * RAPairs stays 4, so the paired entries become (r6,r7) and (r15,r16)
++   * instead of (r6,r7) and (r14,r15). Only the pairing changes; both are
++   * still ldp/stp-able.
++   */
++  constexpr std::array<ARMEmitter::Register, 5> RA = {
++    ARMEmitter::Reg::r6,
++    ARMEmitter::Reg::r7,
++    ARMEmitter::Reg::r15,
++    ARMEmitter::Reg::r16,
++    ARMEmitter::Reg::r30,
+   };
+ 
+   constexpr std::array<ARMEmitter::Register, 5> PreserveAll_Dynamic = {ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r16,
+                                                                        ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+ 
+-  constexpr std::array<ARMEmitter::Register, 7> NotPreserved_Dynamic = {ARMEmitter::Reg::r6,  ARMEmitter::Reg::r7,  ARMEmitter::Reg::r14,
+-                                                                        ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r17,
+-                                                                        ARMEmitter::Reg::r30};
++  constexpr std::array<ARMEmitter::Register, 6> NotPreserved_Dynamic = {ARMEmitter::Reg::r6,  ARMEmitter::Reg::r7,  ARMEmitter::Reg::r15,
++                                                                        ARMEmitter::Reg::r16, ARMEmitter::Reg::r17, ARMEmitter::Reg::r30};
+ 
+   constexpr unsigned RAPairs = 4;
+ 
+@@ -806,8 +821,9 @@ void Arm64Emitter::FillStaticRegs(FillStaticRegOptions Options) {
+   auto TmpReg2 = *Options.OptionalReg2;
+ 
+ #ifdef ARCHITECTURE_arm64ec
+-  // Load STATE in from the CPU area as x28 is not callee saved in the ARM64EC ABI.
+-  ldr(TmpReg.X(), ARMEmitter::Reg::r18, TEB_CPU_AREA_OFFSET);
++  // Load STATE in from the CPU area as it is not callee saved in the ARM64EC ABI.
++  // (ios-wine: STATE is x14 here and the TEB is TEB_REG/x28 -- see Arm64Emitter.h.)
++  ldr(TmpReg.X(), TEB_REG.R(), TEB_CPU_AREA_OFFSET);
+   ldr(STATE, TmpReg, CPU_AREA_EMULATOR_DATA_OFFSET);
+ #endif
+ 
+diff --git a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
+index 5ad6e7b..a1d6e65 100644
+--- a/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
++++ b/FEXCore/Source/Interface/Core/ArchHelpers/Arm64Emitter.h
+@@ -29,10 +29,10 @@ enum X86Reg : uint32_t;
+ }
+ 
+ namespace FEXCore::CPU {
++#ifndef ARCHITECTURE_arm64ec
+ // Contains the address to the currently available CPU state
+ constexpr auto STATE = ARMEmitter::XReg::x28;
+ 
+-#ifndef ARCHITECTURE_arm64ec
+ // GPR temporaries. Only x3 can be used across spill boundaries
+ // so if these ever need to change, be very careful about that.
+ constexpr auto TMP1 = ARMEmitter::XReg::x0;
+@@ -55,6 +55,41 @@ constexpr auto VTMP2 = ARMEmitter::VReg::v1;
+ constexpr auto SVE_OPT_PRED = ARMEmitter::PReg::p2;
+ 
+ #else
++/*
++ * ios-wine: the TEB is in x28 on this port, so STATE cannot be.
++ *
++ * Apple's XNU ZEROES x18 on return from any exception, including ordinary
++ * timer preemption -- measured on both an arm64 Mac and the target iPhone:
++ *
++ *     x18 immediate=0xaaaa1111  spin=0  syscall=0xcccc3333   -> ZEROED
++ *
++ * "spin=0" is with no syscalls at all in between, so there is no instruction
++ * boundary at which a value could be restored and x18 is unusable, full stop.
++ * Wine's entire ARM64 port was therefore moved to x28, and
++ * every module in the process must agree -- including this one, which reads the
++ * TEB on every JIT entry/exit.
++ *
++ * x28 is a legal home for it: measured with clang 21.1.0 (bylaws) and 23.1.0-rc3,
++ * a maximum-register-pressure function compiled for arm64ec-w64-mingw32 emits
++ *     x0-x12, x15, x16, x17, x19-x22, x25, x26, x27, x29, x30
++ * and NEVER x13, x14, x18, x23, x24, x28 -- exactly the set the ARM64EC ABI
++ * reserves for the emulator. So x28 survives arbitrary EC code, which is what
++ * the TEB register has to do.
++ *
++ * The cost is that FEX loses one register. It already used four of the five
++ * reserved ones -- x13 (TMP4), x23 (guest RSP), x24 (REG_AF), x28 (STATE) --
++ * and x14 was only a member of the dynamic RA pool. So STATE moves to x14 and
++ * the dynamic pool shrinks from 6 GPRs to 5 (see RA in Arm64Emitter.cpp).
++ * There is no free lunch available here: FEX's arm64ec JIT otherwise claims
++ * every GPR except x18, so SOME register had to be given up, and x14 is the
++ * only candidate that both survives EC code and was not already load-bearing.
++ */
++constexpr auto STATE = ARMEmitter::XReg::x14;
++
++// The register holding the TEB. Upstream ARM64EC (and Windows) says x18; this
++// port says x28. Everything that used to name x18 explicitly uses this.
++constexpr auto TEB_REG = ARMEmitter::XReg::x28;
++
+ constexpr auto TMP1 = ARMEmitter::XReg::x10;
+ constexpr auto TMP2 = ARMEmitter::XReg::x11;
+ constexpr auto TMP3 = ARMEmitter::XReg::x12;
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+index b174dab..53ea97f 100644
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -150,7 +150,7 @@ void Dispatcher::EmitDispatcher() {
+   // Clobbers TMP1/2
+   // Check the EC code bitmap incase we need to exit the JIT to call into native code.
+   ARMEmitter::ForwardLabel l_NotECCode;
+-  ldr(TMP1, ARMEmitter::XReg::x18, TEB_PEB_OFFSET);
++  ldr(TMP1, TEB_REG, TEB_PEB_OFFSET);
+   ldr(TMP1, TMP1, PEB_EC_CODE_BITMAP_OFFSET);
+ 
+   lsr(ARMEmitter::Size::i64Bit, TMP2, RipReg, 18);
+@@ -258,7 +258,7 @@ void Dispatcher::EmitDispatcher() {
+ #endif
+ 
+ #ifdef ARCHITECTURE_arm64ec
+-    ldr(TMP2, ARMEmitter::XReg::x18, TEB_CPU_AREA_OFFSET);
++    ldr(TMP2, TEB_REG, TEB_CPU_AREA_OFFSET);
+     LoadConstant(ARMEmitter::Size::i32Bit, TMP1, 1);
+     strb(TMP1.W(), TMP2, CPU_AREA_IN_SYSCALL_CALLBACK_OFFSET);
+ #endif
+@@ -266,7 +266,7 @@ void Dispatcher::EmitDispatcher() {
+     Body();
+ 
+ #ifdef ARCHITECTURE_arm64ec
+-    ldr(TMP2, ARMEmitter::XReg::x18, TEB_CPU_AREA_OFFSET);
++    ldr(TMP2, TEB_REG, TEB_CPU_AREA_OFFSET);
+     strb(ARMEmitter::WReg::zr, TMP2, CPU_AREA_IN_SYSCALL_CALLBACK_OFFSET);
+ #endif
+ 
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+index 1e21d5b..8db8e39 100644
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -27,6 +27,7 @@ $end_info$
+ #include <FEXCore/Utils/Allocator.h>
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/EnumUtils.h>
++#include <FEXCore/Utils/JITWriteAlias.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/LongJump.h>
+ #include <FEXCore/Utils/Profiler.h>
+@@ -511,7 +512,7 @@ static void DirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record,
+     BranchEmit.b(BranchOffset);
+   }
+ 
+-  std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(CallerAddress)).store(BranchInst, std::memory_order::relaxed);
++  std::atomic_ref<uint32_t>(*FEXCore::JIT::Write(reinterpret_cast<uint32_t*>(CallerAddress))).store(BranchInst, std::memory_order::relaxed);
+   ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(CallerAddress), 4);
+ }
+ 
+@@ -522,7 +523,7 @@ static void IndirectBlockDelinker(FEXCore::Context::ExitFunctionLinkData* Record
+   // Restore branch +2 instructions to jump to the linker block
+   BranchEmit.b(0x2);
+ 
+-  std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(JumpThunkStartAddress)).store(BranchInst, std::memory_order::relaxed);
++  std::atomic_ref<uint32_t>(*FEXCore::JIT::Write(reinterpret_cast<uint32_t*>(JumpThunkStartAddress))).store(BranchInst, std::memory_order::relaxed);
+   ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(JumpThunkStartAddress), 4);
+ 
+   // No need to reset HostCode here as the exit linker pointer is stored separately, and if the block is relinked it will be updated.
+@@ -589,7 +590,7 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+         GuestRip, Record, [](FEXCore::Context::ExitFunctionLinkData* Record) { DirectBlockDelinker(Record, false); }, lk);
+     }
+ 
+-    std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(CallerAddress)).store(BranchInst, std::memory_order::relaxed);
++    std::atomic_ref<uint32_t>(*FEXCore::JIT::Write(reinterpret_cast<uint32_t*>(CallerAddress))).store(BranchInst, std::memory_order::relaxed);
+     ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(CallerAddress), 4);
+   } else {
+     // This case is common between calls and jumps as the thunk callsite can be left untouched.
+@@ -602,7 +603,7 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
+     uint32_t LdrInst = 0;
+     ARMEmitter::Emitter LdrEmit(reinterpret_cast<uint8_t*>(&LdrInst), 4);
+     LdrEmit.ldr(TMP1, reinterpret_cast<uint64_t>(&Record->HostCode) - JumpThunkStartAddress);
+-    std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(JumpThunkStartAddress)).store(LdrInst, std::memory_order::relaxed);
++    std::atomic_ref<uint32_t>(*FEXCore::JIT::Write(reinterpret_cast<uint32_t*>(JumpThunkStartAddress))).store(LdrInst, std::memory_order::relaxed);
+     ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(JumpThunkStartAddress), 4);
+ 
+     Thread->LookupCache->AddBlockLink(GuestRip, Record, IndirectBlockDelinker, lk);
+@@ -1111,7 +1112,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
+     }
+ 
+     // Copy over CodeBuffer contents
+-    memcpy(GetCursorAddress<uint8_t*>(), TempCodeBuffer, TempSize);
++    // Destination is executable memory: write through the alias.
++    memcpy(FEXCore::JIT::Write(GetCursorAddress<uint8_t*>()), TempCodeBuffer, TempSize);
+     SetCursorOffset(SharedCodeBuffers.LatestOffset + TempSize);
+ 
+     SharedCodeBuffers.LatestOffset = GetCursorOffset();
+diff --git a/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp b/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
+index 6c2b349..69d2bf5 100644
+--- a/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/MiscOps.cpp
+@@ -334,7 +334,7 @@ DEF_OP(MonoBackpatcherWrite) {
+   }
+ 
+ #ifdef ARCHITECTURE_arm64ec
+-  ldr(TMP2, ARMEmitter::XReg::x18, TEB_CPU_AREA_OFFSET);
++  ldr(TMP2, TEB_REG, TEB_CPU_AREA_OFFSET);
+   LoadConstant(ARMEmitter::Size::i32Bit, TMP1, 1);
+   strb(TMP1.W(), TMP2, CPU_AREA_IN_SYSCALL_CALLBACK_OFFSET);
+ #endif
+@@ -347,7 +347,7 @@ DEF_OP(MonoBackpatcherWrite) {
+   }
+ 
+ #ifdef ARCHITECTURE_arm64ec
+-  ldr(TMP2, ARMEmitter::XReg::x18, TEB_CPU_AREA_OFFSET);
++  ldr(TMP2, TEB_REG, TEB_CPU_AREA_OFFSET);
+   strb(ARMEmitter::WReg::zr, TMP2, CPU_AREA_IN_SYSCALL_CALLBACK_OFFSET);
+ #endif
+ 
+diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+index f3171d4..223f569 100644
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+@@ -2,6 +2,8 @@
+ #include "Interface/Core/LookupCache.h"
+ #include "Interface/Core/SharedCodeBufferManager.h"
+ 
++#include <FEXCore/Utils/JITWriteAlias.h>
++
+ #include <FEXCore/fextl/memory.h>
+ #include <FEXCore/Utils/AllocatorHooks.h>
+ #include <FEXCore/Utils/LogManager.h>
+@@ -11,6 +13,88 @@
+ #include <FEXCore/Utils/PrctlUtils.h>
+ #endif
+ 
++namespace FEXCore::JIT {
++// Zero unless a dual-mapped (iOS) code region is installed.
++ptrdiff_t WriteAliasDelta = 0;
++uintptr_t WriteAliasLo = 0;
++size_t WriteAliasSize = 0;   // 0 disables the translation entirely
++
++#ifdef _WIN32
++/*
++ * ios-wine: learn the RW alias of a freshly allocated code buffer.
++ *
++ * On iOS a page can never be writable and executable at once, so Wine hands
++ * out executable memory from a debugger-blessed arena that is mapped twice:
++ * RX where code runs, RW at exec + delta. FEX must branch to the first and
++ * store through the second.
++ *
++ * The delta cannot be discovered from inside a PE module any other way -- the
++ * arena belongs to the iOS app, below Wine, and dlsym() is not reachable from
++ * here. ntdll answers for it through a private NtQueryVirtualMemory class.
++ *
++ * 1100 == MemoryWineIosJitWriteDelta, defined in wine/include/winternl.h.
++ * Repeated rather than included because FEX builds against mingw-w64's headers
++ * and must keep working on real Windows, where this call simply fails and the
++ * delta stays 0.
++ *
++ * INVARIANT: one delta for the whole process. The arena is a single blessed
++ * region -- nothing can be blessed after the debugger detaches -- so every code
++ * buffer necessarily shares it. Asserted below rather than assumed, because a
++ * second delta silently corrupting one of two code buffers is the kind of bug
++ * that would surface as an impossible crash much later.
++ */
++void InstallWriteAlias(void* Ptr) {
++  using QueryFn = int32_t(__stdcall*)(void*, const void*, uint32_t, void*, size_t, size_t*);
++  auto NtDll = ::GetModuleHandleW(L"ntdll.dll");
++  if (!NtDll) {
++    return;
++  }
++  auto Query = reinterpret_cast<QueryFn>(::GetProcAddress(NtDll, "NtQueryVirtualMemory"));
++  if (!Query) {
++    return;
++  }
++
++  // Matches WINE_IOS_JIT_ALIAS in wine/include/winternl.h. Declared locally
++  // rather than included: FEX builds against mingw-w64's headers and has to
++  // keep working on real Windows, where the query simply fails.
++  struct {
++    uint64_t ExecBase;
++    uint64_t Size;
++    int64_t WriteDelta;
++  } Alias {};
++
++  constexpr uint32_t MemoryWineIosJitWriteDelta = 1100;
++  if (Query(::GetCurrentProcess(), Ptr, MemoryWineIosJitWriteDelta, &Alias, sizeof(Alias), nullptr) < 0) {
++    return;
++  }
++  if (!Alias.Size || !Alias.WriteDelta) {
++    return;
++  }
++
++  if (WriteAliasSize && (WriteAliasDelta != Alias.WriteDelta || WriteAliasLo != Alias.ExecBase)) {
++    LogMan::Msg::EFmt("JIT write alias changed ({:#x} -> {:#x}); all code buffers must come from one "
++                      "blessed region",
++                      WriteAliasDelta, Alias.WriteDelta);
++    return;
++  }
++  if (reinterpret_cast<uintptr_t>(Ptr) - Alias.ExecBase >= Alias.Size) {
++    // Executable memory that is NOT in the arena. On iOS that cannot execute,
++    // so say so here rather than let it fault somewhere unrecognisable.
++    LogMan::Msg::EFmt("executable allocation {} is outside the blessed arena {:#x}+{:#x}", Ptr, Alias.ExecBase, Alias.Size);
++    return;
++  }
++
++  WriteAliasLo = Alias.ExecBase;
++  WriteAliasSize = Alias.Size;
++  WriteAliasDelta = Alias.WriteDelta;
++  LogMan::Msg::IFmt("JIT write alias: arena {:#x}+{:#x}, writes at +{:#x} (this alloc {})", Alias.ExecBase, Alias.Size,
++                    Alias.WriteDelta, Ptr);
++}
++#else
++void InstallWriteAlias(void*) {}
++#endif
++} // namespace FEXCore::JIT
++
+ namespace FEXCore::CPU {
+ static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
+ // We don't want to move above 128MB atm because that means we will have to encode longer jumps
+@@ -21,10 +105,20 @@ CodeBuffer::CodeBuffer(size_t Size)
+   Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
+   LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");
+ 
++  // ios-wine: if this buffer came from a dual-mapped region, find out where to
++  // write it. Must happen before anything emits into it. No-op elsewhere.
++  FEXCore::JIT::InstallWriteAlias(Ptr);
++
+   // Protect the last page of the allocated buffer to trigger SIGSEGV on write access
+   uintptr_t LastPageAddr = AlignDown(reinterpret_cast<uintptr_t>(Ptr) + Size - 1, FEXCore::Utils::FEX_PAGE_SIZE);
+-  if (!FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
++  if (!FEXCore::JIT::WriteAliasDelta &&
++      !FEXCore::Allocator::VirtualProtect(reinterpret_cast<void*>(LastPageAddr), FEXCore::Utils::FEX_PAGE_SIZE,
+                                           FEXCore::Allocator::ProtectOptions::None)) {
++    // Skipped entirely on the dual-mapped path: making an arena page PROT_NONE
++    // is irreversible (RW/none -> RX fails with KERN_PROTECTION_FAILURE), and
++    // the guard page's whole job is to catch a single block overrunning the
++    // TEMP buffer -- which is ordinary heap memory, not this one. The
++    // CodeBuffer-full case is an explicit bounds check in JIT.cpp, not a fault.
+     LogMan::Msg::EFmt("Failed to mprotect last page of code buffer.");
+   }
+ 
+@@ -75,7 +169,22 @@ fextl::shared_ptr<CodeBuffer> SharedCodeBufferManager::AllocateNew(size_t Size)
+ 
+ fextl::shared_ptr<CodeBuffer> SharedCodeBufferManager::GetLatest() {
+   if (!Latest) {
+-    AllocateNew(INITIAL_CODE_SIZE);
++    /*
++     * ios-wine: on a dual-mapped region, take the whole thing at once.
++     *
++     * FEX normally starts at 16 MB and grows by allocating a NEW buffer and
++     * freeing the old one. Neither half of that works here. Executable memory
++     * comes from a region a debugger blessed before it detached, so it can
++     * never be freed and re-blessed, and the allocator behind it is a bump
++     * allocator with no free at all -- every doubling would permanently strand
++     * the previous buffer inside a fixed-size arena.
++     *
++     * Measured on the host harness: a 200k-iteration guest takes the initial
++     * 16 MB buffer and never grows, so this costs nothing today; it is here so
++     * that the first guest that DOES grow does not quietly leak 16+32+64 MB of
++     * arena before it gets to 128.
++     */
++    AllocateNew(FEXCore::JIT::WriteAliasSize ? MAX_CODE_SIZE : INITIAL_CODE_SIZE);
+   }
+   return Latest;
+ }
+diff --git a/FEXCore/include/FEXCore/Utils/AllocatorHooks.h b/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
+index cccce4d..3aa5789 100644
+--- a/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
++++ b/FEXCore/include/FEXCore/Utils/AllocatorHooks.h
+@@ -2,6 +2,7 @@
+ #pragma once
+ #include <FEXCore/Utils/CompilerDefs.h>
+ #include <FEXCore/Utils/EnumOperators.h>
++#include <FEXCore/Utils/JITWriteAlias.h>
+ #include <FEXCore/Utils/LogManager.h>
+ 
+ #ifndef _WIN32
+@@ -55,11 +56,20 @@ inline void* VirtualAlloc(void* Base, size_t Size, bool Execute = false, bool Co
+     Parameter.Type = MemExtendedParameterAttributeFlags;
+     Parameter.ULong64 = MEM_EXTENDED_PARAMETER_EC_CODE;
+   };
+-  return ::VirtualAlloc2(nullptr, Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE, Execute ? &Parameter : nullptr,
+-                         Execute ? 1 : 0);
++  void* Result = ::VirtualAlloc2(nullptr, Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE,
++                                 Execute ? &Parameter : nullptr, Execute ? 1 : 0);
+ #else
+-  return ::VirtualAlloc(Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE);
++  void* Result = ::VirtualAlloc(Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE);
+ #endif
++  // ios-wine: executable memory may be dual-mapped (RX here, RW at a second
++  // address). Learn the offset now, before anything emits into it. Every
++  // Execute=true allocation goes through here -- dispatcher, block linkers and
++  // X64ReturnInstr as well as the CodeBuffer -- and the earliest of them is
++  // written long before the first CodeBuffer exists. No-op elsewhere.
++  if (Execute && Result) {
++    FEXCore::JIT::InstallWriteAlias(Result);
++  }
++  return Result;
+ }
+ 
+ inline void* VirtualAlloc(size_t Size, bool Execute = false, bool Commit = true) {
+diff --git a/FEXCore/include/FEXCore/Utils/JITWriteAlias.h b/FEXCore/include/FEXCore/Utils/JITWriteAlias.h
+new file mode 100644
+index 0000000..d6a409a
+--- /dev/null
++++ b/FEXCore/include/FEXCore/Utils/JITWriteAlias.h
+@@ -0,0 +1,95 @@
++// SPDX-License-Identifier: MIT
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++
++/*
++ * Dual-mapped JIT memory support (iOS 26+).
++ *
++ * On iOS the app cannot make its own memory executable. Executable pages come
++ * from a debugger handshake (`brk #0xf00d`) which returns an RX region; to write
++ * into it we vm_remap a second, writable view of the same physical pages. So a
++ * given instruction has two addresses:
++ *
++ *      exec  -- where it runs, and what every branch/entry point refers to
++ *      write -- where it must be stored, exec + WriteAliasDelta
++ *
++ * FEX otherwise assumes these are the same pointer. Rather than thread a second
++ * pointer through the emitter, note that FEX already emits into a temporary
++ * buffer and *relocates* finished code into the CodeBuffer -- so only the small
++ * number of places that touch executable memory directly need adjusting:
++ *
++ *   - the relocation memcpy                       (JIT.cpp)
++ *   - block link/delink branch patching           (JIT.cpp, 4 sites)
++ *   - dispatcher emission                         (Dispatcher.cpp)
++ *
++ * WriteAliasDelta is 0 on every other platform, making Write() an identity and
++ * this whole mechanism a no-op there.
++ *
++ * INVARIANT: all code buffers must be carved from ONE blessed region, so a
++ * single delta is valid process-wide. That is required anyway -- regions can
++ * only be blessed before the debugger detaches, so FEX must reserve its code
++ * memory up front.
++ */
++namespace FEXCore::JIT {
++
++// write_address - exec_address. Zero unless dual mapping is in use.
++extern ptrdiff_t WriteAliasDelta;
++
++/*
++ * Bounds of the dual-mapped region, as exec addresses. Write() applies the
++ * delta ONLY inside them.
++ *
++ * This is not defensive programming, it is required for correctness. FEX
++ * compiles each block into a TEMPORARY buffer and only relocates the finished
++ * block into the CodeBuffer at the end:
++ *
++ *     JIT.cpp:865   SetBuffer(TempCodeBuffer, UsableBufferRange);   <- heap
++ *     JIT.cpp:1092  SetBuffer(CurrentCodeBuffer->Ptr, ...);         <- arena
++ *
++ * so the very same Buffer::dcn(), Emitter::Bind() and block-tail memcpy run
++ * against ordinary heap memory for most of their life. Adding the delta there
++ * would store at temp + 0x6e_dfff_0000, which is not mapped at all.
++ *
++ * The earlier version of this patch had no range check and was wrong for every
++ * store made during block compilation. It went unnoticed because nothing had
++ * ever reached the point of compiling a block.
++ */
++extern uintptr_t WriteAliasLo;   // exec base of the arena
++extern size_t WriteAliasSize;    // 0 when no dual mapping is installed
++
++/*
++ * Discover the alias for a freshly allocated executable region and install it.
++ *
++ * Called from FEXCore::Allocator::VirtualAlloc for every Execute=true
++ * allocation, NOT just the CodeBuffer: the dispatcher, the block-linker thunks
++ * and X64ReturnInstr are all separate allocations, and each of them is written
++ * before the first CodeBuffer exists. Installing the delta only at CodeBuffer
++ * creation left the dispatcher emitting through a zero delta, i.e. straight
++ * into the RX mapping -- measured as a fault in
++ * Arm64Emitter::PushCalleeSavedRegisters with x10 (the loaded delta) == 0.
++ *
++ * No-op on every platform where the query is unavailable.
++ */
++void InstallWriteAlias(void* ExecPtr);
++
++/// True if this address is inside the dual-mapped region.
++/// One unsigned compare: a negative difference wraps to a huge unsigned value.
++inline bool IsAliased(uintptr_t Addr) {
++  return (Addr - WriteAliasLo) < WriteAliasSize;
++}
++
++/// Translate an executable address to the address it must be written through.
++/// Returns the pointer unchanged for anything outside the dual-mapped region --
++/// notably the per-block temporary buffer, which is plain heap.
++template<typename T>
++inline T* Write(T* ExecPtr) {
++  const auto Addr = reinterpret_cast<uintptr_t>(ExecPtr);
++  if (!IsAliased(Addr)) {
++    return ExecPtr;
++  }
++  return reinterpret_cast<T*>(Addr + WriteAliasDelta);
++}
++
++} // namespace FEXCore::JIT
+diff --git a/Source/Windows/ARM64EC/CMakeLists.txt b/Source/Windows/ARM64EC/CMakeLists.txt
+index 0c9a57a..ba5e83e 100644
+--- a/Source/Windows/ARM64EC/CMakeLists.txt
++++ b/Source/Windows/ARM64EC/CMakeLists.txt
+@@ -1,6 +1,9 @@
+ add_library(arm64ecfex SHARED
+   Module.cpp
+   Module.S
++  # ios-wine: must be a TU of THIS target, not of a static library, so it wins
++  # over libc++abi's thread_local implementation on the link line. See the file.
++  CxaEhStorage.cpp
+   libarm64ecfex.def
+   $<TARGET_OBJECTS:FEXCore_object>)
+ 
+diff --git a/Source/Windows/ARM64EC/CxaEhStorage.cpp b/Source/Windows/ARM64EC/CxaEhStorage.cpp
+new file mode 100644
+index 0000000..6cd9e4c
+--- /dev/null
++++ b/Source/Windows/ARM64EC/CxaEhStorage.cpp
+@@ -0,0 +1,137 @@
++// SPDX-License-Identifier: MIT
++/*
++ * ios-wine: per-thread C++ exception state WITHOUT compiler thread-local storage.
++ *
++ * WHY THIS FILE EXISTS.  Windows thread-local storage lowers to a hard-coded
++ * TEB read.  Measured with clang 21.1.0 (bylaws) and 23.1.0-rc3, for both
++ * aarch64-w64-mingw32 and arm64ec-w64-mingw32, a single `_Thread_local int`
++ * compiles to:
++ *
++ *     ldr x9, [x18, #0x58]        // TEB->ThreadLocalStoragePointer
++ *
++ * On this port the TEB is in x28, because Darwin ZEROES x18 on return from any
++ * exception -- including plain timer preemption with no syscall involved.  So
++ * that instruction reads a register that is zero most of the time, and the load
++ * faults.  Neither -ffixed-x28 nor -DWINE_TEB_IN_X28 reaches it: it is emitted
++ * by the backend, not by a header.
++ *
++ * libc++abi's cxa_exception_storage.cpp is the only place in libarm64ecfex.dll
++ * where this survives -- everything else goes through NtCurrentTeb(), which the
++ * build patches to read x28 (scripts/06-fex-arm64ec.sh).  It is a PREBUILT
++ * object in the toolchain's libc++abi.a, so it cannot be recompiled here.
++ *
++ * Measured, before this file existed:
++ *
++ *     x18 references in the shipped image: 2
++ *       __cxa_get_globals:      1801b5eb4: ldr x9, [x18, #0x58]
++ *       __cxa_get_globals_fast: 1801b5ed4: ldr x9, [x18, #0x58]
++ *
++ * Both are reached from __cxa_throw / __cxa_begin_catch / __cxa_end_catch,
++ * which are all present and called in the built image, so this is not dead
++ * code that could be ignored.
++ *
++ * HOW.  Defining both symbols here means the linker never extracts
++ * cxa_exception_storage.o from libc++abi.a at all -- this is a translation unit
++ * of the arm64ecfex target itself, so it is on the link line before any
++ * archive.  Storage moves to a TEB TLS slot, reached through FEX's own
++ * TlsGetValue/TlsSetValue, which read the TEB via NtCurrentTeb() and therefore
++ * via x28.
++ *
++ * The block is allocated ZEROED and deliberately OVER-SIZED.  libc++abi's
++ * __cxa_eh_globals is
++ *     { __cxa_exception *caughtExceptions; unsigned int uncaughtExceptions; }
++ * -- 16 bytes -- and has been for many years, but this file cannot include the
++ * private header that declares it.  Over-allocating removes the whole class of
++ * "libc++abi grew a field and we silently corrupted the heap" failure for the
++ * price of a few bytes per thread.
++ *
++ * LIMITATION: the block is leaked when a thread exits.  libc++abi's version is
++ * freed by a thread_local destructor, which is exactly the mechanism being
++ * avoided here.  It is 64 bytes, allocated only on a thread's first throw.
++ *
++ * NOTHING HERE MAY IMPORT ANYTHING BUT NTDLL.  An earlier version of this file
++ * called HeapAlloc/GetProcessHeap, which added
++ *     api-ms-win-core-heap-l1-1-0.dll  ->  kernelbase.dll
++ * to libarm64ecfex.dll's import table.  That is not a size problem, it is a
++ * correctness one: kernelbase then loads as an import of the EMULATOR, i.e.
++ * before ntdll's arm64ec_process_init() has run, so
++ * arm64ec_update_hybrid_metadata() patches kernelbase's
++ * __os_arm64x_dispatch_call/_ret/_fptr slots with the NULLs they still hold.
++ *
++ * The failure is a long way from the cause.  x86 code ran, called
++ * kernelbase!GetStdHandle through its entry thunk, the function returned
++ * correctly, and then the thunk's last instruction
++ *
++ *     1800ef900: ldr x1, [x8, #0x798]   // __os_arm64x_dispatch_ret
++ *     1800ef920: br  x1
++ *
++ * branched to zero.  scripts/06-fex-arm64ec.sh now asserts the import table.
++ */
++
++#include <atomic>
++#include <cstdint>
++
++#include <windows.h>
++#include <winternl.h>
++
++#include "Common/Priv.h"
++
++namespace {
++// Generously sized; see the note above about not being able to include
++// libc++abi's private cxa_exception.h.
++constexpr size_t EhGlobalsSize = 64;
++
++constexpr uint32_t NoSlot = 0xFFFFFFFFu;
++std::atomic<uint32_t> EhTlsSlot {NoSlot};
++
++uint32_t AcquireSlot() {
++  uint32_t Slot = EhTlsSlot.load(std::memory_order_acquire);
++  if (Slot != NoSlot) {
++    return Slot;
++  }
++
++  // Two threads can race here; the loser gives its slot straight back rather
++  // than leaking a TLS index, of which there are only 64 before the expansion
++  // slots (which FEX's TlsAlloc deliberately refuses to use).
++  const uint32_t Fresh = ::TlsAlloc();
++  if (Fresh == TLS_OUT_OF_INDEXES) {
++    return NoSlot;
++  }
++
++  uint32_t Expected = NoSlot;
++  if (EhTlsSlot.compare_exchange_strong(Expected, Fresh, std::memory_order_acq_rel)) {
++    return Fresh;
++  }
++  ::TlsFree(Fresh);
++  return Expected;
++}
++} // namespace
++
++extern "C" {
++
++// Returns the calling thread's exception globals, creating them if needed.
++void* __cxa_get_globals() {
++  const uint32_t Slot = AcquireSlot();
++  if (Slot == NoSlot) {
++    return nullptr;
++  }
++
++  void* Globals = ::TlsGetValue(Slot);
++  if (!Globals) {
++    // RtlAllocateHeap, not HeapAlloc: ntdll only. See the header comment.
++    Globals = ::RtlAllocateHeap(GetCurrentPEB()->ProcessHeap, HEAP_ZERO_MEMORY, EhGlobalsSize);
++    ::TlsSetValue(Slot, Globals);
++  }
++  return Globals;
++}
++
++// Same, but must not allocate. libc++abi's callers null-check this.
++void* __cxa_get_globals_fast() {
++  const uint32_t Slot = EhTlsSlot.load(std::memory_order_acquire);
++  if (Slot == NoSlot) {
++    return nullptr;
++  }
++  return ::TlsGetValue(Slot);
++}
++
++} // extern "C"
+diff --git a/Source/Windows/ARM64EC/Module.S b/Source/Windows/ARM64EC/Module.S
+index 4c18172..ae74664 100644
+--- a/Source/Windows/ARM64EC/Module.S
++++ b/Source/Windows/ARM64EC/Module.S
+@@ -1,6 +1,13 @@
+ .text
+ .balign 16
+ 
++// ios-wine: every "TEB" below is x28, not the x18 the ARM64EC ABI specifies.
++// Apple's XNU zeroes x18 on return from any exception -- including plain timer
++// preemption, with no syscall involved -- so nothing that must survive between
++// two arbitrary instructions can live there. Wine's whole ARM64 port moved the
++// TEB to x28 and this module has to agree with it. FEX's own CPU-state pointer
++// moved off x28 to x14 to make room; see FEXCore Arm64Emitter.h.
++
+   // __os_arm64x_x64_jump in ARM64EC docs
+   // Expects target code address in x9
+ .globl DispatchJump
+@@ -16,7 +23,7 @@ RetToEntryThunk:
+ 
+ check_target_ec:
+   // Check if target is in fact x86 code
+-  ldr x16, [x18, #0x60] // TEB->PEB
++  ldr x16, [x28, #0x60] // TEB->PEB
+   ldr x16, [x16, #0x368] // PEB->EcCodeBitMap
+   lsr x17, x9, #18
+   ldr x16, [x16, x17, lsl #3]
+@@ -32,7 +39,7 @@ ExitToX64:
+   str lr, [sp, #-8]! // Push return address to stack, this will be popped by the x86 RET instr.
+ 
+ enter_jit:
+-  ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
++  ldr x17, [x28, #0x1788] // TEB->ChpeV2CpuAreaInfo
+   mov w16, #1
+   strb w16, [x17, #0x0] // ChpeV2CpuAreaInfo->InSimulation
+   ldr x16, [x17, #0x40] // ChpeV2CpuAreaInfo->EmulatorData[2] - DispatcherLoopTopEnterEC
+@@ -41,12 +48,12 @@ enter_jit:
+   // Invoked by KiUserEmulationDispatcher after e.g. an NtContinue to x86 code
+ .global BeginSimulation
+ BeginSimulation:
+-  ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
++  ldr x17, [x28, #0x1788] // TEB->ChpeV2CpuAreaInfo
+   ldr x16, [x17, #0x8] // ChpeV2CpuAreaInfo->EmulatorStackBase
+   mov sp, x16
+   ldr x0, [x17, #0x18] // ChpeV2CpuAreaInfo->ContextAmd64
+   bl "#SyncThreadContext"
+-  ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
++  ldr x17, [x28, #0x1788] // TEB->ChpeV2CpuAreaInfo
+   ldr x16, [x17, #0x48] // ChpeV2CpuAreaInfo->EmulatorData[3] - DispatcherLoopTopEnterECFillSRA
+   mov x11, #0 // Zero ENTRY_FILL_SRA_SINGLE_INST_REG to avoid single step
+   br x16 // DispatcherLoopTopEnterECFillSRA(SingleInst:x10, CPUArea:x17)
+@@ -59,7 +66,7 @@ ExitFunctionEC:
+   mrs x17, fpcr
+   and x17, x17, #~6 // NEP + AH
+   msr fpcr, x17
+-  ldr x17, [x18, #0x1788] // TEB->ChpeV2CpuAreaInfo
++  ldr x17, [x28, #0x1788] // TEB->ChpeV2CpuAreaInfo
+   strb wzr, [x17, #0x0] // ChpeV2CpuAreaInfo->InSimulation
+   ldr x17, [x17, #0x20] // ChpeV2CpuAreaInfo->SuspendDoorbell
+   ldr w17, [x17]
+diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
+index ab3e7a3..57f494a 100644
+--- a/Source/Windows/ARM64EC/Module.cpp
++++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -15,6 +15,7 @@ $end_info$
+ #include <FEXCore/HLE/SyscallHandler.h>
+ #include <FEXCore/Config/Config.h>
+ #include <FEXCore/Utils/Allocator.h>
++#include <FEXCore/Utils/JITWriteAlias.h>
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/Threads.h>
+ #include <FEXCore/Utils/Profiler.h>
+@@ -624,7 +625,14 @@ NTSTATUS ProcessInit() {
+   X64ReturnInstr = ::VirtualAlloc(nullptr, FEXCore::Utils::FEX_PAGE_SIZE, MEM_COMMIT | MEM_TOP_DOWN, PAGE_EXECUTE_READWRITE);
+   InvalidationTracker->HandleMemoryProtectionNotification(reinterpret_cast<uint64_t>(X64ReturnInstr), FEXCore::Utils::FEX_PAGE_SIZE,
+                                                           PAGE_EXECUTE_READ);
+-  *reinterpret_cast<uint8_t*>(X64ReturnInstr) = 0xc3;
++  // ios-wine: X64ReturnInstr lives in executable memory, which on this port is
++  // never writable at the address it executes from. Store through the alias.
++  // Identity everywhere else (WriteAliasDelta == 0).
++  *FEXCore::JIT::Write(reinterpret_cast<uint8_t*>(X64ReturnInstr)) = 0xc3;
++  // Written through a different mapping than it executes from, so the I-cache
++  // has to be told. sys_icache_invalidate, not __builtin___clear_cache: the
++  // latter lowers to ___clear_cache, which libSystem does not export on iOS.
++  ::FlushInstructionCache(::GetCurrentProcess(), X64ReturnInstr, 1);
+ 
+   const uintptr_t KiUserExceptionDispatcherFFS = reinterpret_cast<uintptr_t>(GetProcAddress(NtDll, "KiUserExceptionDispatcher"));
+   Exception::KiUserExceptionDispatcher = NtDllRedirectionLUT[KiUserExceptionDispatcherFFS - NtDllBase] + NtDllBase;
+diff --git a/Source/Windows/Common/FEXUnixLib.cpp b/Source/Windows/Common/FEXUnixLib.cpp
+index 9797823..25ade45 100644
+--- a/Source/Windows/Common/FEXUnixLib.cpp
++++ b/Source/Windows/Common/FEXUnixLib.cpp
+@@ -44,6 +44,44 @@ static NTSTATUS __attribute__((naked)) TrampolineCall(unixlib_handle_t, unsigned
+ // This code path will eventually crash once Wine and the kernel implements `userspace syscall dispatch`.
+ // FEX will need to switch over to using WINE's unixlib syscall approach then.
+ namespace Illegal {
++#ifdef FEX_HOST_DARWIN
++/*
++ * ios-wine: on Darwin these are not "illegal", they are fatal.
++ *
++ * The fallbacks below issue RAW LINUX syscalls -- `svc #0` with the number in
++ * x8 -- on the assumption that a Wine process really is a Linux process, which
++ * is true for hangover and false here. `svc #0` with x8=167 on Darwin raises
++ * SIGSYS, and it does so before Wine's fault machinery is reachable, so the
++ * process simply disappears. Measured under lldb, with the emulator otherwise
++ * fully initialised:
++ *
++ *     thread #2, stop reason = signal SIGSYS
++ *     frame #0: 0x1203b74bc
++ *       0x1801a74b4 <FEX::Windows::UnixLib::Illegal::prctl>:
++ *         mov x8, #0xa7   // 167 = Linux prctl
++ *         svc #0
++ *
++ * FEX reaches them because there is no libarm64ecfex.so to load -- this port
++ * has no Linux unix side at all and never will:
++ *     warn:module:load_builtin_unixlib failed to load ".../libarm64ecfex.so"
++ *
++ * All three are optional, so refusing is correct rather than merely survivable:
++ *   prctl(PR_SET_VMA_ANON_NAME) names a VMA for /proc/self/maps -- no /proc.
++ *   madvise(MADV_HUGEPAGE)      is Linux transparent huge pages -- no equivalent.
++ *   getpid                      only builds a /dev/shm/fex-<pid>-stats path.
++ * Returning failure also makes VirtualName latch SupportsVirtualName=false on
++ * its first call, so it is asked once and never again.
++ */
++  static uint64_t prctl(int, uint64_t, const void*, size_t, const char*) {
++    return static_cast<uint64_t>(-1);
++  }
++  static uint64_t madvise(const void*, size_t, int) {
++    return static_cast<uint64_t>(-1);
++  }
++  static uint64_t linux_getpid() {
++    return 0;
++  }
++#else
+   __attribute__((naked)) uint64_t prctl(int op, uint64_t attr, const void* addr, size_t size, const char* Name) {
+     asm volatile(R"(
+       mov x8, 167; // prctl
+@@ -70,6 +108,7 @@ namespace Illegal {
+     )" ::
+                    : "r0", "r8");
+   }
++#endif
+ 
+   void VirtualName(const char* Name, const void* Ptr, size_t Size) {
+     if (SupportsVirtualName) {

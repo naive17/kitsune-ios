@@ -1,0 +1,27 @@
+# Meson cross file: Windows PE, ARM64EC.
+#
+# Used for DXVK / vkd3d-proton. ARM64EC (not plain aarch64) is deliberate: the
+# game's x86_64 code calls d3d11.dll directly, and an EC image lets that call
+# land in NATIVE ARM64 code instead of being emulated. Hangover's README reaches
+# the same conclusion independently -- "For x86_64 applications first try
+# arm64ec, it should perform best."
+#
+# cpu_family is 'aarch64' because that is the ISA meson must reason about; the
+# EC-ness is carried by the compiler triple.
+
+[binaries]
+c       = 'arm64ec-w64-mingw32-clang'
+cpp     = 'arm64ec-w64-mingw32-clang++'
+ar      = 'llvm-ar'
+strip   = 'llvm-strip'
+windres = 'arm64ec-w64-mingw32-windres'
+dlltool = 'arm64ec-w64-mingw32-dlltool'
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system     = 'windows'
+cpu_family = 'aarch64'
+cpu        = 'aarch64'
+endian     = 'little'

@@ -1,0 +1,68 @@
+diff --git a/Source/Windows/Common/WinAPI/Alloc.cpp b/Source/Windows/Common/WinAPI/Alloc.cpp
+index ded646b..8cebcdd 100644
+--- a/Source/Windows/Common/WinAPI/Alloc.cpp
++++ b/Source/Windows/Common/WinAPI/Alloc.cpp
+@@ -30,7 +30,40 @@ MEM_ADDRESS_REQUIREMENTS MakeWOW64AddressReqs() {
+ } // namespace
+ #endif
+ 
++
++#ifdef _M_ARM64EC
++namespace {
++// ios-wine: FEX's own VM calls (JIT code buffers, lazy lookup-cache commits,
++// callret stacks) must not go through Wine's ARM64EC NtAllocate/Free/Protect
++// wrappers. Those call NotifyMemory*, which takes ThreadCreationMutex, while
++// the compile path already holds CodeInvalidationMutex shared.
++// HandleRWXAccessViolation takes the same two locks in the opposite order,
++// so the process deadlocks (seen in the Steam webhelper). Setting
++// InSyscallCallback makes the wrappers go straight to the syscall.
++struct ScopedNoVMNotify {
++  CHPE_V2_CPU_AREA_INFO* Area;
++  BOOLEAN Prev;
++  ScopedNoVMNotify() {
++    Area = GetCurrentTEB()->ChpeV2CpuAreaInfo;
++    if (Area) {
++      Prev = Area->InSyscallCallback;
++      Area->InSyscallCallback = 1;
++    }
++  }
++  ~ScopedNoVMNotify() {
++    if (Area) {
++      Area->InSyscallCallback = Prev;
++    }
++  }
++};
++} // namespace
++#define FEX_NO_VM_NOTIFY ScopedNoVMNotify NoVMNotifyGuard
++#else
++#define FEX_NO_VM_NOTIFY
++#endif
++
+ DLLEXPORT_FUNC(void*, VirtualAlloc, (void* lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)) {
++  FEX_NO_VM_NOTIFY;
+   NTSTATUS Status;
+ #ifndef _M_ARM64EC
+   if (!lpAddress) {
+@@ -67,12 +100,14 @@ DLLEXPORT_FUNC(SIZE_T, VirtualQuery, (LPCVOID lpAddress, PMEMORY_BASIC_INFORMATI
+ }
+ 
+ DLLEXPORT_FUNC(WINBOOL, VirtualProtect, (void* lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect)) {
++  FEX_NO_VM_NOTIFY;
+   return WinAPIReturn(NtProtectVirtualMemory(NtCurrentProcess(), &lpAddress, &dwSize, flNewProtect, lpflOldProtect));
+ }
+ 
+ DLLEXPORT_FUNC(void*, VirtualAlloc2,
+                (HANDLE Process, void* BaseAddress, SIZE_T Size, ULONG AllocationType, ULONG PageProtection,
+                 MEM_EXTENDED_PARAMETER* ExtendedParameters, ULONG ParameterCount)) {
++  FEX_NO_VM_NOTIFY;
+   NTSTATUS Status;
+ #ifndef _M_ARM64EC
+   if (!BaseAddress) {
+@@ -104,6 +139,7 @@ DLLEXPORT_FUNC(void*, VirtualAlloc2,
+ }
+ 
+ DLLEXPORT_FUNC(WINBOOL, VirtualFree, (void* lpAddress, SIZE_T dwSize, DWORD dwFreeType)) {
++  FEX_NO_VM_NOTIFY;
+   return WinAPIReturn(NtFreeVirtualMemory(NtCurrentProcess(), &lpAddress, &dwSize, dwFreeType));
+ }
+ 

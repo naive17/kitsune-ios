@@ -1,0 +1,441 @@
+/*
+ * Every text the ios-wine app shows, in one file.
+ *
+ * How to edit:
+ *   - Each line reads  "key" = "text";  Change only the text on the right.
+ *   - The left side is the key the app looks up. Leave it exactly as it is,
+ *     even after the text on the right has changed. A key that no longer
+ *     matches makes the app show its original English text.
+ *   - Keep every placeholder (%@, %d, %ld, %lu, %llu, %zu, %s, %.1f, %.2f,
+ *     %.0f, %#lx) and keep them in the same order. %% is a percent sign.
+ *   - \n is a line break; write \" for a double quote inside a text.
+ *   - Spaces at the start or end of a text matter where the app joins it
+ *     with a name or another text; keep them.
+ *   - Texts used on several screens appear once, under Shared.
+ *   - Plurals are made by the code: it adds "s" after "program" when the
+ *     count is not 1.
+ *   - After editing, check the file with:
+ *       plutil -lint src/ios/en.lproj/Localizable.strings
+ *
+ * The app's name on the Home Screen is in InfoPlist.strings, next to this file.
+ */
+
+/* Shared: tabs, buttons and words used on several screens */
+"Library" = "Library";
+"Bottles" = "Bottles";
+"Settings" = "Settings";
+"OK" = "OK";
+"Cancel" = "Cancel";
+"Done" = "Done";
+"Run" = "Run";
+"Install" = "Install";
+"Delete" = "Delete";
+"Save" = "Save";
+"Details" = "Details";
+"Hide Details" = "Hide Details";
+"Enable JIT" = "Enable JIT";
+"Not ready" = "Not ready";
+"Can't Launch" = "Can't Launch";
+"Running" = "Running";
+"Steam" = "Steam";
+"unknown" = "unknown";
+"unknown error" = "unknown error";
+/* sizes */
+"%.1f GB" = "%.1f GB";
+"%llu MB" = "%llu MB";
+
+/* Status header and boot screen */
+"Preparing the runtime" = "Preparing the runtime";
+"Starting…" = "Starting";
+/* %@ is the program's name */
+"Starting %@" = "Starting %@";
+"Ready" = "Ready";
+"Enabling JIT…" = "Enabling JIT";
+"JIT is off." = "JIT is off";
+"JIT didn't turn on. Check StikDebug and try again." = "JIT didn't turn on. Check StikDebug and try again.";
+"JIT needs the ios-wine script. Tap Enable JIT." = "JIT needs the ios-wine script. Tap Enable JIT.";
+"JIT is on. Switch back to ios-wine." = "JIT is on. Switch back to ios-wine.";
+"JIT setup failed. Opening a program restarts ios-wine." = "JIT setup failed. Opening a program restarts ios-wine.";
+"Checking runtime…" = "Checking runtime";
+"Installing runtime…" = "Installing runtime";
+"Creating default bottle…" = "Creating default bottle";
+"Wine runtime missing. Install the full build." = "Wine runtime missing. Install the full build.";
+"Wine runtime incomplete. Install the full build." = "Wine runtime incomplete. Install the full build.";
+/* button; the spaces pad it */
+"  Set Up Default Bottle  " = "  Set Up Default Bottle  ";
+"Wine stopped (code %d). Opening a program restarts ios-wine." = "Wine stopped (code %d). Opening a program restarts ios-wine.";
+"The program exited (code %d). Opening another restarts ios-wine." = "The program exited (code %d). Opening another restarts ios-wine.";
+/* %s is the reason, in English */
+"Wine didn't start: %s" = "Wine didn't start: %s";
+/* followed by the reason */
+"Launch request rejected: " = "Launch request rejected: ";
+"invalid request" = "invalid request";
+"not an executable PE: %s" = "not an executable PE: %s";
+
+/* JIT and launch alerts */
+"Couldn't open StikDebug." = "Couldn't open StikDebug.";
+"StikDebug Unavailable" = "StikDebug Unavailable";
+"Check StikDebug's pairing file and VPN, then try again." = "Check StikDebug's pairing file and VPN, then try again.";
+"The launch request is invalid." = "The launch request is invalid.";
+/* restart alert title; %@ is the program's name */
+"Open %@?" = "Open %@?";
+/* first %@ is the bottle to open, second the running one */
+"ios-wine restarts to open the %@ bottle. Programs running in the %@ bottle will close." = "ios-wine restarts to open the %@ bottle. Programs running in the %@ bottle will close.";
+/* button that restarts ios-wine */
+"Restart" = "Restart";
+"Restarting…" = "Restarting…";
+"Couldn't open StikDebug. Close ios-wine and open it again to continue." = "Couldn't open StikDebug. Close ios-wine and open it again to continue.";
+"Couldn't save the program to open after the restart." = "Couldn't save the program to open after the restart.";
+"JIT Script Missing" = "JIT Script Missing";
+"Reinstall ios-wine." = "Reinstall ios-wine.";
+"The command line is too long." = "The command line is too long.";
+/* stands in for a program without a name, as in "Starting program" */
+"program" = "program";
+
+/* Library */
+"Search programs and games" = "Search programs and games";
+"My programs" = "My programs";
+"Installed by programs" = "Installed by programs";
+"Included with Wine" = "Included with Wine";
+"Games you install in Steam appear here." = "Games you install in Steam appear here.";
+"Tap + to add a portable ZIP, an .exe or an installer." = "Tap + to add a ZIP, an .exe or an installer.";
+"Installing Steam…" = "Installing Steam";
+"in progress" = "in progress";
+"Valve's client, downloaded into this app" = "Steam's client";
+/* a game's size or app id */
+"Steam · %@" = "Steam · %@";
+"Downloading in Steam" = "Downloading in Steam";
+/* %@ is the bottle's name */
+"Installer · %@ bottle" = "Installer · %@ bottle";
+/* architecture, then the bottle's name */
+"%@ · %@ bottle" = "%@ · %@ bottle";
+"32-bit programs aren't supported yet" = "32-bit programs aren't supported yet";
+"Not supported" = "Not supported";
+"Enable JIT First" = "Enable JIT First";
+"Steam can be installed once JIT is on." = "Steam can be installed once JIT is on.";
+/* %@ is the program's name */
+"Run %@?" = "Run %@?";
+"A console program runs on its own. Opening something else afterwards restarts ios-wine." = "Opening something else afterwards restarts ios-wine.";
+/* architecture, bottle, then the arguments line below if any */
+"%@\nBottle: %@%@" = "%@\nBottle: %@%@";
+/* starts on a new line; followed by the arguments */
+"\nArguments: " = "\nArguments: ";
+"Arguments…" = "Arguments";
+"Bottle…" = "Bottle";
+"Arguments" = "Arguments";
+"Command-line arguments" = "Command-line arguments";
+"Choose Bottle" = "Choose Bottle";
+/* followed by the program's name */
+"Delete " = "Delete ";
+"Its files are removed from this app." = "Its files are removed from this app.";
+
+/* Library: importing a program */
+/* followed by the file's name */
+"Importing " = "Importing ";
+"Importing…" = "Importing…";
+"Import failed" = "Import failed";
+"opening %@" = "opening %@";
+"extracting %zu entries" = "extracting %zu entries";
+"%zu entries were skipped as unsafe or unreadable" = "%zu entries were skipped as unsafe or unreadable";
+"the archive contains no runnable .exe" = "the archive contains no runnable .exe";
+"could not copy the file in" = "could not copy the file in";
+"that .exe is not a PE image this build can read" = "that .exe is not a PE image this build can read";
+"unsupported file type .%@" = "unsupported file type .%@";
+
+/* Program architectures */
+"ARM64" = "ARM64";
+"x86-64" = "x86-64";
+"32-bit x86" = "32-bit x86";
+"32-bit ARM" = "32-bit ARM";
+"Unknown" = "Unknown";
+
+/* Bottles */
+"New Bottle" = "New Bottle";
+"Letters, digits, - or _." = "Letters, digits, - or _.";
+/* placeholder for a new bottle's name */
+"name" = "name";
+"Create" = "Create";
+"Creating…" = "Creating…";
+"Each bottle is a separate Windows installation." = "Each bottle is a separate Windows installation.";
+"No bottles yet." = "No bottles yet.";
+/* size, count, then "s" or nothing */
+"%@ · %lu program%@" = "%@ · %lu program%@";
+"Duplicate…" = "Duplicate…";
+"Rename…" = "Rename…";
+"Rename" = "Rename";
+"Duplicate" = "Duplicate";
+"Can't Rename" = "Can't Rename";
+"Can't Create" = "Can't Create";
+"Can't Delete" = "Can't Delete";
+"Can't Duplicate" = "Can't Duplicate";
+"Can't Reset" = "Can't Reset";
+"Resetting…" = "Resetting…";
+"Duplicating…" = "Duplicating…";
+"Size: %@" = "Size: %@";
+"Runtime: %@" = "Runtime: %@";
+"Path: %@" = "Path: %@";
+"Programs" = "Programs";
+"Tools" = "Tools";
+"No programs" = "No programs";
+"Show Drive C in Files" = "Show Drive C in Files";
+"Delete Bottle" = "Delete Bottle";
+"Deleting resets it to a fresh bottle." = "Deleting resets it to a fresh bottle.";
+"Deletes Steam, your games and their saves." = "Deletes Steam, your games and their saves.";
+"Deletes everything installed in it." = "Deletes everything installed in it.";
+/* the Files app's location, as in On My iPhone > ios-wine > Bottles */
+"On My iPhone" = "On My iPhone";
+"Open in Files" = "Open in Files";
+"Delete %@?" = "Delete %@?";
+"This deletes Steam, your games and their saves. Type “delete” to confirm." = "This deletes Steam Bottle. Type “delete” to confirm.";
+/* the word the user types to confirm; keep it the same as in the text above */
+"delete" = "delete";
+"Everything installed in it is removed." = "Everything installed in it is removed.";
+"Deleting…" = "Deleting…";
+
+/* Bottles: tools */
+"Wine Configuration" = "Wine Configuration";
+"Control Panel" = "Control Panel";
+"Registry Editor" = "Registry Editor";
+"Task Manager" = "Task Manager";
+"File Manager" = "File Manager";
+"Command Prompt" = "Command Prompt";
+
+/* Bottles: errors */
+"Use letters, digits, - or _ (at most 64), and not \"default\"." = "Use letters, digits, - or _ (at most 64), and not \"default\".";
+"Use letters, digits, - or _ (at most 64), and not \"default\" or \"Steam\"." = "Use letters, digits, - or _ (at most 64), and not \"default\" or \"Steam\".";
+"A bottle named %@ already exists." = "A bottle named %@ already exists.";
+"There is no bottle named %@." = "There is no bottle named %@.";
+"The runtime tree has no prefix template." = "The runtime tree has no prefix template.";
+"This bottle cannot be deleted." = "This bottle cannot be deleted.";
+"This bottle cannot be renamed." = "This bottle cannot be renamed.";
+"copy failed" = "copy failed";
+"rename failed" = "rename failed";
+
+/* Settings */
+"Display" = "Display";
+"Performance" = "Performance";
+"Controls" = "Controls";
+"Diagnostics" = "Diagnostics";
+"Storage" = "Storage";
+"About" = "About";
+"Applies the next time a program starts." = "Applies the next time a program starts.";
+"Battery caps games at 30 fps and turns on by itself when the phone gets hot." = "Battery caps games at 30 fps and turns on by itself when the phone gets hot.";
+"Applies the next time ios-wine opens. Full logging slows programs down." = "Applies the next time ios-wine opens. Full logging slows programs down.";
+"Keeps the Wine runtime and your settings." = "Keeps the Wine runtime and your settings.";
+"Avoid the Notch" = "Avoid the Notch";
+"Keep windows clear of the notch" = "Keep windows clear of the notch";
+"Fit Games to the Screen" = "Fit Games to the Screen";
+"Match supported games to the screen" = "Match supported games to the screen";
+"Resolution" = "Resolution";
+"Higher is sharper and uses more memory" = "Higher is sharper and uses more memory";
+"Auto" = "Auto";
+"1.7×" = "1.7×";
+"2×" = "2×";
+"2.5×" = "2.5×";
+"3×" = "3×";
+"Other Programs" = "Other Programs";
+"Orientation for programs that aren't games" = "Orientation for programs that aren't games";
+"Portrait" = "Portrait";
+"Landscape" = "Landscape";
+"Power Mode" = "Power Mode";
+"Balanced" = "Balanced";
+"Battery" = "Battery";
+"Frame Rate Limit" = "Frame Rate Limit";
+"Lower saves battery" = "Lower saves battery";
+"None" = "None";
+"Texture Size" = "Texture Size";
+"Smaller uses less memory" = "Smaller uses less memory";
+"Small" = "Small";
+"Medium" = "Medium";
+/* texture size and logging level */
+"Full" = "Full";
+"Battery Mode in Low Power Mode" = "Battery Mode in Low Power Mode";
+"Performance Overlay" = "Performance Overlay";
+"Frame rate and memory while playing" = "Frame rate and memory while playing";
+"Camera Sensitivity" = "Camera Sensitivity";
+"Used in look mode" = "Used in look mode";
+"0.5×" = "0.5×";
+"1×" = "1×";
+"1.5×" = "1.5×";
+"On-Screen Controller" = "On-Screen Controller";
+"For Steam games without a controller" = "For Steam games without a controller";
+"Steam Window" = "Steam Window";
+"When opening Steam; games always start it hidden" = "When opening Steam; games always start it hidden";
+"Visible" = "Visible";
+"Hidden" = "Hidden";
+"Logging" = "Logging";
+"Off" = "Off";
+"Basic" = "Basic";
+"Metal Performance HUD" = "Metal Performance HUD";
+"GPU timings overlay" = "GPU timings overlay";
+"Clear Shader Cache" = "Clear Shader Cache";
+"Calculating…" = "Calculating…";
+"Clear Logs" = "Clear Logs";
+"Remove All Programs and Bottles…" = "Remove All Programs and Bottles…";
+"Not installed" = "Not installed";
+"Version" = "Version";
+/* version, then the build date */
+"%@, built %s" = "%@, built %s";
+"Wine Runtime" = "Wine Runtime";
+"Checking…" = "Checking…";
+"Licenses" = "Licenses";
+"ios-wine (GPL), Wine (LGPL), DXMT, FEX and others; included in the app" = "ios-wine (GPL), Wine (LGPL), DXMT, FEX and others; included in the app";
+"Share Logs" = "Share Logs";
+"No Logs Yet" = "No Logs Yet";
+"Nothing has been logged." = "Nothing has been logged.";
+"Remove Everything?" = "Remove Everything?";
+"This deletes Steam, your games, imported programs and all bottles. Type “erase” to confirm." = "This deletes Steam, your games, imported programs and all bottles. Type “erase” to confirm.";
+/* the word the user types to confirm; keep it the same as in the text above */
+"erase" = "erase";
+"Remove" = "Remove";
+"Removing Everything" = "Removing Everything";
+"Removing…" = "Removing…";
+/* followed by the reason */
+"Removed, but the default bottle couldn't be recreated: " = "Removed, but the default bottle couldn't be recreated: ";
+
+/* Install Steam */
+/* also the Library row */
+"Install Steam" = "Install Steam";
+"Packages" = "Packages";
+"Checking the latest version…" = "Checking the latest version…";
+"Try Again" = "Try Again";
+"Preparing the Steam bottle…" = "Preparing the Steam bottle…";
+"Finishing…" = "Finishing…";
+/* %@ is a package's title, below */
+"Downloading %@…" = "Downloading %@…";
+"Unpacking %@…" = "Unpacking %@…";
+"Steam is installed." = "Steam is installed.";
+"Stopped. Packages downloaded so far are kept." = "Stopped. Packages downloaded so far are kept.";
+"Stopping…" = "Stopping…";
+/* version number, then date */
+"Version %@, built %@. Each package is checked against Valve's checksums." = "Version %@, built %@. Each package is checked against Valve's checksums.";
+"Steam for Windows" = "Steam for Windows";
+/* %@ is the download size */
+"%@ from Valve's update servers (client-update.akamai.steamstatic.com)" = "%@ from Valve's update servers (client-update.akamai.steamstatic.com)";
+"Installs into the Steam bottle" = "Installs into the Steam bottle";
+"Created if it doesn't exist" = "Created if it doesn't exist";
+"Also sets up" = "Also sets up";
+"Windows 10 mode, RSA crypto providers, Common Controls 6" = "Windows 10 mode, RSA crypto providers, Common Controls 6";
+/* %lu is the number of packages */
+"%lu, as Steam's own updater downloads them" = "%lu, as Steam's own updater downloads them";
+
+/* Install Steam: package titles */
+"Steam launcher" = "Steam launcher";
+"Steam client" = "Steam client";
+"Web browser engine" = "Web browser engine";
+"Web helper" = "Web helper";
+"Media codecs" = "Media codecs";
+"Support libraries" = "Support libraries";
+"Controller support" = "Controller support";
+"Controller support files" = "Controller support files";
+"Steam interface" = "Steam interface";
+"Interface sounds" = "Interface sounds";
+"Interface videos" = "Interface videos";
+"Shared files" = "Shared files";
+"Images" = "Images";
+"High-resolution images" = "High-resolution images";
+"Other resources" = "Other resources";
+"Translations" = "Translations";
+"English text" = "English text";
+"Big Picture images" = "Big Picture images";
+
+/* Install Steam: errors */
+"download failed" = "download failed";
+/* status code, then the file's name */
+"HTTP %ld for %@" = "HTTP %ld for %@";
+"Couldn't read Steam's version list. Try again." = "Couldn't read Steam's version list. Try again.";
+/* package title, then a count */
+"%@: %zu files could not be unpacked." = "%@: %zu files could not be unpacked.";
+"An installation is already running." = "An installation is already running.";
+"Steam is already installed." = "Steam is already installed.";
+"A download was damaged. Try again." = "A download was damaged. Try again.";
+"Couldn't finish the install. Try again." = "Couldn't finish the install. Try again.";
+"The download was incomplete. Try again." = "The download was incomplete. Try again.";
+/* a registry file's name */
+"%@ is missing" = "%@ is missing";
+"The bottle has no registry." = "The bottle has no registry.";
+/* a DLL's name */
+"The runtime tree has no %@." = "The runtime tree has no %@.";
+
+/* Steam launch errors */
+"Steam is not installed in this app's library (Documents/Apps/Steam/steam.exe)." = "Steam is not installed in this app's library (Documents/Apps/Steam/steam.exe).";
+/* %@ is the app id */
+"Steam app %@ is not installed in this library." = "Steam app %@ is not installed in this library.";
+/* %@ is the game's name */
+"%@ is not fully installed yet. Finish it in Steam first." = "%@ is not fully installed yet. Finish it in Steam first.";
+
+/* Launch request errors (a program started from a Mac or by Play) */
+"request must be a JSON object" = "request must be a JSON object";
+"invalid bottle name" = "invalid bottle name";
+"exe must be a relative path under Documents/Apps" = "exe must be a relative path under Documents/Apps";
+"invalid executable path component" = "invalid executable path component";
+"executable escapes Apps" = "executable escapes Apps";
+"bottle path contains a symlink" = "bottle path contains a symlink";
+"executable does not exist" = "executable does not exist";
+"invalid argument array" = "invalid argument array";
+"arguments must be strings without NUL bytes" = "arguments must be strings without NUL bytes";
+"arguments exceed 16 KB" = "arguments exceed 16 KB";
+"env must be a JSON object of at most 64 entries" = "env must be a JSON object of at most 64 entries";
+"env names must be [A-Za-z0-9_], 1-128 chars" = "env names must be [A-Za-z0-9_], 1-128 chars";
+"env values must be strings without NUL, <=4096 chars" = "env values must be strings without NUL, <=4096 chars";
+
+/* Session bar: button names read by VoiceOver, and shown when an icon is missing */
+"library" = "library";
+/* the pointer mode button */
+"mode" = "mode";
+/* pointer modes */
+"tap" = "tap";
+"pad" = "pad";
+"look" = "look";
+"controller" = "controller";
+/* keyboard */
+"kbd" = "kbd";
+"esc" = "esc";
+"tab" = "tab";
+"ctrl" = "ctrl";
+"alt" = "alt";
+/* reset zoom */
+"1:1" = "1:1";
+/* running programs */
+"apps" = "apps";
+/* battery mode */
+"eco" = "eco";
+"hide" = "hide";
+
+/* Keyboard bar */
+"Esc" = "Esc";
+"Tab" = "Tab";
+"Ctrl" = "Ctrl";
+"Alt" = "Alt";
+"Hide" = "Hide";
+"Hide keyboard" = "Hide keyboard";
+
+/* On-screen controller */
+"A" = "A";
+"B" = "B";
+"X" = "X";
+"Y" = "Y";
+"LB" = "LB";
+"LT" = "LT";
+"RB" = "RB";
+"RT" = "RT";
+"View" = "View";
+"Menu" = "Menu";
+
+/* Running programs */
+"Quit all" = "Quit all";
+"No windows yet." = "No windows yet.";
+"Swipe left to close or force quit." = "Swipe left to close or force quit.";
+/* process id, then the window's handle */
+"pid %@ · window %#lx" = "pid %@ · window %#lx";
+"Close" = "Close";
+"Force Quit" = "Force Quit";
+/* %@ is the window's title */
+"Force Quit %@?" = "Force Quit %@?";
+"Unsaved progress is lost." = "Unsaved progress is lost.";
+
+/* Performance overlay */
+/* frame rate, the GPU part below, memory used, memory free */
+"%@ fps%@ · %.2f GB · %llu MB free" = "%@ fps%@ · %.2f GB · %llu MB free";
+/* added after fps when GPU timing is on */
+" · GPU %.0f%%" = " · GPU %.0f%%";

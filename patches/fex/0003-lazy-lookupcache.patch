@@ -1,0 +1,328 @@
+diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
+index a39c9a1..f3e5291 100644
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -397,10 +397,31 @@ void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread)
+   Thread->FrontendDecoder = fextl::make_unique<FEXCore::Frontend::Decoder>(Thread);
+   Thread->PassManager = fextl::make_unique<FEXCore::IR::PassManager>(this);
+ 
+-  Thread->CurrentFrame->State.L1Pointer = Thread->LookupCache->GetL1Pointer();
+-  Thread->CurrentFrame->State.L1Mask = Thread->LookupCache->GetScaledL1PointerMask();
+-
+-  Thread->CurrentFrame->Pointers.L2Pointer = Thread->LookupCache->GetPagePointer();
++#ifdef ARCHITECTURE_arm64ec
++  // ios-wine: do NOT take the LookupCache's reservation here (about 24 MB per
++  // thread with this port's sizes, 272 MB upstream).
++  //
++  // ThreadInit() in Source/Windows/ARM64EC/Module.cpp runs for EVERY Windows
++  // thread in the process, x86 or not. On a native ARM64EC workload none of
++  // them ever executes an x86 instruction, and on iOS address space is the
++  // scarce resource.
++  //
++  // Zero is the "not allocated" marker and it has to be written explicitly:
++  // CreateThread() may have memcpy'd a donor CPUState in, which would carry
++  // another thread's pointers.
++  //
++  // The contract with generated code: the dispatcher's loop top tests
++  // State.L1Pointer and branches to the compile path when it is zero, so the
++  // L2 load below it is never reached with a null Pointers.L2Pointer.
++  // ContextImpl::CompileBlock/CompileSingleStep then call
++  // LookupCache::EnsureAllocated(), which allocates and republishes all three
++  // values before any translated code runs.
++  Thread->CurrentFrame->State.L1Pointer = 0;
++  Thread->CurrentFrame->State.L1Mask = 0;
++  Thread->CurrentFrame->Pointers.L2Pointer = 0;
++#else
++  Thread->LookupCache->EnsureAllocated(Thread);
++#endif
+ 
+   Dispatcher->InitThreadPointers(Thread);
+ 
+@@ -847,6 +868,10 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
+   FEXCORE_PROFILE_SCOPED("CompileBlock");
+   FEXCORE_PROFILE_ACCUMULATION(Thread, AccumulatedJITTime);
+ 
++  // ios-wine: first x86 code on this thread -- take the lookup cache backing
++  // now and publish L1Pointer/L1Mask/L2Pointer before anything can be executed.
++  Thread->LookupCache->EnsureAllocated(Thread);
++
+   static_cast<ContextImpl*>(Thread->CTX)->SyscallHandler->PreCompile();
+ 
+   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
+@@ -949,6 +974,10 @@ uintptr_t ContextImpl::CompileSingleStep(FEXCore::Core::CpuStateFrame* Frame, ui
+   FEXCORE_PROFILE_SCOPED("CompileSingleStep");
+   auto Thread = Frame->Thread;
+ 
++  // ios-wine: as CompileBlock. This path does not go through FindBlock, so it
++  // needs its own EnsureAllocated.
++  Thread->LookupCache->EnsureAllocated(Thread);
++
+   static_cast<ContextImpl*>(Thread->CTX)->SyscallHandler->PreCompile();
+ 
+   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+index 53ea97f..c18d2c4 100644
+--- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+@@ -174,6 +174,16 @@ void Dispatcher::EmitDispatcher() {
+ 
+   ARMEmitter::ForwardLabel NoBlock;
+ 
++#ifdef ARCHITECTURE_arm64ec
++  // ios-wine: the per-thread LookupCache is allocated on first use, so
++  // State.L1Pointer / Pointers.L2Pointer are zero until this thread has run x86
++  // code. Two instructions here keep the L2 load below from dereferencing null;
++  // the compile path allocates the cache and republishes both before returning.
++  // See Core.cpp::InitializeCompiler and LookupCache::EnsureAllocated.
++  ldr(TMP1, STATE_PTR(CpuStateFrame, State.L1Pointer));
++  (void)cbz(ARMEmitter::Size::i64Bit, TMP1, &NoBlock);
++#endif
++
+   if (DisableL2Cache()) {
+     (void)b(&NoBlock);
+   } else {
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.cpp b/FEXCore/Source/Interface/Core/LookupCache.cpp
+index 0b23030..271aca3 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.cpp
++++ b/FEXCore/Source/Interface/Core/LookupCache.cpp
+@@ -26,6 +26,29 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
+ 
+   TotalCacheSize = ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE + MAX_L1_SIZE;
+ 
++  VirtualMemSize = ctx->Config.VirtualMemSize;
++
++  if (DynamicL1Cache()) {
++    // Start at minimum size when dynamic.
++    L1PointerMask = MIN_L1_ENTRIES - 1;
++  } else {
++    // Start at maximum instead.
++    L1PointerMask = MAX_L1_ENTRIES - 1;
++  }
++
++  // ios-wine: the reservation below is NOT taken here.
++  //
++  // Every Windows thread runs FEX's ThreadInit, which unconditionally builds a
++  // full emulator thread, one LookupCache each. A native ARM64EC process never
++  // executes a single x86 instruction, so on iOS, where address space is the
++  // scarce resource, every one of them would be reserved for nothing.
++  //
++  // AllocateCache() below does the reservation on the first block lookup. See
++  // the ARM64EC note in Core.cpp::InitializeCompiler for how the generated code
++  // is kept correct across that transition.
++}
++
++void LookupCache::AllocateCache(FEXCore::Core::InternalThreadState* Thread) {
+   // Block cache ends up looking like this
+   // PageMemoryMap[VirtualMemoryRegion >> 12]
+   //       |
+@@ -38,7 +61,24 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
+   // Allocate a region of memory that we can use to back our block pointers
+   // We need one pointer per page of virtual memory
+   // At 64GB of virtual memory this will allocate 128MB of virtual memory space
+-  PagePointer = reinterpret_cast<uintptr_t>(FEXCore::Allocator::VirtualAlloc(TotalCacheSize, false, false));
++  // ios-wine: COMMIT up front (third arg), instead of relying on overcommit.
++  //
++  // Upstream reserves this region and lets it fault in: MarkOvercommitRange()
++  // registers it, and FEX's own ARM64EC exception handler
++  // (ResetToConsistentState -> OvercommitTracker::HandleAccessViolation)
++  // commits the page and resumes. That path does not resolve here. The device
++  // faults reading L1 at a PROT_NONE page, and HandleAccessViolation returns
++  // TRUE whether or not its VirtualAlloc(MEM_COMMIT) actually succeeded, so a
++  // failed commit becomes NtContinueNative onto the same instruction -- an
++  // endless fault loop. Observed as a live process making no progress: the
++  // input drain thread ticking, heartbeats steady at 2490 MB, and not one line
++  // of guest output.
++  //
++  // Committing at allocation removes the dependency on that mechanism
++  // entirely. It costs address space, not RSS -- these pages are zero-fill on
++  // demand and most are never touched -- and the lazy-allocation change above
++  // means only a thread that actually runs x86 code pays it at all.
++  PagePointer = reinterpret_cast<uintptr_t>(FEXCore::Allocator::VirtualAlloc(TotalCacheSize, false, true));
+   LOGMAN_THROW_A_FMT(PagePointer != -1ULL, "Failed to allocate PagePointer");
+ 
+   // Disable THP on the Lookup cache.
+@@ -46,7 +86,7 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
+ 
+   FEXCore::Allocator::VirtualName("FEXMem_Lookup", reinterpret_cast<void*>(PagePointer),
+                                   ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE);
+-  CTX->SyscallHandler->MarkOvercommitRange(PagePointer, TotalCacheSize);
++  ctx->SyscallHandler->MarkOvercommitRange(PagePointer, TotalCacheSize);
+ 
+   // Allocate our memory backing our pages
+   // We need 32KB per guest page (One pointer per byte)
+@@ -59,18 +99,24 @@ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
+   L1Pointer = PageMemory + CODE_SIZE;
+   FEXCore::Allocator::VirtualName("FEXMem_Lookup_L1", reinterpret_cast<void*>(L1Pointer), MAX_L1_SIZE);
+ 
+-  VirtualMemSize = ctx->Config.VirtualMemSize;
++  // Publish the newly valid pointers into the CPU state. Generated code reads
++  // all three of these directly; until this point State.L1Pointer was zero,
++  // which the dispatcher treats as "no cache, go compile".
++  PublishPointers(Thread);
++}
+ 
+-  if (DynamicL1Cache()) {
+-    // Start at minimum size when dynamic.
+-    L1PointerMask = MIN_L1_ENTRIES - 1;
+-  } else {
+-    // Start at maximum instead.
+-    L1PointerMask = MAX_L1_ENTRIES - 1;
+-  }
++void LookupCache::PublishPointers(FEXCore::Core::InternalThreadState* Thread) {
++  Thread->CurrentFrame->State.L1Pointer = L1Pointer;
++  Thread->CurrentFrame->State.L1Mask = GetScaledL1PointerMask();
++  Thread->CurrentFrame->Pointers.L2Pointer = PagePointer;
+ }
+ 
+ LookupCache::~LookupCache() {
++  if (!PagePointer) {
++    // Never allocated, nothing to release.
++    return;
++  }
++
+   FEXCore::Allocator::VirtualFree(reinterpret_cast<void*>(PagePointer), TotalCacheSize);
+   ctx->SyscallHandler->UnmarkOvercommitRange(PagePointer, TotalCacheSize);
+ 
+@@ -79,17 +125,33 @@ LookupCache::~LookupCache() {
+ }
+ 
+ void LookupCache::ClearL2Cache(const FEXCore::LookupCacheBaseLockToken& lk) {
++  if (!PagePointer) {
++    return;
++  }
++
+   // Clear out the page memory
+   // PagePointer and PageMemory are sequential with each other. Clear both at once.
++  // ios-wine: Recommit=true. VirtualDontNeed's two implementations do NOT
++  // agree. On Linux it is madvise(MADV_DONTNEED), which keeps the mapping and
++  // zero-fills on next touch, so the flag is ignored and `false` costs
++  // nothing. On Windows it is VirtualFree(MEM_DECOMMIT), which really does
++  // remove the backing -- and with Recommit=false the pages are left
++  // PAGE_NOACCESS. Generated code reads L1/L2 through raw pointers with no
++  // validity check, so the next dispatch faults.
+   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer),
+-                                      ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE, false);
++                                      ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE, true);
+   AllocateOffset = 0;
+ }
+ 
+ void LookupCache::ClearThreadLocalCaches(const LookupCacheWriteLockToken&) {
+   // TODO: Preserve code cache entries?
+   // Clear L1 and L2 by clearing the full cache.
+-  FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
++  if (PagePointer) {
++    // ios-wine: Recommit=true -- see ClearL2Cache above. This one covers the
++    // whole reservation INCLUDING the L1 table, so leaving it decommitted is
++    // what the device fault at L1+0x3b08 on a PROT_NONE page actually was.
++    FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, true);
++  }
+ 
+   // TODO: Rename this member to avoid confusion with code caching
+   CachedCodePages.clear();
+diff --git a/FEXCore/Source/Interface/Core/LookupCache.h b/FEXCore/Source/Interface/Core/LookupCache.h
+index bf958d8..c513ffb 100644
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -166,6 +166,18 @@ public:
+   LookupCache(FEXCore::Context::ContextImpl* CTX);
+   ~LookupCache();
+ 
++  // ios-wine: the backing reservation (about 24 MB per thread with this port's
++  // sizes) is taken on first use rather than at thread creation.
++  // Everything that can touch L1/L2 must go through here first. Generated code
++  // does not, so the dispatcher branches to the compile path whenever
++  // State.L1Pointer is still zero -- see Dispatcher.cpp.
++  void EnsureAllocated(FEXCore::Core::InternalThreadState* Thread) {
++    if (PagePointer) [[likely]] {
++      return;
++    }
++    AllocateCache(Thread);
++  }
++
+   // Swaps out the underlying GuestToHostMap and clears all associated caches.
+   // This interface requires the previous CodeBuffer to be provided despite not using it. This ensures the shared write lock is still valid.
+   void ChangeGuestToHostMapping([[maybe_unused]] CPU::CodeBuffer& Prev, GuestToHostMap& NewMap, const LookupCacheWriteLockToken& lk) {
+@@ -174,6 +186,8 @@ public:
+   }
+ 
+   uintptr_t FindBlock(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) {
++    EnsureAllocated(Thread);
++
+     // Try L1, no lock needed
+     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1PointerMask];
+     if (L1Entry.GuestCode == Address) {
+@@ -257,7 +271,10 @@ public:
+           // Madvise the entries that we are dropping. Gives the memory back to the OS.
+           LookupCacheEntry* FirstZeroL1Entry = &reinterpret_cast<LookupCacheEntry*>(L1Pointer)[CurrentL1Entries];
+           size_t ZeroMemorySize = (MAX_L1_ENTRIES - CurrentL1Entries) * sizeof(LookupCacheEntry);
+-          FEXCore::Allocator::VirtualDontNeed(FirstZeroL1Entry, ZeroMemorySize, false);
++          // ios-wine: Keep dropped L1 pages mapped and zero-filled. Generated
++          // lookup blocks can briefly retain the preceding mask; decommitting
++          // here turns that harmless stale lookup into a protection fault.
++          FEXCore::Allocator::VirtualDontNeed(FirstZeroL1Entry, ZeroMemorySize, true);
+ 
+           // Update the thread's L1 pointer mask to increase how much cache it uses.
+           // Since we're in C-code, this is safe to update here.
+@@ -286,6 +303,8 @@ public:
+ 
+   // Adds to Guest -> Host code mapping
+   void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, const fextl::vector<uint64_t>& CodePages, void* HostCode) {
++    EnsureAllocated(Thread);
++
+     std::optional<FEXCore::SHMStats::AccumulationBlock<uint64_t>> LockTime(
+       Thread->ThreadStats ? &Thread->ThreadStats->AccumulatedCacheWriteLockTime : nullptr);
+     auto lk = Shared->AcquireWriteLock();
+@@ -300,6 +319,11 @@ public:
+ 
+   // Invalidates L1/L2 for a given guest block
+   void InvalidateCache(uint64_t Address, const LookupCacheWriteLockToken& lk) {
++    if (!PagePointer) {
++      // Nothing has ever been cached on this thread.
++      return;
++    }
++
+     // Do L1
+     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1PointerMask];
+     if (L1Entry.GuestCode == Address) {
+@@ -331,6 +355,12 @@ public:
+ 
+   // Invalidates all L1/L2 entries for all guest block that intersect the given range
+   bool InvalidateCacheRange(uint64_t Start, uint64_t Length) {
++    if (!PagePointer) {
++      // Nothing has ever been cached on this thread. CachedCodePages is empty
++      // in this state, so this is a fast path rather than a behaviour change.
++      return false;
++    }
++
+     auto lk = Shared->AcquireWriteLock();
+ 
+     auto lower = CachedCodePages.lower_bound(Start >> 12);
+@@ -380,6 +410,11 @@ public:
+   }
+ 
+ private:
++  // Takes the backing reservation and publishes the resulting pointers into
++  // Thread's CPU state. Out of line: this runs once per thread at most.
++  void AllocateCache(FEXCore::Core::InternalThreadState* Thread);
++  void PublishPointers(FEXCore::Core::InternalThreadState* Thread);
++
+   void CacheBlockMapping(uint64_t Address, const GuestToHostMap::BlockEntry& Entry, bool L1Only, const LookupCacheBaseLockToken& lk) {
+     for (const auto& CodePage : Entry.CodePages) {
+       CachedCodePages[CodePage >> 12].insert(Address);
+@@ -440,10 +475,12 @@ private:
+   // Maps from a page index to all blocks in the page that have at some point been fetched into L1/L2
+   fextl::map<uint64_t, fextl::robin_set<uint64_t>> CachedCodePages;
+ 
+-  uintptr_t PagePointer;
+-  uintptr_t PageMemory;
+-  uintptr_t L1Pointer;
+-  uintptr_t L1PointerMask;
++  // Zero until AllocateCache() runs. PagePointer is the "is this thread's cache
++  // real yet" flag; every path that dereferences any of the three checks it.
++  uintptr_t PagePointer {};
++  uintptr_t PageMemory {};
++  uintptr_t L1Pointer {};
++  uintptr_t L1PointerMask {};
+ 
+   size_t TotalCacheSize;
+ 

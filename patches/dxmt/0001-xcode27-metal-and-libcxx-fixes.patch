@@ -1,0 +1,62 @@
+diff --git a/include/ftl.hpp b/include/ftl.hpp
+index c20f48f..63ecef2 100644
+--- a/include/ftl.hpp
++++ b/include/ftl.hpp
+@@ -3,6 +3,7 @@
+ #include <utility>
+ #include <vector>
+ #include <algorithm>
++#include <iterator>
+ 
+ template <class Tp, typename Func>
+ auto operator | (const std::vector<Tp> &vec, Func &&f)  {
+diff --git a/src/airconv/shaders/air_tessellation.metal b/src/airconv/shaders/air_tessellation.metal
+index 56ba86e..aebb685 100644
+--- a/src/airconv/shaders/air_tessellation.metal
++++ b/src/airconv/shaders/air_tessellation.metal
+@@ -150,7 +150,18 @@ struct TessMeshWorkload {
+ 
+ int
+ get_next_index(threadgroup int *out_count) {
+-  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed), __METAL_MEMORY_SCOPE_THREADGROUP__);
++  // The Xcode 27 Metal compiler (metalfe-32023.921) added a 5th memory-flags
++  // parameter to this internal builtin; see the toolchain's <metal_atomic>,
++  // which now calls it as (ptr, val, order, scope, flags).
++  // __METAL_MEMORY_FLAGS_NONE__ is the neutral value the public wrappers pass.
++#if defined(__METAL_MEMORY_FLAGS_NONE__)
++  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed),
++                                           __METAL_MEMORY_SCOPE_THREADGROUP__,
++                                           __METAL_MEMORY_FLAGS_NONE__);
++#else
++  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed),
++                                           __METAL_MEMORY_SCOPE_THREADGROUP__);
++#endif
+ }
+ 
+ template <partitioning partition>
+diff --git a/src/util/sha1/sha1_util.hpp b/src/util/sha1/sha1_util.hpp
+index 8197c5e..df80989 100644
+--- a/src/util/sha1/sha1_util.hpp
++++ b/src/util/sha1/sha1_util.hpp
+@@ -12,6 +12,7 @@
+ 
+ #include <cstdint>
+ #include <cstring>
++#include <functional>
+ #include <string>
+ #include "./sha1.h"
+ 
+diff --git a/src/airconv/darwin/meson.build b/src/airconv/darwin/meson.build
+index f3e39ec..a47d8c7 100644
+--- a/src/airconv/darwin/meson.build
++++ b/src/airconv/darwin/meson.build
+@@ -19,6 +19,9 @@ if native_llvm_path.startswith('/usr/local/opt')
+     llvm_ld_flags_darwin,
+     '/usr/local/opt/zstd/lib/libzstd.a', '/usr/local/opt/llvm@15/lib/libunwind.a'
+   ]
++elif import('fs').exists('/opt/homebrew/opt/zstd/lib/libzstd.a')
++  # ios-wine: Apple-silicon Homebrew (brew's llvm@15 references zstd)
++  llvm_ld_flags_darwin = [ llvm_ld_flags_darwin, '/opt/homebrew/opt/zstd/lib/libzstd.a' ]
+ endif
+ 
+ airconv_lib_darwin = static_library('airconv', airconv_src,

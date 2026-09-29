@@ -1,0 +1,8 @@
+/*
+ * Texts iOS reads from the app's Info.plist. Change only the text on the
+ * right; the left side is the Info.plist key. The app's other texts are in
+ * Localizable.strings, next to this file.
+ */
+
+/* The app's name on the Home Screen */
+"CFBundleDisplayName" = "ios-wine";

@@ -1,0 +1,24 @@
+--- a/Source/Windows/Common/Logging.cpp
++++ b/Source/Windows/Common/Logging.cpp
+@@ -4,6 +4,7 @@
+ #include <FEXCore/Utils/LogManager.h>
+ 
+ #include <cstdio>
++#include <cstdlib>
+ #include <ntstatus.h>
+ #include <windef.h>
+ #include <winternl.h>
+@@ -14,6 +15,13 @@
+ FILE* LogFile;
+ 
+ static void MsgHandler(LogMan::DebugLevels Level, const char* Message) {
++  /* ios-wine: debug-level lines ("Handled unaligned atomic", every exception
++   * FEX sees) were 84% of the Wine log -- hundreds of MB per Steam run, all
++   * written from hot paths. Keep them behind IOSWINE_FEX_DEBUGLOG=1. */
++  static const bool DebugOn = getenv("IOSWINE_FEX_DEBUGLOG") != nullptr;
++  if (Level == LogMan::DEBUG && !DebugOn) {
++    return;
++  }
+   const auto Output = fextl::fmt::format("{} {:X} {}\n", LogMan::DebugLevelStr(Level), GetCurrentThreadId(), Message);
+   if (WineDbgOut) {
+     WineDbgOut(Output.c_str());

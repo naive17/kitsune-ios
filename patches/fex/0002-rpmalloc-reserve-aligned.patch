@@ -1,0 +1,98 @@
+diff --git a/rpmalloc/rpmalloc.c b/rpmalloc/rpmalloc.c
+index 20ab541..2077ded 100644
+--- a/rpmalloc/rpmalloc.c
++++ b/rpmalloc/rpmalloc.c
+@@ -59,6 +59,17 @@
+ #if PLATFORM_WINDOWS
+ #include <windows.h>
+ #include <fibersapi.h>
++/* ios-wine: os_mmap() reserves aligned through VirtualAlloc2 (see there).
++   mingw-w64 hides the prototype behind NTDDI_WIN10_RS4 and this file does not
++   raise NTDDI_VERSION; MEM_ADDRESS_REQUIREMENTS and the parameter-type enum are
++   unconditional in winnt.h, so only this declaration is missing. Declared here
++   rather than by raising NTDDI_VERSION, which would change every other header
++   decision this file makes. FEX defines the symbol itself in
++   Source/Windows/Common/WinAPI/Alloc.cpp; this module imports only ntdll. */
++#if !defined(NTDDI_WIN10_RS4) || (NTDDI_VERSION < NTDDI_WIN10_RS4)
++WINBASEAPI PVOID WINAPI VirtualAlloc2(HANDLE Process, PVOID BaseAddress, SIZE_T Size, ULONG AllocationType, ULONG PageProtection,
++                                      MEM_EXTENDED_PARAMETER* ExtendedParameters, ULONG ParameterCount);
++#endif
+ #if defined(DYNAMIC_TLS_NO_FLS)
+ static DWORD tls_key = 0;
+ #else
+@@ -181,11 +192,23 @@ madvise(caddr_t, size_t, int);
+ #define MEDIUM_PAGE_SIZE_SHIFT 22
+ #define MEDIUM_PAGE_SIZE (1 << MEDIUM_PAGE_SIZE_SHIFT)
+ #define MEDIUM_PAGE_MASK (~((uintptr_t)MEDIUM_PAGE_SIZE - 1))
+-#define LARGE_PAGE_SIZE_SHIFT 26
++#define LARGE_PAGE_SIZE_SHIFT 24   /* ios-wine: 16 MB (was 64 MB); an 8 MB block still fits one per page */
+ #define LARGE_PAGE_SIZE (1 << LARGE_PAGE_SIZE_SHIFT)
+ #define LARGE_PAGE_MASK (~((uintptr_t)LARGE_PAGE_SIZE - 1))
+ 
+-#define SPAN_SIZE (256 * 1024 * 1024)
++/* ios-wine: 16 MB spans, not 256 MB.
++ *
++ * A span is reserved, not committed, so upstream's 256 MB costs nothing on a
++ * desktop. Here every span is a CONTIGUOUS HOLE in the app's address space,
++ * and the device fails on contiguity, not on total. Steam runs ~140 emulated
++ * threads and each heap reserves about two spans: at 64 MB that is ~18 GB of
++ * the ~120 GB of usable VA, and a Steam game install (16 more download
++ * threads) ran the address space dry.
++ *
++ * heap_get_span() divides SPAN_SIZE by LARGE_PAGE_SIZE, so a span must hold at
++ * least one large page; LARGE_PAGE_SIZE_SHIFT above is lowered to 24 (16 MB)
++ * for that. */
++#define SPAN_SIZE (16 * 1024 * 1024)
+ #define SPAN_MASK (~((uintptr_t)(SPAN_SIZE - 1)))
+ 
+ ////////////
+@@ -785,8 +808,47 @@ os_mmap(size_t size, size_t alignment, size_t* offset, size_t* mapped_size) {
+ #else
+ 	DWORD do_commit = MEM_COMMIT;
+ #endif
+-	void* ptr =
+-	    VirtualAlloc(0, map_size, (os_huge_pages ? MEM_LARGE_PAGES : 0) | MEM_RESERVE | do_commit | MEM_TOP_DOWN, PAGE_READWRITE);
++	const DWORD ios_flags = (os_huge_pages ? MEM_LARGE_PAGES : 0) | MEM_RESERVE | do_commit | MEM_TOP_DOWN;
++	void* ptr = 0;
++	/*
++	 * ios-wine: reserve ALIGNED instead of reserving size+alignment and keeping
++	 * the slack.
++	 *
++	 * heap_get_span() asks for SPAN_SIZE with alignment SPAN_SIZE, so the plain
++	 * call below reserves 2*SPAN_SIZE and never releases the padding. Measured
++	 * on the harness against the x86-64 D3D11 test: two 512 MB reservations per
++	 * emulated thread, plus SPAN_SIZE of slack on every huge allocation.
++	 *
++	 * On a desktop that is free -- address space is the one resource nobody
++	 * counts. On iOS it is the binding constraint, and what runs out is not the
++	 * total but the CONTIGUITY: a 4 GB reservation succeeded at startup on the
++	 * phone and a later 512 MB one failed in the same process. Halving the
++	 * request halves the hole that still has to exist.
++	 *
++	 * NtAllocateVirtualMemoryEx takes an alignment directly (Wine implements it
++	 * in get_extended_params) and satisfies it by SEARCHING for an aligned hole,
++	 * so it needs a hole of `size`, not `size + alignment`. VirtualAlloc2 is
++	 * FEX's own shim over it. Falls through to the old path if it is refused --
++	 * this must never be the reason an allocation fails.
++	 */
++	if (alignment > global_config.page_size) {
++		MEM_ADDRESS_REQUIREMENTS AddrReq;
++		MEM_EXTENDED_PARAMETER ExtParam;
++		memset(&AddrReq, 0, sizeof(AddrReq));
++		memset(&ExtParam, 0, sizeof(ExtParam));
++		AddrReq.Alignment = alignment;
++		ExtParam.Type = MemExtendedParameterAddressRequirements;
++		ExtParam.Pointer = &AddrReq;
++		ptr = VirtualAlloc2(0, 0, size, ios_flags, PAGE_READWRITE, &ExtParam, 1);
++		if (ptr) {
++			/* Exact fit. Clearing alignment skips the padding fixup below, which
++			   would otherwise walk the pointer off the front of the region. */
++			map_size = size;
++			alignment = 0;
++		}
++	}
++	if (!ptr)
++		ptr = VirtualAlloc(0, map_size, ios_flags, PAGE_READWRITE);
+ #else
+ 	int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_UNINITIALIZED;
+ #if defined(__APPLE__) && !TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR

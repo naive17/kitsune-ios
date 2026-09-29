@@ -1,0 +1,20 @@
+# Sources, toolchains and build products.
+/third_party
+/build
+/out
+/toolchains
+
+# Staged runtime, test binaries and device session state.
+/.deploy
+
+# npm install (husky).
+node_modules/
+
+# Generated from ioswine-device.yml by xcodegen.
+/ioswine-device.xcodeproj/
+
+*.log
+.env
+local.env
+.DS_Store
+__pycache__/

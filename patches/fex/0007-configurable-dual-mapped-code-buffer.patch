@@ -1,0 +1,56 @@
+diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+@@ -9,6 +9,8 @@
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/MathUtils.h>
+ 
++#include <cstdlib>
++
+ #ifndef _WIN32
+ #include <FEXCore/Utils/PrctlUtils.h>
+ #endif
+@@ -167,6 +169,34 @@
+   return Buffer;
+ }
+ 
++/*
++ * ios-wine: how much arena a dual-mapped guest takes up front.
++ *
++ * Whole-buffer-at-once (below) is right, but 128MB each is expensive when the
++ * arena is 1GB and Steam runs three guests: 384MB, ~46% of the measured 838MB
++ * high-water, reserved against a demand FEX's own note here records as never
++ * exceeding the 16MB initial size in a 200k-iteration guest. Every MB of arena
++ * also costs 128 vm_map entries (64 pages x the RX mapping and its alias).
++ *
++ * IOSWINE_FEX_CODE_MB sizes it, clamped to 16..128MB; unset, it is 128MB
++ * (MAX_CODE_SIZE). The app's Steam launch profile sets 48
++ * (src/ios/launch_profile.h).
++ *
++ * A guest that genuinely fills a smaller buffer still grows through
++ * StartLargerCodeBuffer up to MAX_CODE_SIZE; it strands the first buffer, which
++ * is why this is a reservation size and not a cap.
++ */
++static size_t DualMappedCodeSize() {
++  static size_t Size = [] {
++    const char *Env = getenv("IOSWINE_FEX_CODE_MB");
++    size_t MB = Env ? static_cast<size_t>(atoi(Env)) : 128;
++    if (MB < 16) MB = 16;
++    if (MB > 128) MB = 128;
++    return MB * 1024 * 1024;
++  }();
++  return Size;
++}
++
+ fextl::shared_ptr<CodeBuffer> SharedCodeBufferManager::GetLatest() {
+   if (!Latest) {
+     /*
+@@ -184,7 +214,7 @@
+      * that the first guest that DOES grow does not quietly leak 16+32+64 MB of
+      * arena before it gets to 128.
+      */
+-    AllocateNew(FEXCore::JIT::WriteAliasSize ? MAX_CODE_SIZE : INITIAL_CODE_SIZE);
++    AllocateNew(FEXCore::JIT::WriteAliasSize ? DualMappedCodeSize() : INITIAL_CODE_SIZE);
+   }
+   return Latest;
+ }

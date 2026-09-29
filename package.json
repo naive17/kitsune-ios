@@ -1,0 +1,13 @@
+{
+  "name": "ios-wine",
+  "private": true,
+  "description": "Developer tooling for ios-wine: the commit-msg hook.",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "prepare": "husky",
+    "test": "scripts/test.sh"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}

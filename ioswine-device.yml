@@ -1,0 +1,151 @@
+name: ioswine-device
+options:
+  bundleIdPrefix: dev.ioswine
+  deploymentTarget:
+    iOS: "15.0"
+  xcodeVersion: "26.0"
+
+settings:
+  base:
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: A34P6YC4SA
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ONLY_ACTIVE_ARCH: YES
+
+targets:
+  ioswine-device:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: src/ios/main.m
+      - path: src/ios/boot_vc.m
+      - path: src/ios/diagnostics.m
+      - path: src/ios/wine_boot.m
+      - path: src/ios/input_overlay.m
+      - path: src/ios/launcher_vc.m
+      - path: src/ios/library_vc.m
+      - path: src/ios/bottles_vc.m
+      - path: src/ios/settings_vc.m
+      - path: src/ios/progress_vc.m
+      - path: src/ios/boot_status.m
+      - path: src/ios/perf_hud.m
+      - path: src/ios/power.m
+      - path: src/ios/app_library.m
+      - path: src/ios/task_manager.m
+      - path: src/ios/session.m
+      - path: src/ios/steam_install.m
+      - path: src/ios/steam_install_vc.m
+      - path: src/ios/vz.c
+      - path: src/lzma/LzmaDec.c
+      - path: src/ios/pe_info.c
+      - path: src/ios/pe_icon.c
+      - path: src/ios/program_icons.m
+      - path: src/ios/zip.c
+      - path: src/ios/mach_excmon.c
+      - path: src/ios/game_controller.m
+      - path: src/ios/touch_gamepad.m
+      - path: src/ios/jit_arena.c
+      - path: src/ios/wine_surface.m
+        compilerFlags: -fno-objc-arc
+      - path: src/jit/jit_alloc.c
+      - path: jit-scripts/ios-wine.js
+        buildPhase: resources
+      # The app's texts (en.lproj/Localizable.strings, InfoPlist.strings),
+      # bundled as localized variant groups.
+      - path: src/ios
+        includes:
+          - "*.lproj"
+    dependencies:
+      - sdk: UIKit.framework
+      - sdk: Foundation.framework
+      - sdk: CoreGraphics.framework
+      - sdk: QuartzCore.framework
+      - sdk: Metal.framework
+      - sdk: UniformTypeIdentifiers.framework
+      - sdk: GameController.framework
+      - sdk: libz.tbd
+    settings:
+      base:
+        PRODUCT_NAME: ioswine
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ioswine.m3boot
+        INFOPLIST_FILE: src/ios/Info.plist
+        CODE_SIGN_ENTITLEMENTS: src/ios/ioswine.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTED_PLATFORMS: iphoneos
+        SDKROOT: iphoneos
+        ARCHS: arm64
+        CLANG_ENABLE_OBJC_ARC: YES
+        CLANG_WARN_DOCUMENTATION_COMMENTS: NO
+        HEADER_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/src/ios
+          - $(SRCROOT)/src/jit
+        OTHER_CFLAGS:
+          - $(inherited)
+          - -Wno-inline-asm
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -Wl,-force_load,$(SRCROOT)/build/wine-ios/libwineserver.a
+          - -Wl,-export_dynamic
+    postBuildScripts:
+      - name: Stage the Wine runtime
+        basedOnDependencyAnalysis: false
+        script: |
+          set -eu
+          APP="$TARGET_BUILD_DIR/$WRAPPER_NAME"
+          BOOTSTRAP="$APP/Bootstrap"
+          UNIX_DIR="$APP/lib/wine/aarch64-unix"
+          PE_DIR="$APP/lib/wine/aarch64-windows"
+          NLS_DIR="$APP/share/wine/nls"
+
+          /bin/rm -rf "$BOOTSTRAP" "$APP/lib/wine" "$APP/share/wine"
+          if test "${IOSWINE_THIN_UPDATE:-0}" = 1; then
+            RUNTIME="$SRCROOT/.deploy/runtime"
+            test -f "$RUNTIME/lib/wine/aarch64-unix/winecoreaudio.so"
+            /usr/bin/ditto "$RUNTIME/lib" "$APP/lib"
+            /usr/bin/ditto "$RUNTIME/share" "$APP/share"
+            echo "thin update: reused local signed-runtime inputs; no Bootstrap payload"
+          else
+            test -f "$SRCROOT/out/wine-core/TREE_VERSION"
+            test -f "$SRCROOT/out/ios-unix/winecoreaudio.so"
+
+            /bin/mkdir -p "$BOOTSTRAP" "$UNIX_DIR" "$PE_DIR" "$NLS_DIR"
+            /usr/bin/ditto "$SRCROOT/out/wine-core" "$BOOTSTRAP/wine"
+            /bin/rm -f "$BOOTSTRAP/wine/prefix-template/dosdevices/c:"
+            /bin/rm -f "$BOOTSTRAP/wine/prefix-template/dosdevices/z:"
+            /bin/cp "$SRCROOT"/out/ios-unix/*.so "$UNIX_DIR/"
+            /bin/cp "$SRCROOT/out/ios-unix/libgnutls.30.dylib" "$UNIX_DIR/"
+            /bin/cp "$SRCROOT/out/wine-core/lib/wine/aarch64-windows/ntdll.dll" "$PE_DIR/"
+            /bin/cp "$SRCROOT/out/wine-core/lib/wine/aarch64-windows/apisetschema.dll" "$PE_DIR/"
+            /bin/cp "$SRCROOT/out/wine-core/lib/wine/aarch64-windows/wineios.drv" "$PE_DIR/"
+            /bin/bash "$SRCROOT/scripts/build-session-host.sh" "$PE_DIR"
+            for dll in d3d11 dxgi d3d10core winemetal; do
+              /bin/cp "$SRCROOT/out/dxmt-arm64ec/$dll.dll" "$PE_DIR/"
+            done
+            /bin/cp "$SRCROOT"/out/wine-tree/share/wine/nls/*.nls "$NLS_DIR/"
+            /bin/cp "$SRCROOT/out/wine-tree/share/wine/wine.inf" "$APP/share/wine/wine.inf"
+            /usr/bin/ditto "$SRCROOT/out/wine-core/share/wine/fonts" "$APP/share/wine/fonts"
+            /bin/bash "$SRCROOT/scripts/stage-xinput.sh" "$APP/lib/wine" "$SRCROOT/out/wine-tree/lib/wine/aarch64-windows"
+          fi
+
+          /bin/bash "$SRCROOT/scripts/stage-ca-bundle.sh" "$APP/share/wine"
+          /usr/bin/ditto "$SRCROOT/LICENSES" "$APP/LICENSES"
+
+          if test "$CODE_SIGNING_ALLOWED" = YES && test -n "$EXPANDED_CODE_SIGN_IDENTITY"; then
+            for so in "$UNIX_DIR"/*.so "$UNIX_DIR"/*.dylib; do
+              test -f "$so" || continue
+              /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" \
+                --timestamp=none "$so"
+            done
+          fi
+
+schemes:
+  ioswine-device:
+    build:
+      targets:
+        ioswine-device: all
+    run:
+      config: Debug

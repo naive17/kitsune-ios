@@ -1,0 +1,136 @@
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.h
+@@ -25,6 +25,11 @@
+ 
+   fextl::unique_ptr<GuestToHostMap> LookupCache;
+ 
++  // ios-wine: retirement of superseded buffers (see
++  // ContextImpl::IosRetireStaleCodeBuffers). 0 = not yet purged.
++  uint64_t IosPurgedAtMs = 0;
++  bool IosReleased = false;
++
+   CodeBuffer(size_t Size);
+   CodeBuffer(const CodeBuffer&) = delete;
+   CodeBuffer& operator=(const CodeBuffer&) = delete;
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+@@ -133,7 +133,9 @@
+ }
+ 
+ CodeBuffer::~CodeBuffer() {
+-  FEXCore::Allocator::VirtualFree(Ptr, AllocatedSize);
++  if (!IosReleased) {
++    FEXCore::Allocator::VirtualFree(Ptr, AllocatedSize);
++  }
+ }
+ 
+ fextl::shared_ptr<CodeBuffer> SharedCodeBufferManager::AllocateNew(size_t Size) {
+--- a/FEXCore/include/FEXCore/Core/Context.h
++++ b/FEXCore/include/FEXCore/Core/Context.h
+@@ -142,6 +142,11 @@
+ 
+   FEX_DEFAULT_VISIBILITY virtual void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) = 0;
+   FEX_DEFAULT_VISIBILITY virtual void InvalidateCodeBuffersCodeRange(uint64_t Start, uint64_t Length) = 0;
++  // ios-wine: purge, then (after a grace period) free code buffers that a newer
++  // buffer has superseded. Caller holds CodeInvalidationMutex uniquely and
++  // passes every thread of the process.
++  FEX_DEFAULT_VISIBILITY virtual void
++  IosRetireStaleCodeBuffers(FEXCore::Core::InternalThreadState* const* Threads, size_t NumThreads) = 0;
+   FEX_DEFAULT_VISIBILITY virtual void
+   InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) = 0;
+   FEX_DEFAULT_VISIBILITY virtual FEXCore::Utils::WritePriorityMutex::Mutex& GetCodeInvalidationMutex() = 0;
+--- a/FEXCore/Source/Interface/Context/Context.h
++++ b/FEXCore/Source/Interface/Context/Context.h
+@@ -219,6 +219,7 @@
+   void OnCodeBufferAllocated(const std::shared_ptr<CPU::CodeBuffer>&) override;
+   void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) override;
+   void InvalidateCodeBuffersCodeRange(uint64_t Start, uint64_t Length) override;
++  void IosRetireStaleCodeBuffers(FEXCore::Core::InternalThreadState* const* Threads, size_t NumThreads) override;
+   void InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) override;
+   FEXCore::Utils::WritePriorityMutex::Mutex& GetCodeInvalidationMutex() override {
+     return CodeInvalidationMutex;
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -1011,6 +1011,62 @@
+   }
+ }
+ 
++/*
++ * ios-wine: reclaim superseded code buffers.
++ *
++ * When a buffer fills, FEX starts a new one and the old one lives until every
++ * thread drops its reference -- which a thread only does when it next
++ * compiles. Chromium has dozens of threads that never compile again, so on a
++ * 1GB JIT arena the webhelper leaked a 128MB buffer every few minutes until
++ * the arena was gone and nothing (not even a game) could start.
++ *
++ * Nothing needs the old code once lookups can no longer reach it: ARM64EC
++ * exits to native code with a tail branch (ExitFunctionEC), so no native frame
++ * returns into JIT code. What can reach it is the old buffer's own lookup map
++ * and block links, each thread's L1/L2 cache, and the call-ret shadow stack.
++ * Stage 1 purges all of those (the same operations a cross-thread
++ * invalidation performs); a thread still on the old buffer then misses,
++ * compiles, and switches. Stage 2, after a grace period long enough for any
++ * thread that was mid-block to leave it, frees the memory. The CodeBuffer
++ * object itself stays until its last reference goes.
++ */
++void ContextImpl::IosRetireStaleCodeBuffers(FEXCore::Core::InternalThreadState* const* Threads, size_t NumThreads) {
++  /* 5s, not 20: the grace only has to outlast a thread that is mid-block in
++   * the old buffer, and during Dark Souls' level load every stranded 64MB
++   * buffer counts against a 3.7GB ceiling the app dies at (2026-09-23). */
++  static constexpr uint64_t GraceMs = 5000;
++  const uint64_t Now =
++    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() | 1;
++
++  fextl::vector<fextl::shared_ptr<CPU::CodeBuffer>> Stale;
++  {
++    std::scoped_lock lk {CodeBufferListLock};
++    if (CodeBufferList.size() < 2) {
++      return;
++    }
++    for (size_t i = 0; i + 1 < CodeBufferList.size(); ++i) {
++      if (auto Strong = CodeBufferList[i].lock(); Strong && !Strong->IosReleased) {
++        Stale.push_back(std::move(Strong));
++      }
++    }
++  }
++
++  for (auto& Buffer : Stale) {
++    if (!Buffer->IosPurgedAtMs) {
++      Buffer->LookupCache->InvalidateRange(0, ~0ULL);
++      for (size_t i = 0; i < NumThreads; ++i) {
++        InvalidateThreadCachedCodeRange(Threads[i], 0, ~0ULL);
++      }
++      Buffer->IosPurgedAtMs = Now;
++      LogMan::Msg::EFmt("ios-codebuf-retire: purged {} ({} MB), {} threads", fmt::ptr(Buffer->Ptr), Buffer->AllocatedSize >> 20, NumThreads);
++    } else if (Now - Buffer->IosPurgedAtMs > GraceMs) {
++      Buffer->IosReleased = true;
++      FEXCore::Allocator::VirtualFree(Buffer->Ptr, Buffer->AllocatedSize);
++      LogMan::Msg::EFmt("ios-codebuf-retire: freed {} ({} MB)", fmt::ptr(Buffer->Ptr), Buffer->AllocatedSize >> 20);
++    }
++  }
++}
++
+ void ContextImpl::InvalidateThreadCachedCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {
+   LOGMAN_THROW_A_FMT(CodeInvalidationMutex.try_lock() == false, "CodeInvalidationMutex needs to be unique_locked here");
+ 
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -346,6 +346,17 @@
+   for (auto Thread : Threads) {
+     CTX.InvalidateThreadCachedCodeRange(Thread.second, Address, Size);
+   }
++
++  // ios-wine: invalidations are frequent (every VirtualFree/VirtualProtect)
++  // and already hold the lock stale-buffer retirement needs.
++  {
++    fextl::vector<FEXCore::Core::InternalThreadState*> All;
++    All.reserve(Threads.size());
++    for (auto Thread : Threads) {
++      All.push_back(Thread.second);
++    }
++    CTX.IosRetireStaleCodeBuffers(All.data(), All.size());
++  }
+ }
+ 
+ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t Size, bool ForWriteLocked) {
