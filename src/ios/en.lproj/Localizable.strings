@@ -111,8 +111,8 @@
 "%@ · %@ bottle" = "%@ · %@ bottle";
 "32-bit programs aren't supported yet" = "32-bit programs aren't supported yet";
 "Not supported" = "Not supported";
-"Enable JIT First" = "Enable JIT First";
-"Steam can be installed once JIT is on." = "Steam can be installed once JIT is on.";
+"Runtime Not Ready" = "Runtime Not Ready";
+"Steam can be installed once the Wine runtime is set up." = "Steam can be installed once the Wine runtime is set up.";
 /* %@ is the program's name */
 "Run %@?" = "Run %@?";
 "A console program runs on its own. Opening something else afterwards restarts Kitsune." = "Opening something else afterwards restarts Kitsune.";

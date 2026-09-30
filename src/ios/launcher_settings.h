@@ -53,6 +53,12 @@ static inline double KitsuneLookSensitivityStored(NSUserDefaults *ud) {
   return v > 0 ? v : 1.0;
 }
 
+/* A WinePointerMode (input_overlay.h: 0 touch, 1 trackpad, 2 look). Trackpad
+ * until one is chosen: it is the mode that can reach every pixel. */
+static inline NSInteger KitsunePointerModeStored(NSUserDefaults *ud) {
+  NSInteger v = [ud integerForKey:KITSUNE_KEY_POINTER_MODE];
+  return [ud objectForKey:KITSUNE_KEY_POINTER_MODE] && v >= 0 && v <= 2 ? v : 1;
+}
 static inline BOOL KitsuneTouchPadStored(NSUserDefaults *ud) {
   return [ud objectForKey:KITSUNE_KEY_TOUCH_PAD] ? [ud boolForKey:KITSUNE_KEY_TOUCH_PAD] : YES;
 }

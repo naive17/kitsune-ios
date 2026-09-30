@@ -79,6 +79,14 @@ int main(void) {
     [ud setInteger:99 forKey:KITSUNE_KEY_TEXTURES];
     assert(KitsuneTextureModeStored(ud) == KitsuneTexturesDownscaled512);
     assert(KitsuneSafeAreaStored(ud));
+    /* Pointer mode: trackpad until one is chosen; a choice, touch included, is kept. */
+    assert(KitsunePointerModeStored(ud) == 1);
+    [ud setInteger:0 forKey:KITSUNE_KEY_POINTER_MODE];
+    assert(KitsunePointerModeStored(ud) == 0);
+    [ud setInteger:2 forKey:KITSUNE_KEY_POINTER_MODE];
+    assert(KitsunePointerModeStored(ud) == 2);
+    [ud setInteger:7 forKey:KITSUNE_KEY_POINTER_MODE];
+    assert(KitsunePointerModeStored(ud) == 1);
     [ud removePersistentDomainForName:@"kitsune-launch-test"];
 
     /* Minimum scale: 800x600 must fit the safe-area desktop on both axes. */

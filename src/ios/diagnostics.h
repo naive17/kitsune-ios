@@ -26,8 +26,10 @@
 #define KITSUNE_DIAGNOSTICS_H
 
 #import <Foundation/Foundation.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef NS_ENUM(NSInteger, KitsuneDiagLevel) {
   KitsuneDiagOff = 0,
@@ -125,6 +127,26 @@ static inline KitsuneDiagLevel KitsuneDiagLevelStored(NSUserDefaults *ud) {
   if (v < KitsuneDiagOff) return KitsuneDiagOff;
   if (v > KitsuneDiagFull) return KitsuneDiagFull;
   return (KitsuneDiagLevel)v;
+}
+
+/* Whether the wine log gained a critical-section timeout (Wine's "wait timed
+ * out in thread" line) since *scanned, which it advances to size. Reads only
+ * the appended bytes, at most the last 1 MB; a shorter log is a new one. */
+static inline BOOL KitsuneLogNewLockTimeout(const char *path, long size, long *scanned) {
+  static const char needle[] = "wait timed out in thread";
+  if (size < *scanned) *scanned = 0;
+  if (size <= *scanned) return NO;
+  long from = size - *scanned > (1L << 20) ? size - (1L << 20) : *scanned;
+  *scanned = size;
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) return NO;
+  size_t len = (size_t)(size - from);
+  char *buf = malloc(len);
+  ssize_t got = buf ? pread(fd, buf, len, from) : -1;
+  close(fd);
+  BOOL hit = got > 0 && memmem(buf, (size_t)got, needle, sizeof needle - 1) != NULL;
+  free(buf);
+  return hit;
 }
 
 static inline void KitsuneDiagStore(NSUserDefaults *ud, KitsuneDiagLevel level) {

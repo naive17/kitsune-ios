@@ -165,6 +165,19 @@ void KitsuneHeartbeatStart(KitsuneDiagPolicy policy, const char *wineLogPath, vo
           }
         }
       }
+      /* Play mode dumps no threads, so a wedge left nothing to diagnose. A
+       * critical-section timeout in the wine log means one is under way: dump
+       * the host threads then, three ticks in a row, so the stuck threads'
+       * pc/sp can be compared. Until then only the log's new bytes are read. */
+      if (!policy.thread_dumps) {
+        static long scanned;
+        static unsigned wedge_dumps;
+        if (wedge_dumps < 3 && (wedge_dumps > 0 || KitsuneLogNewLockTimeout(g_wine_log, sz, &scanned))) {
+          char tag[32];
+          snprintf(tag, sizeof tag, "wedge-%u", ++wedge_dumps);
+          WineBootDumpThreads(tag, KitsuneLogC);
+        }
+      }
       /* The sampler takes dyld's lock; it runs on a side thread so a guest
        * parked in dlopen cannot stall the heartbeat. */
       if (policy.guest_sampler) {

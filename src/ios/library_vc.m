@@ -170,7 +170,7 @@ static NSString *HumanSize(unsigned long long bytes) {
 - (void)onInstallSteam {
   if (WineSteamInstaller.isRunning) return;
   if (!KitsuneTreeVersion(WineTreeRoot()).length) {
-    [self.host report:NSLocalizedString(@"Enable JIT First", nil) message:NSLocalizedString(@"Steam can be installed once JIT is on.", nil)];
+    [self.host report:NSLocalizedString(@"Runtime Not Ready", nil) message:NSLocalizedString(@"Steam can be installed once the Wine runtime is set up.", nil)];
     return;
   }
   [WineSteamInstallVC presentFrom:self onInstalled:^{ [self refresh]; }];

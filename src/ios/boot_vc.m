@@ -438,6 +438,15 @@ static void PublishJITScript(void) {
   if (policy.mach_exc_monitor) MachExcMon_Install(KitsuneHeartbeatFd());
   GameController_Start();
 
+  /* The Wine tree is installed before JIT: it is only file copying, and
+   * installing Steam needs the tree, so it must not wait for a program to be
+   * started. The launcher offers nothing to run while this is Preparing. */
+  [self setPhase:WineBootPhasePreparing message:NSLocalizedString(@"Checking runtime…", nil)];
+  if (![self ensureRuntimePayload]) {
+    [self setPhase:WineBootPhaseFailed message:NSLocalizedString(@"Wine runtime missing. Install the full build.", nil)];
+    return;
+  }
+
   /* The arena needs StikDebug attached with the Kitsune script. Enable JIT
    * and Play pass the script along; StikDebug's own app list passes it only
    * when it is assigned to Kitsune there, and otherwise just sets the debug
@@ -522,11 +531,6 @@ static void PublishJITScript(void) {
     return;
   }
   [self waitForForeground];
-  [self setPhase:WineBootPhasePreparing message:NSLocalizedString(@"Checking runtime…", nil)];
-  if (![self ensureRuntimePayload]) {
-    [self setPhase:WineBootPhaseFailed message:NSLocalizedString(@"Wine runtime missing. Install the full build.", nil)];
-    return;
-  }
   [self finishRuntimeSetup];
 }
 
@@ -1291,7 +1295,9 @@ static void PublishJITScript(void) {
 
   NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
   _input.lookSensitivity = KitsuneLookSensitivityStored(ud);
-  _input.pointerMode = (WinePointerMode)[ud integerForKey:KITSUNE_KEY_POINTER_MODE];
+  _Static_assert(WinePointerTouch == 0 && WinePointerTrackpad == 1 && WinePointerLook == 2,
+                 "KitsunePointerModeStored returns these values");
+  _input.pointerMode = (WinePointerMode)KitsunePointerModeStored(ud);
   [self updateModeButton];
   [_hud setVisible:KitsunePerfHUDStored(ud)];
   [self updatePowerButton];

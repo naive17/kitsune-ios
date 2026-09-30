@@ -48,6 +48,25 @@ int main(void) {
     KitsuneDiagStore(ud, KitsuneDiagOff);
     assert(KitsuneDiagApplyToEnvironment(ud) == KitsuneDiagOff && KitsuneDiagLevelFromEnv() == KitsuneDiagOff);
     [ud removePersistentDomainForName:@"kitsune-diag-test"];
-    puts("DIAGNOSTICS PASS: three levels, play mode carries no debug env, stored level clamped, env round trip");
+
+    /* The wedge trigger: a critical-section timeout appended to the wine log. */
+    char log[] = "/tmp/kitsune-diag-lock-XXXXXX";
+    int fd = mkstemp(log);
+    assert(fd >= 0);
+    const char *quiet = "0040:err:virtual:map_view ios: jit alloc 0x150010000 size 6000000\n";
+    const char *stuck = "0040:err:sync:RtlpWaitForCriticalSection section 0000000129FA0E28 "
+        "\"loader.c: loader_section\" wait timed out in thread 0040, blocked by 0170, retrying (60 sec)\n";
+    long scanned = 0;
+    assert(write(fd, quiet, strlen(quiet)) == (ssize_t)strlen(quiet));
+    assert(!KitsuneLogNewLockTimeout(log, (long)strlen(quiet), &scanned) && scanned == (long)strlen(quiet));
+    assert(write(fd, stuck, strlen(stuck)) == (ssize_t)strlen(stuck));
+    long size = (long)(strlen(quiet) + strlen(stuck));
+    assert(KitsuneLogNewLockTimeout(log, size, &scanned) && scanned == size);
+    assert(!KitsuneLogNewLockTimeout(log, size, &scanned));  /* already seen */
+    assert(ftruncate(fd, 0) == 0 && pwrite(fd, stuck, strlen(stuck), 0) == (ssize_t)strlen(stuck));
+    assert(KitsuneLogNewLockTimeout(log, (long)strlen(stuck), &scanned));  /* a replaced log starts over */
+    close(fd);
+    unlink(log);
+    puts("DIAGNOSTICS PASS: three levels, play mode carries no debug env, stored level clamped, env round trip, lock-timeout trigger");
   }
 }

@@ -24,7 +24,7 @@ TREE_HASH=$( { find "$CORE/lib" "$CORE/share" -type f -exec shasum {} \; ; } \
              | sed "s|$CORE/||" | sort | shasum | cut -c1-16 )
 # The hash covers only the tree, so the suffix must change whenever the prefix
 # edits below change; otherwise an older cached template is reused.
-CACHE="$BUILD/prefix-template-cache/$TREE_HASH-v2"
+CACHE="$BUILD/prefix-template-cache/$TREE_HASH-v3"
 
 if [ -f "$CACHE/system.reg" ]; then
   rm -rf "$DEST"
@@ -77,9 +77,12 @@ grep -q "BCDE0395-E52F-467C-8E3D-C4579291692E" "$WORK/system.reg" \
 # hang. str(2) is REG_EXPAND_SZ, so the values follow %USERPROFILE%.
 if ! grep -q '"Personal"' "$WORK/user.reg"; then
   for key in "Shell Folders" "User Shell Folders"; do
-    cat >> "$WORK/user.reg" <<REGEOF
-
-[Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\$key]
+    # Registry files escape backslashes as \\ in key names and values, and
+    # Wine drops the backslash of an unknown escape such as \M, so a single one
+    # turns the key into SoftwareMicrosoft...: the header goes through printf
+    # (\\\\ prints \\) and the values through a quoted heredoc, which keeps them.
+    printf '\n[Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Explorer\\\\%s]\n' "$key" >> "$WORK/user.reg"
+    cat >> "$WORK/user.reg" <<'REGEOF'
 "Desktop"=str(2):"%USERPROFILE%\\Desktop"
 "Personal"=str(2):"%USERPROFILE%\\Documents"
 "My Pictures"=str(2):"%USERPROFILE%\\Pictures"
@@ -103,6 +106,11 @@ if ! grep -q '"Personal"' "$WORK/user.reg"; then
 REGEOF
   done
 fi
+# Both keys must hold the values: a stray single backslash once turned them
+# into SoftwareMicrosoft... keys, and Steam could not resolve Documents.
+grep -q '^\[SoftwareMicrosoft' "$WORK/user.reg" && die "Shell Folders written under a mangled key name"
+[ "$(grep -c '^"Personal"=str(2):"%USERPROFILE%\\\\Documents"$' "$WORK/user.reg")" -ge 2 ] \
+  || die "Shell Folders values missing or mangled in user.reg"
 grep -q '"Personal"' "$WORK/user.reg" \
   || die "failed to populate shell folders in prefix template"
 
