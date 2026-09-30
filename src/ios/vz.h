@@ -1,7 +1,7 @@
 /* Valve's VZ packages: the LZMA-compressed zips Steam's client updates ship
  * in. */
-#ifndef IOSWINE_VZ_H
-#define IOSWINE_VZ_H
+#ifndef KITSUNE_VZ_H
+#define KITSUNE_VZ_H
 
 #include <stddef.h>
 #include <stdint.h>

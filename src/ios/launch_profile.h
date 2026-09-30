@@ -7,51 +7,51 @@
  *   landscape);
  *   the diagnostics level, which adds its environment only at Full.
  *
- * The result goes through IOSWineValidateLaunchRequest like a launch file, so a
+ * The result goes through KitsuneValidateLaunchRequest like a launch file, so a
  * profile cannot express anything a launch file could not.
  */
-#ifndef IOSWINE_LAUNCH_PROFILE_H
-#define IOSWINE_LAUNCH_PROFILE_H
+#ifndef KITSUNE_LAUNCH_PROFILE_H
+#define KITSUNE_LAUNCH_PROFILE_H
 
 #import <Foundation/Foundation.h>
 #include "diagnostics.h"
 
-typedef NS_ENUM(NSInteger, IOSWineTextureMode) {
+typedef NS_ENUM(NSInteger, KitsuneTextureMode) {
   /* BC textures decoded on the CPU into RGBA8/BGR5A1 and capped at 512 px:
    * the configuration that reached gameplay on the phone. Ugly up close. */
-  IOSWineTexturesDownscaled512 = 0,
+  KitsuneTexturesDownscaled512 = 0,
   /* Same decode, capped at 1024 px. More memory, sharper. */
-  IOSWineTexturesDownscaled1024 = 1,
+  KitsuneTexturesDownscaled1024 = 1,
   /* BC transcoded to ETC2/EAC in winemetal.so so the GPU keeps them compressed
    * at their full size. New; needs a device pass before it is the default. */
-  IOSWineTexturesNative = 2,
+  KitsuneTexturesNative = 2,
 };
 
 typedef struct {
   BOOL steamVisible;          /* NO adds -silent to the client alone: Steam starts without its window */
   BOOL console;               /* -console: Steam's console tab and its stdout log */
-  IOSWineDiagLevel diag;
-  IOSWineTextureMode textures;
+  KitsuneDiagLevel diag;
+  KitsuneTextureMode textures;
   int frameCap;               /* 0 = the display's refresh rate */
   BOOL landscape;
-} IOSWineLaunchOptions;
+} KitsuneLaunchOptions;
 
-static inline IOSWineLaunchOptions IOSWineDefaultLaunchOptions(void) {
-  IOSWineLaunchOptions o;
+static inline KitsuneLaunchOptions KitsuneDefaultLaunchOptions(void) {
+  KitsuneLaunchOptions o;
   memset(&o, 0, sizeof(o));
   o.steamVisible = YES;
-  o.textures = IOSWineTexturesDownscaled512;
+  o.textures = KitsuneTexturesDownscaled512;
   o.landscape = YES;
   return o;
 }
 
-static inline NSString *IOSWineDXMTConfig(IOSWineTextureMode textures, int frameCap) {
+static inline NSString *KitsuneDXMTConfig(KitsuneTextureMode textures, int frameCap) {
   NSMutableString *cfg = [NSMutableString string];
   switch (textures) {
-  case IOSWineTexturesNative:
+  case KitsuneTexturesNative:
     [cfg appendString:@"d3d11.mipClampBC = 0"];
     break;
-  case IOSWineTexturesDownscaled1024:
+  case KitsuneTexturesDownscaled1024:
     [cfg appendString:@"d3d11.mipClampBC = 4; d3d11.bcMaxDim = 1024"];
     break;
   default:
@@ -63,7 +63,7 @@ static inline NSString *IOSWineDXMTConfig(IOSWineTextureMode textures, int frame
 }
 
 /* The request for steam.exe, launching `appID` (nil: just the client). */
-static inline NSDictionary *IOSWineSteamLaunchRequest(NSString *appID, IOSWineLaunchOptions o) {
+static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLaunchOptions o) {
   NSMutableArray<NSString *> *args = [NSMutableArray array];
   if (o.console) [args addObject:@"-console"];
   /* A game starts Steam without its window, which spares the memory and GPU
@@ -75,27 +75,27 @@ static inline NSDictionary *IOSWineSteamLaunchRequest(NSString *appID, IOSWineLa
   }
   NSMutableDictionary<NSString *, NSString *> *env = [NSMutableDictionary dictionaryWithDictionary:@{
     /* Native iOS controller bridge, and the builtin XInput that reads it. */
-    @"IOSWINE_GAME_INPUT": @"1",
+    @"KITSUNE_GAME_INPUT": @"1",
     @"WINEDLLOVERRIDES": @"xinput1_1,xinput1_2,xinput1_3,xinput1_4,xinput9_1_0,xinputuap=b",
     /* Steam's memory and address-space policy, measured one lever at a time. */
     @"WINE_IOS_STACKPOOL_MB": @"512",
-    @"IOSWINE_FORCE_SWRAST": @"1",
+    @"KITSUNE_FORCE_SWRAST": @"1",
     /* Together these enable the band; BIGPOOL_MB counts by presence only. */
     @"WINE_IOS_BIGPOOL_MB": @"1",
     @"WINE_IOS_CEF_LOWBAND": @"1",
-    @"IOSWINE_FEX_CODE_MB": @"48",
-    @"IOSWINE_ARENA_CODE_MB": @"384",
-    @"IOSWINE_SWAP": @"1",
-    @"IOSWINE_SWAP_MASK": @"3",
+    @"KITSUNE_FEX_CODE_MB": @"48",
+    @"KITSUNE_ARENA_CODE_MB": @"384",
+    @"KITSUNE_SWAP": @"1",
+    @"KITSUNE_SWAP_MASK": @"3",
   }];
   /* A game runs without Steam's web helper, its UI and biggest process: the
    * port ends it when the game starts and lets it back when the game exits. */
-  if (appID.length) env[@"IOSWINE_STEAM_LEAN"] = @"1";
-  env[@"DXMT_CONFIG"] = IOSWineDXMTConfig(o.textures, o.frameCap);
-  if (o.textures == IOSWineTexturesNative) env[@"IOSWINE_BC_NATIVE"] = @"1";
-  else env[@"IOSWINE_BC_16BIT"] = @"1";
-  env[@"IOSWINE_LANDSCAPE"] = o.landscape ? @"1" : @"0";
-  [env addEntriesFromDictionary:IOSWineDiagLaunchEnv(o.diag)];
+  if (appID.length) env[@"KITSUNE_STEAM_LEAN"] = @"1";
+  env[@"DXMT_CONFIG"] = KitsuneDXMTConfig(o.textures, o.frameCap);
+  if (o.textures == KitsuneTexturesNative) env[@"KITSUNE_BC_NATIVE"] = @"1";
+  else env[@"KITSUNE_BC_16BIT"] = @"1";
+  env[@"KITSUNE_LANDSCAPE"] = o.landscape ? @"1" : @"0";
+  [env addEntriesFromDictionary:KitsuneDiagLaunchEnv(o.diag)];
   return @{
     @"bottle": @"Steam",
     @"exe": @"Apps/Steam/steam.exe",

@@ -108,7 +108,7 @@ index 68af35c..3bbff87 100644
  }
  
 diff --git a/dlls/crypt32/unixlib.c b/dlls/crypt32/unixlib.c
-index 4b9f0da..af5d1f3 100644
+index 4b9f0da..23af26e 100644
 --- a/dlls/crypt32/unixlib.c
 +++ b/dlls/crypt32/unixlib.c
 @@ -30,6 +30,7 @@
@@ -137,12 +137,12 @@ index 4b9f0da..af5d1f3 100644
 +     * Do not treat this as iOS keychain enumeration or accept the peer's CA.
 +     * Existing PE-side signature/chain verification still validates imports. */
 +    {
-+        const char *bundle = getenv( "IOSWINE_CA_BUNDLE" );
++        const char *bundle = getenv( "KITSUNE_CA_BUNDLE" );
 +        unsigned int n = 0;
 +        struct list *e;
 +        if (bundle && bundle[0] == '/') import_certs_from_path( bundle, FALSE );
 +        LIST_FOR_EACH( e, &root_cert_list ) n++;
-+        ERR( "ios: trust roots from IOSWINE_CA_BUNDLE=%s: %u certs\n", bundle ? bundle : "(unset)", n );
++        ERR( "ios: trust roots from KITSUNE_CA_BUNDLE=%s: %u certs\n", bundle ? bundle : "(unset)", n );
 +    }
 +#endif
 +
@@ -1472,12 +1472,12 @@ index 0000000..de375a2
 +#endif /* __WINE_NTDLL_IOS_COMPAT_H */
 diff --git a/dlls/ntdll/unix/ios_fd_cache.h b/dlls/ntdll/unix/ios_fd_cache.h
 new file mode 100644
-index 0000000..38a5671
+index 0000000..30bf3fe
 --- /dev/null
 +++ b/dlls/ntdll/unix/ios_fd_cache.h
 @@ -0,0 +1,75 @@
-+#ifndef IOSWINE_FD_CACHE_H
-+#define IOSWINE_FD_CACHE_H
++#ifndef KITSUNE_FD_CACHE_H
++#define KITSUNE_FD_CACHE_H
 +
 +/* Included after Wine's union fd_cache_entry and FD_CACHE_* definitions.
 + * Every function requires fd_cache_mutex, with Wine signals blocked. The
@@ -1611,12 +1611,12 @@ index 0000000..a2d87cd
 +#endif /* __WINE_NTDLL_IOS_MACH_VM_H */
 diff --git a/dlls/ntdll/unix/ios_ntdll_image.h b/dlls/ntdll/unix/ios_ntdll_image.h
 new file mode 100644
-index 0000000..68a8397
+index 0000000..5338bcb
 --- /dev/null
 +++ b/dlls/ntdll/unix/ios_ntdll_image.h
 @@ -0,0 +1,279 @@
-+#ifndef IOSWINE_NTDLL_IMAGE_H
-+#define IOSWINE_NTDLL_IMAGE_H
++#ifndef KITSUNE_NTDLL_IMAGE_H
++#define KITSUNE_NTDLL_IMAGE_H
 +
 +#define IOS_NTDLL_CALLBACKS(X) \
 +    X(DbgUiRemoteBreakin) \
@@ -1896,14 +1896,14 @@ index 0000000..68a8397
 +#endif
 diff --git a/dlls/ntdll/unix/ios_process_callbacks.h b/dlls/ntdll/unix/ios_process_callbacks.h
 new file mode 100644
-index 0000000..da72e1a
+index 0000000..f0cc85e
 --- /dev/null
 +++ b/dlls/ntdll/unix/ios_process_callbacks.h
 @@ -0,0 +1,23 @@
-+/* Per-owner Unix -> PE callback identity. ios-wine authors, 2026.
++/* Per-owner Unix -> PE callback identity. Kitsune authors, 2026.
 + * SPDX-License-Identifier: GPL-3.0-or-later */
-+#ifndef IOSWINE_PROCESS_CALLBACKS_H
-+#define IOSWINE_PROCESS_CALLBACKS_H
++#ifndef KITSUNE_PROCESS_CALLBACKS_H
++#define KITSUNE_PROCESS_CALLBACKS_H
 +#define IOS_PROCESS_CALLBACKS(X) \
 +    X(DbgUiRemoteBreakin) \
 +    X(KiRaiseUserExceptionDispatcher) \
@@ -1925,12 +1925,12 @@ index 0000000..da72e1a
 +#endif
 diff --git a/dlls/ntdll/unix/ios_process_context.h b/dlls/ntdll/unix/ios_process_context.h
 new file mode 100644
-index 0000000..36815e7
+index 0000000..bb70946
 --- /dev/null
 +++ b/dlls/ntdll/unix/ios_process_context.h
 @@ -0,0 +1,178 @@
-+#ifndef IOSWINE_PROCESS_CONTEXT_H
-+#define IOSWINE_PROCESS_CONTEXT_H
++#ifndef KITSUNE_PROCESS_CONTEXT_H
++#define KITSUNE_PROCESS_CONTEXT_H
 +
 +#include <errno.h>
 +#include <fcntl.h>
@@ -2109,15 +2109,15 @@ index 0000000..36815e7
 +#endif
 diff --git a/dlls/ntdll/unix/ios_process_state.h b/dlls/ntdll/unix/ios_process_state.h
 new file mode 100644
-index 0000000..cf3e324
+index 0000000..b4c51bb
 --- /dev/null
 +++ b/dlls/ntdll/unix/ios_process_state.h
 @@ -0,0 +1,26 @@
 +/* Mutable Unix-side startup state for one Windows process, not one pthread.
-+ * Copyright 2026 ios-wine contributors. SPDX-License-Identifier: GPL-3.0-or-later
++ * Copyright 2026 Kitsune contributors. SPDX-License-Identifier: GPL-3.0-or-later
 + * Wine types (including WOW_PEB) must be available before this header. */
-+#ifndef IOSWINE_PROCESS_STATE_H
-+#define IOSWINE_PROCESS_STATE_H
++#ifndef KITSUNE_PROCESS_STATE_H
++#define KITSUNE_PROCESS_STATE_H
 +struct ios_process_state
 +{
 +    SECTION_IMAGE_INFORMATION image;
@@ -2140,7 +2140,7 @@ index 0000000..cf3e324
 +};
 +#endif
 diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
-index 2b6dbf2..c53f541 100644
+index 2b6dbf2..566bef6 100644
 --- a/dlls/ntdll/unix/loader.c
 +++ b/dlls/ntdll/unix/loader.c
 @@ -37,6 +37,7 @@
@@ -2373,8 +2373,8 @@ index 2b6dbf2..c53f541 100644
 +        };
 +        if (ios_process_publish_callbacks( callbacks ))
 +            fatal_error( "cannot publish process-owned ntdll callbacks\n" );
-+        if (getenv( "IOSWINE_PROCESS_CACHE_EXPERIMENT" ) &&
-+            !strcmp( getenv( "IOSWINE_PROCESS_CACHE_EXPERIMENT" ), "1" ))
++        if (getenv( "KITSUNE_PROCESS_CACHE_EXPERIMENT" ) &&
++            !strcmp( getenv( "KITSUNE_PROCESS_CACHE_EXPERIMENT" ), "1" ))
 +            ERR( "ios-process-dispatch: owner callbacks bound; PEB=%p pid=%04x\n",
 +                 RtlGetCurrentPeb(), get_current_process_id() );
 +    }
@@ -2841,7 +2841,7 @@ index 54d485a..de21fe1 100644
              ret = LO_NATIVE_BUILTIN;
              TRACE( "got main exe default %s for %s\n", debugstr_loadorder(ret), debugstr_us(nt_name) );
 diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
-index 418f95b..650a310 100644
+index 418f95b..473c940 100644
 --- a/dlls/ntdll/unix/process.c
 +++ b/dlls/ntdll/unix/process.c
 @@ -75,20 +75,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(process);
@@ -2892,7 +2892,7 @@ index 418f95b..650a310 100644
      char **argv;
  
 +#ifdef WINE_IOS_JIT_ARENA
-+    if (getenv( "IOSWINE_THREADED_PROCESS" ) && !strcmp( getenv( "IOSWINE_THREADED_PROCESS" ), "1" ))
++    if (getenv( "KITSUNE_THREADED_PROCESS" ) && !strcmp( getenv( "KITSUNE_THREADED_PROCESS" ), "1" ))
 +    {
 +        USHORT machine = pe_info->machine;
 +        /* Same selection NtCreateUserProcess made for the server's new_process. */
@@ -2951,7 +2951,7 @@ index 418f95b..650a310 100644
 +#endif
 +
 +#ifdef WINE_IOS_JIT_ARENA
-+/* Steam without its UI while a game runs (IOSWINE_STEAM_LEAN, which the app
++/* Steam without its UI while a game runs (KITSUNE_STEAM_LEAN, which the app
 + * sets for game launches). Steam's whole interface is its Chromium web
 + * helper, the largest thing in memory after the game, and neither the client
 + * nor the game needs it. When Steam starts the game the helper is ended, and
@@ -2989,7 +2989,7 @@ index 418f95b..650a310 100644
 +
 +    if (enabled < 0)
 +    {
-+        const char *e = getenv( "IOSWINE_STEAM_LEAN" );
++        const char *e = getenv( "KITSUNE_STEAM_LEAN" );
 +        enabled = e && atoi( e );
 +    }
 +    if (!enabled || !ios_lean_caller_is_steam()) return IOS_LEAN_NONE;
@@ -3069,7 +3069,7 @@ index 418f95b..650a310 100644
 +            iname[n++] = (c > 0 && c < 128) ? (char)c : '?';
 +        }
 +        iname[n] = 0;
-+        if (getenv( "IOSWINE_FORCE_SWRAST" ) &&
++        if (getenv( "KITSUNE_FORCE_SWRAST" ) &&
 +            (strstr( iname, "gldriverquery" ) || strstr( iname, "vulkandriverquery" ) ||
 +             strstr( iname, "steamerrorreporter" ) || strstr( iname, "steamsysinfo" ) ||
 +             strstr( iname, "conhost" ) ||
@@ -3101,7 +3101,7 @@ index 418f95b..650a310 100644
 +            !strstr( cl_ascii, "disable-software-rasterizer" ))
 +        {
 +            int want_sp = !strstr( cl_ascii, "single-process" );
-+            int want_sr = getenv( "IOSWINE_FORCE_SWRAST" ) != NULL;
++            int want_sr = getenv( "KITSUNE_FORCE_SWRAST" ) != NULL;
 +            ULONG swlen = sizeof(sw_ascii) - 1;
 +            ULONG splen = want_sp ? sizeof(sp_ascii) - 1 : 0;
 +            ULONG srlen = want_sr ? sizeof(sr_ascii) - 1 : 0;
@@ -3280,7 +3280,7 @@ index 418f95b..650a310 100644
  }
  
 diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
-index 730a0cd..4fc958c 100644
+index 730a0cd..e96d953 100644
 --- a/dlls/ntdll/unix/server.c
 +++ b/dlls/ntdll/unix/server.c
 @@ -75,6 +75,9 @@
@@ -3861,8 +3861,8 @@ index 730a0cd..4fc958c 100644
 +#ifdef WINE_IOS_JIT_ARENA
 +    BOOL enable_owned_process, enable_threaded_children;
 +    {
-+        const char *experiment = getenv( "IOSWINE_PROCESS_CACHE_EXPERIMENT" );
-+        const char *threaded = getenv( "IOSWINE_THREADED_PROCESS" );
++        const char *experiment = getenv( "KITSUNE_PROCESS_CACHE_EXPERIMENT" );
++        const char *threaded = getenv( "KITSUNE_THREADED_PROCESS" );
 +        enable_owned_process = experiment && !strcmp( experiment, "1" );
 +        enable_threaded_children = threaded && !strcmp( threaded, "1" );
 +        if (enable_owned_process)
@@ -3927,8 +3927,8 @@ index 730a0cd..4fc958c 100644
 +#ifdef WINE_IOS_JIT_ARENA
 +                /* Until the handle-indexed inproc sync cache is owner-aware,
 +                 * threaded processes use Wine's real server wait path. */
-+                if (getenv( "IOSWINE_THREADED_PROCESS" ) &&
-+                    !strcmp( getenv( "IOSWINE_THREADED_PROCESS" ), "1" ))
++                if (getenv( "KITSUNE_THREADED_PROCESS" ) &&
++                    !strcmp( getenv( "KITSUNE_THREADED_PROCESS" ), "1" ))
 +                {
 +                    close( inproc_device_fd );
 +                    inproc_device_fd = -1;
@@ -4070,7 +4070,7 @@ index 730a0cd..4fc958c 100644
      {
          struct thread_data *data = get_thread_data();
 diff --git a/dlls/ntdll/unix/signal_arm64.c b/dlls/ntdll/unix/signal_arm64.c
-index 522ade3..41b3da1 100644
+index 522ade3..fd48944 100644
 --- a/dlls/ntdll/unix/signal_arm64.c
 +++ b/dlls/ntdll/unix/signal_arm64.c
 @@ -56,7 +56,11 @@
@@ -4724,7 +4724,7 @@ index 522ade3..41b3da1 100644
 +            /* Bounded diagnostic reads: arbitrary register values must never
 +             * become direct pointers inside the fault handler. x23 is the
 +             * guest RSP only while FEX's static register allocation is active. */
-+            if (getenv("IOSWINE_FAULT_STACKS"))
++            if (getenv("KITSUNE_FAULT_STACKS"))
 +            {
 +                const char *labels[] = { "sp", "x23", "x29" };
 +                vm_address_t addresses[] = { SP_sig(sigcontext), REGn_sig(23, sigcontext),
@@ -4746,7 +4746,7 @@ index 522ade3..41b3da1 100644
 +                                 words[i], words[i+1], words[i+2], words[i+3] );
 +                }
 +            }
-+            if (is_arm64ec() && !getenv("IOSWINE_NO_GUEST_DUMP"))
++            if (is_arm64ec() && !getenv("KITSUNE_NO_GUEST_DUMP"))
 +            {
 +                static const char *const gname[16] = {
 +                    "rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi",
@@ -4990,7 +4990,7 @@ index e0eddb8..24fd3da 100644
          wow_context->Eip = pLdrSystemDllInitBlock->pRtlUserThreadStart;
          wow_context->SegCs = cs32_sel;
 diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
-index fbf054e..f8588e7 100644
+index fbf054e..4f79e23 100644
 --- a/dlls/ntdll/unix/sync.c
 +++ b/dlls/ntdll/unix/sync.c
 @@ -74,7 +74,9 @@
@@ -5068,7 +5068,7 @@ index fbf054e..f8588e7 100644
 +
 +static void ios_sync_init(void)
 +{
-+    ios_qos_state = dlsym( RTLD_DEFAULT, "ioswine_guest_qos_state" );
++    ios_qos_state = dlsym( RTLD_DEFAULT, "kitsune_guest_qos_state" );
 +    pthread_key_create( &ios_qos_key, NULL );
 +    pthread_key_create( &ios_yield_key, NULL );
 +}
@@ -5266,7 +5266,7 @@ index dea2cbb..a369ccc 100644
  static void stub_syscall( const char *name )
  {
 diff --git a/dlls/ntdll/unix/system.c b/dlls/ntdll/unix/system.c
-index 2d6e318..077a53e 100644
+index 2d6e318..a4f5580 100644
 --- a/dlls/ntdll/unix/system.c
 +++ b/dlls/ntdll/unix/system.c
 @@ -37,6 +37,11 @@
@@ -5471,7 +5471,7 @@ index 2d6e318..077a53e 100644
 +static void (*ios_gamepad_snapshot)(struct ios_gamepad_info *);
 +static void ios_resolve_gamepad(void)
 +{
-+    ios_gamepad_snapshot = dlsym(RTLD_DEFAULT, "ioswine_gamepad_snapshot_v1");
++    ios_gamepad_snapshot = dlsym(RTLD_DEFAULT, "kitsune_gamepad_snapshot_v1");
 +}
 +#endif
 +
@@ -5497,7 +5497,7 @@ index 2d6e318..077a53e 100644
  
      TRACE( "(0x%08x,%p,0x%08x,%p)\n", class, info, size, ret_size );
  
-+    if ((unsigned int)class == IOSWINE_GAMEPAD_INFO_CLASS)
++    if ((unsigned int)class == KITSUNE_GAMEPAD_INFO_CLASS)
 +        return ios_query_gamepads(info, size, ret_size);
 +
      switch (class)
@@ -5567,7 +5567,7 @@ index 2d6e318..077a53e 100644
  #if defined(linux)
          {
 diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
-index 546963a..f6e012c 100644
+index 546963a..68465a6 100644
 --- a/dlls/ntdll/unix/thread.c
 +++ b/dlls/ntdll/unix/thread.c
 @@ -74,13 +74,16 @@
@@ -5762,7 +5762,7 @@ index 546963a..f6e012c 100644
 +        pthread_exit_wrapper( status );
 +    }
 +    {
-+        void (*notify)( int ) = dlsym( RTLD_DEFAULT, "ios_wine_process_exited" );
++        void (*notify)( int ) = dlsym( RTLD_DEFAULT, "kitsune_process_exited" );
 +        if (notify)
 +        {
 +            notify( status );
@@ -5888,7 +5888,7 @@ index 546963a..f6e012c 100644
                  }
              }
 diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
-index c8ca97d..6fbfcdc 100644
+index c8ca97d..2edb4ab 100644
 --- a/dlls/ntdll/unix/unix_private.h
 +++ b/dlls/ntdll/unix/unix_private.h
 @@ -76,6 +76,34 @@ extern WOW_PEB *wow_peb;
@@ -5994,7 +5994,7 @@ index c8ca97d..6fbfcdc 100644
  extern SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock;
  
 +/* Keep root publishers explicit; all runtime consumers use this accessor.
-+ * With per-process contexts on (IOSWINE_PROCESS_CACHE_EXPERIMENT=1), a thread
++ * With per-process contexts on (KITSUNE_PROCESS_CACHE_EXPERIMENT=1), a thread
 + * bound to no process gets NULL, never another owner's PE. */
 +#ifdef WINE_IOS_JIT_ARENA
 +#define CURRENT_NTDLL_CALLBACK(name) \
@@ -6066,7 +6066,7 @@ index c8ca97d..6fbfcdc 100644
 +
  #endif /* __NTDLL_UNIX_PRIVATE_H */
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index db820a8..da14854 100644
+index db820a8..5bd943d 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -59,14 +59,23 @@
@@ -6778,7 +6778,7 @@ index db820a8..da14854 100644
 -    BYTE vprot;
 -
 -    size = ROUND_SIZE( base, size, host_page_mask );
-+    const char *env = getenv( "IOSWINE_SWAP" ), *dir;
++    const char *env = getenv( "KITSUNE_SWAP" ), *dir;
 +    char path[PATH_MAX];
 +    int fd;
  
@@ -6799,7 +6799,7 @@ index db820a8..da14854 100644
 +        return;
      }
 -    return mprotect_exec( addr, count * host_page_size, prot );
-+    snprintf( path, sizeof path, "%s/ioswine-swap-%d", dir, (int)getpid() );
++    snprintf( path, sizeof path, "%s/kitsune-swap-%d", dir, (int)getpid() );
 +    if ((fd = open( path, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0600 )) < 0)
 +    {
 +        ERR( "ios: swap: cannot create %s (%s); pool commits stay anonymous\n", path, strerror( errno ) );
@@ -6814,7 +6814,7 @@ index db820a8..da14854 100644
 +        return;
 +    }
 +    ios_swap_fd = fd;
-+    if ((env = getenv( "IOSWINE_SWAP_MASK" )) && *env) ios_swap_mask = (unsigned)strtoul( env, NULL, 16 );
++    if ((env = getenv( "KITSUNE_SWAP_MASK" )) && *env) ios_swap_mask = (unsigned)strtoul( env, NULL, 16 );
 +    ios_swap_occ_pages = (size_t)(ios_swap_hi - ios_swap_lo) / host_page_size;
 +    ios_swap_occ = calloc( ios_swap_occ_pages / 8 + 1, 1 );   /* 512 KB for 64 GB of 16 KB pages */
 +    ERR( "ios: swap file covers %p-%p (sparse %zu GB in %s); pool commits are file-backed, mask %#x\n",
@@ -10345,7 +10345,7 @@ index db820a8..da14854 100644
 +        static int checked, threshold_mb;
 +        if (!checked)
 +        {
-+            const char *e = getenv( "IOSWINE_TRACE_BIGALLOC" );
++            const char *e = getenv( "KITSUNE_TRACE_BIGALLOC" );
 +            checked = 1;
 +            threshold_mb = e ? atoi( e ) : 0;
 +        }
@@ -10608,7 +10608,7 @@ index 31e1e6e..342c347 100644
  
  static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
 diff --git a/dlls/sechost/service.c b/dlls/sechost/service.c
-index f05fd2d..8e29628 100644
+index f05fd2d..bb7413f 100644
 --- a/dlls/sechost/service.c
 +++ b/dlls/sechost/service.c
 @@ -32,6 +32,7 @@
@@ -10654,14 +10654,14 @@ index f05fd2d..8e29628 100644
 +    event->type = DBT_DEVTYP_DEVICEINTERFACE;
 +    event->guid = hid_guid;
 +    swprintf( event->name, ARRAY_SIZE(event->name),
-+              L"\\\\?\\IOSWINE#GameController#%u#{4d1e55b2-f16f-11cf-88cb-001111000030}", slot );
++              L"\\\\?\\KITSUNE#GameController#%u#{4d1e55b2-f16f-11cf-88cb-001111000030}", slot );
 +    event->size = offsetof(struct ios_gamepad_broadcast, name[wcslen(event->name) + 1]);
 +}
 +
 +static BOOL ios_gamepad_snapshot( struct ios_gamepad_info *info )
 +{
-+    return !NtQuerySystemInformation( (SYSTEM_INFORMATION_CLASS)IOSWINE_GAMEPAD_INFO_CLASS,
-+                                      info, sizeof(*info), NULL ) && info->version == IOSWINE_GAMEPAD_VERSION;
++    return !NtQuerySystemInformation( (SYSTEM_INFORMATION_CLASS)KITSUNE_GAMEPAD_INFO_CLASS,
++                                      info, sizeof(*info), NULL ) && info->version == KITSUNE_GAMEPAD_VERSION;
 +}
 +
 +/* service_cs held. Each subscription has its own baseline, including pads
@@ -10674,13 +10674,13 @@ index f05fd2d..8e29628 100644
 +    unsigned int i, mask = 0;
 +    BOOL listening = FALSE;
 +
-+    if (info) for (i = 0; i < IOSWINE_GAMEPAD_COUNT; ++i) if (info->pads[i].connected) mask |= 1u << i;
++    if (info) for (i = 0; i < KITSUNE_GAMEPAD_COUNT; ++i) if (info->pads[i].connected) mask |= 1u << i;
 +    LIST_FOR_EACH_ENTRY( notify, &device_notify_list, struct device_notify, entry )
 +    {
 +        if (!notify->ios_gamepads || notify->owner_pid != pid) continue;
 +        listening = TRUE;
 +        if (!info) continue; /* A failed snapshot is not a disconnection. */
-+        for (i = 0; i < IOSWINE_GAMEPAD_COUNT; ++i)
++        for (i = 0; i < KITSUNE_GAMEPAD_COUNT; ++i)
 +        {
 +            unsigned int bit = 1u << i;
 +            if (!((notify->ios_seen ^ mask) & bit)) continue;
@@ -12542,7 +12542,7 @@ index 0000000..aecf876
 +}
 diff --git a/dlls/wineios.drv/metal.m b/dlls/wineios.drv/metal.m
 new file mode 100644
-index 0000000..04f90a3
+index 0000000..913fc02
 --- /dev/null
 +++ b/dlls/wineios.drv/metal.m
 @@ -0,0 +1,533 @@
@@ -12704,7 +12704,7 @@ index 0000000..04f90a3
 +    /* The host app is the only thing that can see UIScreen. */
 +    if (host_screen && host_screen( width, height ) && *width > 0 && *height > 0)
 +    {
-+        const char *cap = getenv( "IOSWINE_SCREEN_MAX" );
++        const char *cap = getenv( "KITSUNE_SCREEN_MAX" );
 +        int cw = 0, ch = 0;
 +
 +        if (cap && sscanf( cap, "%dx%d", &cw, &ch ) == 2 && cw > 0 && ch > 0 &&
@@ -13318,7 +13318,7 @@ index 0000000..79e5daa
 +}
 diff --git a/dlls/wineios.drv/unixlib.h b/dlls/wineios.drv/unixlib.h
 new file mode 100644
-index 0000000..ce812c0
+index 0000000..3642be7
 --- /dev/null
 +++ b/dlls/wineios.drv/unixlib.h
 @@ -0,0 +1,29 @@
@@ -13346,7 +13346,7 @@ index 0000000..ce812c0
 +    WCHAR cwd[1024];
 +};
 +
-+#define WINEIOS_SESSION_HOST L"ioswine-session.exe"
++#define WINEIOS_SESSION_HOST L"kitsune-session.exe"
 +
 +#define WINEIOS_CALL(func, params) WINE_UNIX_CALL(unix_ ## func, params)
 +
@@ -13522,7 +13522,7 @@ index 0000000..4a9cb58
 +
 +#endif /* __WINE_WINEIOS_METAL_H */
 diff --git a/dlls/xinput1_3/main.c b/dlls/xinput1_3/main.c
-index 8530b02..eaa6c93 100644
+index 8530b02..0dadd95 100644
 --- a/dlls/xinput1_3/main.c
 +++ b/dlls/xinput1_3/main.c
 @@ -43,6 +43,7 @@
@@ -13636,8 +13636,8 @@ index 8530b02..eaa6c93 100644
 +{
 +    struct ios_gamepad_info info;
 +    if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
-+    if (NtQuerySystemInformation((SYSTEM_INFORMATION_CLASS)IOSWINE_GAMEPAD_INFO_CLASS,
-+                                &info, sizeof(info), NULL) || info.version != IOSWINE_GAMEPAD_VERSION)
++    if (NtQuerySystemInformation((SYSTEM_INFORMATION_CLASS)KITSUNE_GAMEPAD_INFO_CLASS,
++                                &info, sizeof(info), NULL) || info.version != KITSUNE_GAMEPAD_VERSION)
 +        return ERROR_DEVICE_NOT_CONNECTED;
 +    *pad = info.pads[index];
 +    return pad->connected ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
@@ -13715,10 +13715,10 @@ index 8530b02..eaa6c93 100644
 +        {
 +            struct ios_gamepad_info info;
 +            char trace[8];
-+            ios_trace = GetEnvironmentVariableA("IOSWINE_XINPUT_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1';
-+            ios_backend = !NtQuerySystemInformation((SYSTEM_INFORMATION_CLASS)IOSWINE_GAMEPAD_INFO_CLASS,
++            ios_trace = GetEnvironmentVariableA("KITSUNE_XINPUT_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1';
++            ios_backend = !NtQuerySystemInformation((SYSTEM_INFORMATION_CLASS)KITSUNE_GAMEPAD_INFO_CLASS,
 +                                                    &info, sizeof(info), NULL) &&
-+                          info.version == IOSWINE_GAMEPAD_VERSION;
++                          info.version == KITSUNE_GAMEPAD_VERSION;
 +            if (ios_backend) WINE_MESSAGE("[ios-xinput] native GameController snapshot v1, four slots, no HID thread; pid=%04lx module=%p trace=%d\n",
 +                                         GetCurrentProcessId(), inst, ios_trace);
 +        }
@@ -13880,20 +13880,20 @@ index 867a608..a265f49 100644
  	wine/mmsystem16.h \
 diff --git a/include/wine/ios_gamepad.h b/include/wine/ios_gamepad.h
 new file mode 100644
-index 0000000..164db13
+index 0000000..6cddc86
 --- /dev/null
 +++ b/include/wine/ios_gamepad.h
 @@ -0,0 +1,31 @@
-+/* ios-wine private, pointer-free GameController -> XInput snapshot ABI.
++/* Kitsune private, pointer-free GameController -> XInput snapshot ABI.
 + * Shared by the native host, ntdll unix and ARM64EC PE XInput modules.
-+ * Copyright 2026 the ios-wine project. SPDX-License-Identifier: GPL-3.0-or-later */
++ * Copyright 2026 the Kitsune project. SPDX-License-Identifier: GPL-3.0-or-later */
 +#ifndef __WINE_IOS_GAMEPAD_H
 +#define __WINE_IOS_GAMEPAD_H
 +#include <stdint.h>
 +
-+#define IOSWINE_GAMEPAD_INFO_CLASS 1001
-+#define IOSWINE_GAMEPAD_VERSION 1
-+#define IOSWINE_GAMEPAD_COUNT 4
++#define KITSUNE_GAMEPAD_INFO_CLASS 1001
++#define KITSUNE_GAMEPAD_VERSION 1
++#define KITSUNE_GAMEPAD_COUNT 4
 +
 +struct ios_gamepad_state
 +{
@@ -13908,7 +13908,7 @@ index 0000000..164db13
 +struct ios_gamepad_info
 +{
 +    uint32_t version;
-+    struct ios_gamepad_state pads[IOSWINE_GAMEPAD_COUNT];
++    struct ios_gamepad_state pads[KITSUNE_GAMEPAD_COUNT];
 +};
 +
 +/* No pointers, native long, BOOL, atomics or platform ABI-dependent enums. */
@@ -14397,7 +14397,7 @@ index 94adb19..a900795 100644
      }
      else
 diff --git a/server/request.c b/server/request.c
-index 5135ed5..84e6fbf 100644
+index 5135ed5..ddf7b96 100644
 --- a/server/request.c
 +++ b/server/request.c
 @@ -267,6 +267,56 @@ static void send_reply( union generic_reply *reply )
@@ -14424,7 +14424,7 @@ index 5135ed5..84e6fbf 100644
 +
 +    if (ios_census_on < 0)
 +    {
-+        const char *level = getenv( "IOSWINE_DIAG_LEVEL" );
++        const char *level = getenv( "KITSUNE_DIAG_LEVEL" );
 +        ios_census_on = level && atoi( level ) >= 2;
 +        ios_census_since = monotonic_time;
 +    }

@@ -9,7 +9,7 @@ set -a; source "$ROOT/pins.env"; set +a
 # shellcheck source=/dev/null
 if [ -f "$ROOT/local.env" ]; then set -a; source "$ROOT/local.env"; set +a; fi
 # The app's bundle id, which the device scripts address.
-APP_ID="${IOSWINE_BUNDLE_ID:-dev.ioswine.m3boot}"
+APP_ID="${KITSUNE_BUNDLE_ID:-dev.kitsune.app}"
 
 # A full Xcode is required: the Command Line Tools lack the iphoneos SDK and
 # the libc++ headers. An explicit DEVELOPER_DIR wins; otherwise the first Xcode
@@ -75,7 +75,7 @@ apply_patch() {
     log "applying $(basename "$p") to $(basename "$repo")"
     git -C "$repo" apply "$p"
   else
-    die "patch does not apply to $repo: $p"
+    die "patch does not apply to $repo: $p. A checkout from before the rename to Kitsune, or one with unsaved edits, needs resetting: save your edits, then git -C $repo reset -q --hard && git -C $repo clean -fdq, and rerun"
   fi
 }
 

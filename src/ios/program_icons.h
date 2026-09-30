@@ -1,8 +1,8 @@
 /* Icons for the launcher: a program's own icon from its executable, and a
  * Steam game's header art from the Steam client's cache. Loaded off the main
  * thread and kept in memory and under Caches/icons. */
-#ifndef IOSWINE_PROGRAM_ICONS_H
-#define IOSWINE_PROGRAM_ICONS_H
+#ifndef KITSUNE_PROGRAM_ICONS_H
+#define KITSUNE_PROGRAM_ICONS_H
 
 #import <UIKit/UIKit.h>
 
@@ -19,6 +19,6 @@ extern const CGSize WineSteamArtSize;
 
 /* Header art in the Steam client's cache, in the per-app layout or the older
  * flat one; nil when Steam has not fetched it. */
-NSString *IOSWineSteamArtPath(NSString *steamRoot, NSString *appID);
+NSString *KitsuneSteamArtPath(NSString *steamRoot, NSString *appID);
 
 #endif

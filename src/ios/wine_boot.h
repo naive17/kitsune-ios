@@ -1,9 +1,9 @@
 /* Boot Wine in-process on iOS. See wine_boot.m. */
-#ifndef IOS_WINE_BOOT_H
-#define IOS_WINE_BOOT_H
+#ifndef KITSUNE_BOOT_H
+#define KITSUNE_BOOT_H
 #import <Foundation/Foundation.h>
 typedef void (^WineBootLog)(NSString *line);
-NSString *IOSWinePersistentDocuments(void);
+NSString *KitsunePersistentDocuments(void);
 NSString *WineTreeRoot(void);
 NSString *WineUnixRoot(void);
 NSString *WineLogPath(void);

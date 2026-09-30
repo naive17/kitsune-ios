@@ -6,7 +6,7 @@ index 20ab541..2077ded 100644
  #if PLATFORM_WINDOWS
  #include <windows.h>
  #include <fibersapi.h>
-+/* ios-wine: os_mmap() reserves aligned through VirtualAlloc2 (see there).
++/* Kitsune: os_mmap() reserves aligned through VirtualAlloc2 (see there).
 +   mingw-w64 hides the prototype behind NTDDI_WIN10_RS4 and this file does not
 +   raise NTDDI_VERSION; MEM_ADDRESS_REQUIREMENTS and the parameter-type enum are
 +   unconditional in winnt.h, so only this declaration is missing. Declared here
@@ -25,12 +25,12 @@ index 20ab541..2077ded 100644
  #define MEDIUM_PAGE_SIZE (1 << MEDIUM_PAGE_SIZE_SHIFT)
  #define MEDIUM_PAGE_MASK (~((uintptr_t)MEDIUM_PAGE_SIZE - 1))
 -#define LARGE_PAGE_SIZE_SHIFT 26
-+#define LARGE_PAGE_SIZE_SHIFT 24   /* ios-wine: 16 MB (was 64 MB); an 8 MB block still fits one per page */
++#define LARGE_PAGE_SIZE_SHIFT 24   /* Kitsune: 16 MB (was 64 MB); an 8 MB block still fits one per page */
  #define LARGE_PAGE_SIZE (1 << LARGE_PAGE_SIZE_SHIFT)
  #define LARGE_PAGE_MASK (~((uintptr_t)LARGE_PAGE_SIZE - 1))
  
 -#define SPAN_SIZE (256 * 1024 * 1024)
-+/* ios-wine: 16 MB spans, not 256 MB.
++/* Kitsune: 16 MB spans, not 256 MB.
 + *
 + * A span is reserved, not committed, so upstream's 256 MB costs nothing on a
 + * desktop. Here every span is a CONTIGUOUS HOLE in the app's address space,
@@ -55,7 +55,7 @@ index 20ab541..2077ded 100644
 +	const DWORD ios_flags = (os_huge_pages ? MEM_LARGE_PAGES : 0) | MEM_RESERVE | do_commit | MEM_TOP_DOWN;
 +	void* ptr = 0;
 +	/*
-+	 * ios-wine: reserve ALIGNED instead of reserving size+alignment and keeping
++	 * Kitsune: reserve ALIGNED instead of reserving size+alignment and keeping
 +	 * the slack.
 +	 *
 +	 * heap_get_span() asks for SPAN_SIZE with alignment SPAN_SIZE, so the plain

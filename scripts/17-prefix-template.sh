@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build out/wine-core/prefix-template, the prefix the app installs on first
 # launch instead of running wineboot --init on the phone. Requires
-# build/ioswine-host and build/host-tree (16-host-harness.sh) and out/wine-core.
+# build/kitsune-host and build/host-tree (16-host-harness.sh) and out/wine-core.
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 
 CORE="$OUT/wine-core"
-HOST="$ROOT/build/ioswine-host"
+HOST="$ROOT/build/kitsune-host"
 UNIX="$ROOT/build/host-tree"
 DEST="$CORE/prefix-template"
 WORK="$BUILD/prefix-template-work"
@@ -41,7 +41,7 @@ log "running wineboot --init against the shipping tree"
 # profile paths in system.reg, so it must match what the app sets
 # (configure_environment() in src/ios/wine_boot.m).
 USER=wine LOGNAME=wine \
-IOSWINE_UNIX="$UNIX" IOSWINE_TREE="$CORE" IOSWINE_PREFIX="$WORK" \
+KITSUNE_UNIX="$UNIX" KITSUNE_TREE="$CORE" KITSUNE_PREFIX="$WORK" \
   env WINEDEBUG=-all "$HOST" \
       "$CORE/lib/wine/aarch64-windows/wineboot.exe" --init \
   </dev/null >"$BUILD/prefix-template.log" 2>&1 \

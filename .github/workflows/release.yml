@@ -4,7 +4,7 @@
 # The toolchains (llvm-mingw, LLVM 15 for macOS and iOS, FreeType, GnuTLS)
 # change only with pins.env or their scripts, so a separate job builds them
 # once and caches them, and each job gets its own 6-hour limit. The repository
-# variable IOSWINE_RUNNER picks another runner, such as a self-hosted Mac.
+# variable KITSUNE_RUNNER picks another runner, such as a self-hosted Mac.
 name: Release IPA
 
 on:
@@ -36,7 +36,7 @@ env:
 
 jobs:
   toolchain:
-    runs-on: ${{ vars.IOSWINE_RUNNER || 'xcode-27' }}
+    runs-on: ${{ vars.KITSUNE_RUNNER || 'xcode-27' }}
     timeout-minutes: 360
     outputs:
       key: ${{ steps.key.outputs.key }}
@@ -67,7 +67,7 @@ jobs:
 
   ipa:
     needs: toolchain
-    runs-on: ${{ vars.IOSWINE_RUNNER || 'xcode-27' }}
+    runs-on: ${{ vars.KITSUNE_RUNNER || 'xcode-27' }}
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v5
@@ -81,11 +81,11 @@ jobs:
       - name: Package
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}" name="ioswine-$GITHUB_REF_NAME.ipa"
+            version="${GITHUB_REF_NAME#v}" name="kitsune-$GITHUB_REF_NAME.ipa"
           else
-            version="" name="ioswine-$(git rev-parse --short HEAD).ipa"
+            version="" name="kitsune-$(git rev-parse --short HEAD).ipa"
           fi
-          IOSWINE_VERSION="$version" scripts/app.sh ipa "build/$name"
+          KITSUNE_VERSION="$version" scripts/app.sh ipa "build/$name"
           echo "IPA=build/$name" >> "$GITHUB_ENV"
       # A tag's IPA goes to its release; artifacts count against the storage quota.
       - if: ${{ !startsWith(github.ref, 'refs/tags/v') }}

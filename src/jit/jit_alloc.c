@@ -27,7 +27,7 @@ __attribute__((naked, noinline)) static void *jit26_prepare_region(void *addr,
                    "ret\n");
 }
 
-/* ios-wine.js only: allocate RX without preparing it. Other scripts leave x0
+/* kitsune.js only: allocate RX without preparing it. Other scripts leave x0
  * as it was, which is NULL here. */
 __attribute__((naked, noinline)) static void *jit26_allocate_region(void *addr,
                                                                     size_t len) {
@@ -84,7 +84,7 @@ int jit_alloc_available(char *err, size_t errlen) {
   if (!handshake(NULL, page, &r, &sig)) {
     if (err)
       snprintf(err, errlen,
-               "brk #0xf00d raised %s (%d): no debugger with the ios-wine JIT "
+               "brk #0xf00d raised %s (%d): no debugger with the Kitsune JIT "
                "script is attached",
                strsignal(sig), sig);
     return 0;

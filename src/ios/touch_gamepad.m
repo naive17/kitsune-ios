@@ -11,13 +11,13 @@ static const NSTimeInterval kTapDuration = 0.25;
 
 static const uint16_t kThumbButton[2] = { 0x0040, 0x0080 };
 
-static inline CGRect RectOf(IOSWinePadRect r) { return CGRectMake(r.x, r.y, r.w, r.h); }
+static inline CGRect RectOf(KitsunePadRect r) { return CGRectMake(r.x, r.y, r.w, r.h); }
 static inline BOOL IsFace(int c) { return c >= TP_A && c <= TP_Y; }
 static inline BOOL IsDpad(int c) { return c >= TP_UP && c <= TP_RIGHT; }
 static inline int StickOf(int c) { return c == TP_LSTICK ? 0 : c == TP_RSTICK ? 1 : -1; }
 
 @implementation WineTouchGamepad {
-  IOSWinePadRect _rects[TP_COUNT];
+  KitsunePadRect _rects[TP_COUNT];
   CGFloat _unit;
   CAShapeLayer *_shapes[TP_COUNT];
   CATextLayer *_labels[TP_COUNT];
@@ -47,7 +47,7 @@ static inline int StickOf(int c) { return c == TP_LSTICK ? 0 : c == TP_RSTICK ? 
       [self.layer addSublayer:s];
       _shapes[i] = s;
       CATextLayer *l = [CATextLayer layer];
-      l.string = NSLocalizedString(@(kIOSWinePadLabel[i]), nil);
+      l.string = NSLocalizedString(@(kKitsunePadLabel[i]), nil);
       l.alignmentMode = kCAAlignmentCenter;
       l.foregroundColor = [UIColor colorWithWhite:1 alpha:0.85].CGColor;
       l.font = (__bridge CFTypeRef)[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
@@ -72,8 +72,8 @@ static inline int StickOf(int c) { return c == TP_LSTICK ? 0 : c == TP_RSTICK ? 
   [super layoutSubviews];
   CGSize size = self.bounds.size;
   UIEdgeInsets inset = self.safeAreaInsets;
-  IOSWinePadScreen screen = { size.width, size.height, inset.left, inset.top, inset.right, inset.bottom };
-  _unit = IOSWinePadLayout(screen, _rects);
+  KitsunePadScreen screen = { size.width, size.height, inset.left, inset.top, inset.right, inset.bottom };
+  _unit = KitsunePadLayout(screen, _rects);
   CGFloat scale = self.traitCollection.displayScale;
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
@@ -249,7 +249,7 @@ static inline int StickOf(int c) { return c == TP_LSTICK ? 0 : c == TP_RSTICK ? 
     } else if (IsDpad(c)) {
       uint16_t bits = [self dpadBitsAt:p];
       s.buttons |= bits;
-      for (int d = TP_UP; d <= TP_RIGHT; d++) if (bits & kIOSWinePadButton[d]) lit[d] = YES;
+      for (int d = TP_UP; d <= TP_RIGHT; d++) if (bits & kKitsunePadButton[d]) lit[d] = YES;
     } else if (c == TP_LT) {
       s.left_trigger = 255;
       lit[c] = YES;
@@ -257,14 +257,14 @@ static inline int StickOf(int c) { return c == TP_LSTICK ? 0 : c == TP_RSTICK ? 
       s.right_trigger = 255;
       lit[c] = YES;
     } else {
-      s.buttons |= kIOSWinePadButton[c];
+      s.buttons |= kKitsunePadButton[c];
       lit[c] = YES;
     }
   }
-  s.lx = IOSWineGamepadAxis(stick[0].x);
-  s.ly = IOSWineGamepadAxis(stick[0].y);
-  s.rx = IOSWineGamepadAxis(stick[1].x);
-  s.ry = IOSWineGamepadAxis(stick[1].y);
+  s.lx = KitsuneGamepadAxis(stick[0].x);
+  s.ly = KitsuneGamepadAxis(stick[0].y);
+  s.rx = KitsuneGamepadAxis(stick[1].x);
+  s.ry = KitsuneGamepadAxis(stick[1].y);
 
   [CATransaction begin];
   [CATransaction setDisableActions:YES];

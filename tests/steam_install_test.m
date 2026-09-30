@@ -12,7 +12,7 @@ int main(void) {
          "\t\"steam_win64\"\n\t{\n\t\t\"file\"\t\t\"steam_win64_c3d4.zip.def\"\n\t\t\"size\"\t\t\"99\"\n\t\t\"sha2\"\t\t\""
          "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" "\"\n\t}\n\t\"note\"\t\t\"x\"\n}\n";
     NSString *version = nil;
-    NSArray *pk = IOSWineSteamPackages(manifest, &version);
+    NSArray *pk = KitsuneSteamPackages(manifest, &version);
     assert(pk.count == 2 && [version isEqualToString:@"1758000000"]);
     /* Largest download first; a package with a VZ copy downloads the VZ. */
     assert([pk[0][@"name"] isEqualToString:@"bins_win64"] && [pk[0][@"title"] isEqualToString:@"Steam client"]);
@@ -20,13 +20,13 @@ int main(void) {
     assert([pk[0][@"download"] isEqualToString:@"bins_win64.zip.vz.a1b2_9000"] && [pk[0][@"downloadSize"] unsignedLongLongValue] == 9000);
     assert([pk[0][@"downloadSha2"] hasPrefix:@"abab"] && [pk[0][@"vz"] isEqualToString:pk[0][@"download"]]);
     assert(!pk[1][@"vz"] && [pk[1][@"download"] isEqualToString:@"steam_win64_c3d4.zip.def"] && [pk[1][@"downloadSize"] unsignedLongLongValue] == 99);
-    assert([pk[1][@"title"] isEqualToString:@"Steam launcher"] && [IOSWineSteamPackageTitle(@"new_pkg") isEqualToString:@"new_pkg"]);
-    assert(!IOSWineSteamPackages([manifest stringByReplacingOccurrencesOfString:@"zip.def" withString:@"zip/../x"], nil));
-    assert(!IOSWineSteamPackages([manifest stringByReplacingOccurrencesOfString:@"fedcba98" withString:@"FEDCBA98"], nil));
-    assert(!IOSWineSteamPackages([manifest stringByReplacingOccurrencesOfString:@"a1b2_9000" withString:@"a1b2_90x0"], nil));
-    assert(!IOSWineSteamPackages([manifest stringByReplacingOccurrencesOfString:@"\t\t\"sha2vz\"" withString:@"\t\t\"other\""], nil));
-    assert(!IOSWineSteamPackages(@"\"win64\" { \"version\" \"1\" }", nil));
-    assert(!IOSWineSteamPackages(@"garbage {", nil));
+    assert([pk[1][@"title"] isEqualToString:@"Steam launcher"] && [KitsuneSteamPackageTitle(@"new_pkg") isEqualToString:@"new_pkg"]);
+    assert(!KitsuneSteamPackages([manifest stringByReplacingOccurrencesOfString:@"zip.def" withString:@"zip/../x"], nil));
+    assert(!KitsuneSteamPackages([manifest stringByReplacingOccurrencesOfString:@"fedcba98" withString:@"FEDCBA98"], nil));
+    assert(!KitsuneSteamPackages([manifest stringByReplacingOccurrencesOfString:@"a1b2_9000" withString:@"a1b2_90x0"], nil));
+    assert(!KitsuneSteamPackages([manifest stringByReplacingOccurrencesOfString:@"\t\t\"sha2vz\"" withString:@"\t\t\"other\""], nil));
+    assert(!KitsuneSteamPackages(@"\"win64\" { \"version\" \"1\" }", nil));
+    assert(!KitsuneSteamPackages(@"garbage {", nil));
 
     /* The launcher package has realm variants beside its generic names; the
      * updater checks steamrow's. */
@@ -41,26 +41,26 @@ int main(void) {
                         sha, sha, variant(@"steam_win64_steamrow"), variant(@"steam_win64_steamchina")];
     NSData *(^bytes)(const char *) = ^NSData *(const char *str) { return [NSData dataWithBytes:str length:strlen(str)]; };
     /* package/steam_client_win64.manifest: the server's manifest with CRLF. */
-    assert([IOSWineSteamSavedManifest(bytes("\"win64\"\n{\n}\n")) isEqualToData:bytes("\"win64\"\r\n{\r\n}\r\n")]);
-    assert([IOSWineSteamSavedManifest(bytes("a\r\nb\n")) isEqualToData:bytes("a\r\nb\r\n")]);
-    assert(IOSWineSteamSavedManifest([NSData data]).length == 0);
+    assert([KitsuneSteamSavedManifest(bytes("\"win64\"\n{\n}\n")) isEqualToData:bytes("\"win64\"\r\n{\r\n}\r\n")]);
+    assert([KitsuneSteamSavedManifest(bytes("a\r\nb\n")) isEqualToData:bytes("a\r\nb\r\n")]);
+    assert(KitsuneSteamSavedManifest([NSData data]).length == 0);
 
     /* package/steam_client_win64.installed, against lines of an index Steam's
      * updater wrote itself: the zip's DOS time read as UTC plus eight hours,
      * CRC-32 unsigned, folders with -1, then the footer and its SHA-1. */
-    assert(IOSWineSteamFileTime(23724, 20597) == 1778609022);   /* 2026-05-12 10:03:42 */
-    assert(IOSWineSteamFileTime(22094, 2903) == 1676366806);    /* 2023-02-14 01:26:46 */
-    assert([IOSWineSteamIndexLine(@"bin/hardwareupdater/hardwareupdater.exe", NO, 8718056, 1778609022, 3829382378u)
+    assert(KitsuneSteamFileTime(23724, 20597) == 1778609022);   /* 2026-05-12 10:03:42 */
+    assert(KitsuneSteamFileTime(22094, 2903) == 1676366806);    /* 2023-02-14 01:26:46 */
+    assert([KitsuneSteamIndexLine(@"bin/hardwareupdater/hardwareupdater.exe", NO, 8718056, 1778609022, 3829382378u)
                isEqualToString:@"bin\\hardwareupdater\\hardwareupdater.exe,8718056;1778609022;3829382378"]);
-    assert([IOSWineSteamIndexLine(@"bin/hardwareupdater/", YES, 0, 1778609022, 0) isEqualToString:@"bin\\hardwareupdater\\,-1;1778609022;0"]);
-    assert([IOSWineSteamIndexLine(@"bin", YES, 0, 5, 0) isEqualToString:@"bin\\,-1;5;0"]);
-    assert([IOSWineSteamInstalledIndex(@[ @"a.dll,3;5;7", @"bin\\,-1;5;0" ])
+    assert([KitsuneSteamIndexLine(@"bin/hardwareupdater/", YES, 0, 1778609022, 0) isEqualToString:@"bin\\hardwareupdater\\,-1;1778609022;0"]);
+    assert([KitsuneSteamIndexLine(@"bin", YES, 0, 5, 0) isEqualToString:@"bin\\,-1;5;0"]);
+    assert([KitsuneSteamInstalledIndex(@[ @"a.dll,3;5;7", @"bin\\,-1;5;0" ])
                isEqualToData:bytes("a.dll,3;5;7\r\nbin\\,-1;5;0\r\nOSVER=16\r\nVERSION=3\r\n"
                                    "SHA1=9F74BAC24C887C4147973B1A92402F734CCDDE22\r\n")]);
     /* Between two packages holding one path, the later in the manifest wins. */
     assert([pk[1][@"order"] unsignedIntegerValue] > [pk[0][@"order"] unsignedIntegerValue]);
 
-    pk = IOSWineSteamPackages(realms, nil);
+    pk = KitsuneSteamPackages(realms, nil);
     assert(pk.count == 1 && [pk[0][@"name"] isEqualToString:@"steam_win64"]);
     assert([pk[0][@"download"] isEqualToString:@"steam_win64_steamrow.zip.vz.abc_80"] &&
            [pk[0][@"file"] isEqualToString:@"steam_win64_steamrow.zip.abc"]);
@@ -81,13 +81,13 @@ int main(void) {
     assert([@"v1" writeToFile:[tree stringByAppendingPathComponent:@"TREE_VERSION"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
     assert([fm createDirectoryAtPath:docs withIntermediateDirectories:YES attributes:nil error:nil]);
     NSString *error = nil;
-    assert(IOSWineCreateBottle(docs, tree, @"Steam", &error));
-    NSString *bottle = IOSWineBottlePath(docs, @"Steam");
-    assert(!IOSWinePrepareSteamBottle(bottle, tree, &error) && [error containsString:@"comctl32_v6.dll"]);
+    assert(KitsuneCreateBottle(docs, tree, @"Steam", &error));
+    NSString *bottle = KitsuneBottlePath(docs, @"Steam");
+    assert(!KitsunePrepareSteamBottle(bottle, tree, &error) && [error containsString:@"comctl32_v6.dll"]);
     assert([@"MZv6" writeToFile:[pe stringByAppendingPathComponent:@"comctl32_v6.dll"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
     assert([@"MZrsa" writeToFile:[pe stringByAppendingPathComponent:@"rsaenh.dll"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
-    assert(IOSWinePrepareSteamBottle(bottle, tree, &error) && !error);
-    assert(IOSWinePrepareSteamBottle(bottle, tree, &error));   /* idempotent */
+    assert(KitsunePrepareSteamBottle(bottle, tree, &error) && !error);
+    assert(KitsunePrepareSteamBottle(bottle, tree, &error));   /* idempotent */
     NSString *sys = [NSString stringWithContentsOfFile:[bottle stringByAppendingPathComponent:@"system.reg"] encoding:NSUTF8StringEncoding error:nil];
     assert([sys componentsSeparatedByString:@"Microsoft Enhanced RSA and AES Cryptographic Provider]"].count == 2);
     assert([sys containsString:@"\"Image Path\"=\"C:\\\\windows\\\\system32\\\\rsaenh.dll\""] && [sys hasPrefix:@"WINE REGISTRY Version 2"]);
@@ -95,9 +95,9 @@ int main(void) {
     assert([usr componentsSeparatedByString:@"\"Version\"=\"win10\""].count == 2 && [usr containsString:@"[Software\\\\Wine] "]);
     NSString *sxs = [bottle stringByAppendingPathComponent:@"drive_c/windows/winsxs"];
     NSString *man = [NSString stringWithContentsOfFile:[sxs stringByAppendingPathComponent:
-        [@"manifests/" stringByAppendingString:[IOSWINE_COMCTL_ASSEMBLY stringByAppendingString:@".manifest"]]] encoding:NSUTF8StringEncoding error:nil];
+        [@"manifests/" stringByAppendingString:[KITSUNE_COMCTL_ASSEMBLY stringByAppendingString:@".manifest"]]] encoding:NSUTF8StringEncoding error:nil];
     assert([man containsString:@"processorArchitecture=\"arm64\""] && [man containsString:@"version=\"6.0.2600.2982\""]);
-    assert([[NSString stringWithContentsOfFile:[[sxs stringByAppendingPathComponent:IOSWINE_COMCTL_ASSEMBLY] stringByAppendingPathComponent:@"comctl32.dll"]
+    assert([[NSString stringWithContentsOfFile:[[sxs stringByAppendingPathComponent:KITSUNE_COMCTL_ASSEMBLY] stringByAppendingPathComponent:@"comctl32.dll"]
         encoding:NSUTF8StringEncoding error:nil] isEqualToString:@"MZv6"]);
     assert([[NSString stringWithContentsOfFile:[bottle stringByAppendingPathComponent:@"drive_c/windows/system32/rsaenh.dll"]
         encoding:NSUTF8StringEncoding error:nil] isEqualToString:@"MZrsa"]);
@@ -110,8 +110,8 @@ int main(void) {
     for (NSString *n in @[ @"hb.log", @"wine-stderr.log", @"wine-stderr.log.previous-1", @"launch-request.json.consumed-2", @"render-scale" ])
       assert([@"x" writeToFile:[docs stringByAppendingPathComponent:n] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
     assert([@"shader" writeToFile:[cache stringByAppendingPathComponent:@"db"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
-    assert(IOSWineDirectorySize(cache) == 6);
-    IOSWineRemoveEverything(docs, cache);
+    assert(KitsuneDirectorySize(cache) == 6);
+    KitsuneRemoveEverything(docs, cache);
     assert(![fm fileExistsAtPath:[docs stringByAppendingPathComponent:@"Apps"]] && ![fm fileExistsAtPath:[docs stringByAppendingPathComponent:@"Bottles"]]);
     assert(![fm fileExistsAtPath:[docs stringByAppendingPathComponent:@"hb.log"]] && ![fm fileExistsAtPath:[docs stringByAppendingPathComponent:@"render-scale"]]);
     assert(![fm fileExistsAtPath:cache]);

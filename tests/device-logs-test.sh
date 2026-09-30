@@ -2,7 +2,7 @@
 # Exercise the actual capture function without an iPhone or Xcode.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-capture_test_dir="$(mktemp -d /tmp/ioswine-log-test.XXXXXX)"
+capture_test_dir="$(mktemp -d /tmp/kitsune-log-test.XXXXXX)"
 trap 'rm -rf "$capture_test_dir"' EXIT
 STATE="$capture_test_dir"
 APP=test-app

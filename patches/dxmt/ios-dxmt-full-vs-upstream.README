@@ -3,7 +3,7 @@ DXMT port snapshot
 
 Repository: https://github.com/3Shain/dxmt.git
 Base: 589adb780354b461645b29999cefaf533594ee99 (v0.80) with 0001 and 0002 from
-this directory applied and committed as "ios-wine base". That commit is the
+this directory applied and committed as "Kitsune base". That commit is the
 pre-image of ios-dxmt-full-vs-upstream.patch.
 
   0001-xcode27-metal-and-libcxx-fixes.patch  builds v0.80 with Xcode 27's Metal
@@ -26,9 +26,9 @@ constant-buffer argument layout are shared. Ship both or neither.
 
 Contents beyond upstream: iOS support in winemetal, Managed-to-Shared storage
 on iOS, CPU BC1..BC7 decode (bcdec, MIT, src/dxmt/bcdec.h) with an optional
-16-bit BC1 path behind IOSWINE_BC_16BIT=1, BC mip capping with logical
+16-bit BC1 path behind KITSUNE_BC_16BIT=1, BC mip capping with logical
 descriptors, ETC2/EAC transcode (etcpak, BSD-3, src/winemetal/unix/etcpak)
-behind IOSWINE_BC_NATIVE=1, constant-buffer bounds checks, GPU debug mask
+behind KITSUNE_BC_NATIVE=1, constant-buffer bounds checks, GPU debug mask
 (Documents/dxmt-gpu-debug.txt), nil drawable handling (testable with
-IOSWINE_NIL_DRAWABLE_EVERY=N), and present count, GPU busy time and frame cap
+KITSUNE_NIL_DRAWABLE_EVERY=N), and present count, GPU busy time and frame cap
 hooks for the app.

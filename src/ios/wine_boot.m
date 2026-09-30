@@ -25,7 +25,7 @@ static void set_env(const char *k, NSString *v) {
 }
 
 /* The app's Documents: programs, bottles, logs and the Wine tree. */
-NSString *IOSWinePersistentDocuments(void) {
+NSString *KitsunePersistentDocuments(void) {
   static NSString *cached;
   static dispatch_once_t once;
   dispatch_once(&once, ^{
@@ -42,7 +42,7 @@ NSString *WineUnixRoot(void) {
 }
 
 NSString *WineTreeRoot(void) {
-  return [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"wine"];
+  return [KitsunePersistentDocuments() stringByAppendingPathComponent:@"wine"];
 }
 
 NSString *WineShaderCacheRoot(void) {
@@ -99,7 +99,7 @@ static void rewrite_stale_container_paths(NSString *prefix, NSString *docs) {
     if (!fixed) continue;
     NSData *outData = [out dataUsingEncoding:NSUTF8StringEncoding];
     if (outData && [outData writeToFile:path atomically:YES])
-      NSLog(@"[ioswine] container-path fix: %lu stale path(s) -> %@ in %@", (unsigned long)fixed, current,
+      NSLog(@"[kitsune] container-path fix: %lu stale path(s) -> %@ in %@", (unsigned long)fixed, current,
             path.lastPathComponent);
   }
 }
@@ -110,7 +110,7 @@ static void prune_when_disk_is_low(NSString *docs)
   NSDictionary *attrs = [fm attributesOfFileSystemForPath:docs error:nil];
   unsigned long long freeMB = [attrs[NSFileSystemFreeSize] unsignedLongLongValue] >> 20;
 
-  NSLog(@"[ioswine] disk: %llu MB free", freeMB);
+  NSLog(@"[kitsune] disk: %llu MB free", freeMB);
   if (freeMB > 1500) return;
 
   NSArray *prunable = @[ @"Apps/Steam/package",
@@ -124,12 +124,12 @@ static void prune_when_disk_is_low(NSString *docs)
     if (![fm fileExistsAtPath:path]) continue;
     NSError *err = nil;
     if ([fm removeItemAtPath:path error:&err])
-      NSLog(@"[ioswine] disk: pruned %@", rel);
+      NSLog(@"[kitsune] disk: pruned %@", rel);
     else
-      NSLog(@"[ioswine] disk: could not prune %@: %@", rel, err);
+      NSLog(@"[kitsune] disk: could not prune %@: %@", rel, err);
   }
   attrs = [fm attributesOfFileSystemForPath:docs error:nil];
-  NSLog(@"[ioswine] disk: %llu MB free after pruning",
+  NSLog(@"[kitsune] disk: %llu MB free after pruning",
         [attrs[NSFileSystemFreeSize] unsignedLongLongValue] >> 20);
 }
 
@@ -137,7 +137,7 @@ static void configure_environment(NSString *root) {
   /* Same root as WineTreeRoot()/WineBootPrefix(): HOME and WINEPREFIX are
    * derived here independently, so they MUST resolve to the identical directory
    * or Wine would boot a different prefix than the app checks and rebuilds. */
-  NSString *docs = IOSWinePersistentDocuments();
+  NSString *docs = KitsunePersistentDocuments();
   set_env("HOME", docs);
   set_env("WINEPREFIX", WineBootPrefix());
   rewrite_stale_container_paths(WineBootPrefix(), docs);
@@ -149,7 +149,7 @@ static void configure_environment(NSString *root) {
   /* Trust material ships with the signed app, never with an untrusted peer.
    * crypt32 still checks certificate signatures and builds the normal chain.
    * A missing bundle leaves no implicit trust; this is not iOS keychain access. */
-  set_env("IOSWINE_CA_BUNDLE", [NSBundle.mainBundle.bundlePath
+  set_env("KITSUNE_CA_BUNDLE", [NSBundle.mainBundle.bundlePath
                                  stringByAppendingPathComponent:@"share/wine/cacert.pem"]);
 
   setenv("WINEBOOTSTRAPMODE", "1", 1);
@@ -181,31 +181,31 @@ static void configure_environment(NSString *root) {
   /* The diagnostics level's environment and WINEDEBUG, for launches that did
    * not bring them; what a launch request set is kept. */
   {
-    IOSWineDiagLevel level = IOSWineDiagLevelFromEnv();
-    NSDictionary<NSString *, NSString *> *diag = IOSWineDiagLaunchEnv(level);
+    KitsuneDiagLevel level = KitsuneDiagLevelFromEnv();
+    NSDictionary<NSString *, NSString *> *diag = KitsuneDiagLaunchEnv(level);
     for (NSString *k in diag) setenv(k.UTF8String, diag[k].UTF8String, 0);
-    if (!getenv("WINEDEBUG")) setenv("WINEDEBUG", IOSWineDiagPolicyFor(level).winedebug_other, 1);
+    if (!getenv("WINEDEBUG")) setenv("WINEDEBUG", KitsuneDiagPolicyFor(level).winedebug_other, 1);
   }
 }
 
 #include "launch_request.h"
 static NSString *selectedBottle;
 BOOL WineBootSelectBottle(NSString *name) {
-  if (name && !IOSWineBottleNameValid(name)) return NO;
+  if (name && !KitsuneBottleNameValid(name)) return NO;
   selectedBottle = [name copy];
   return YES;
 }
 NSString *WineBootPrefix(void) {
   NSString *relative = selectedBottle
       ? [@"Bottles" stringByAppendingPathComponent:selectedBottle] : @"prefix";
-  return [IOSWinePersistentDocuments() stringByAppendingPathComponent:relative];
+  return [KitsunePersistentDocuments() stringByAppendingPathComponent:relative];
 }
 
 static char g_wine_log_path[1024];
 
 const char *WineLogPathC(void) {
   if (!g_wine_log_path[0]) {
-    NSString *p = [IOSWinePersistentDocuments()
+    NSString *p = [KitsunePersistentDocuments()
                       stringByAppendingPathComponent:@"wine-stderr.log"];
     strlcpy(g_wine_log_path, p.fileSystemRepresentation ?: "", sizeof(g_wine_log_path));
   }
@@ -227,7 +227,7 @@ static int redirect_wine_output(char *why, size_t whylen) {
     snprintf(why, whylen, "open(%s): %s", path, strerror(errno));
     return 0;
   }
-  const char *hdr = "=== ios-wine: wine log opened ===\n";
+  const char *hdr = "=== Kitsune: wine log opened ===\n";
   if (write(fd, hdr, strlen(hdr)) < 0) {
     snprintf(why, whylen, "write: %s", strerror(errno));
     close(fd);
@@ -335,7 +335,7 @@ static volatile int g_wine_exited = 0;
 static volatile int g_wine_status = 0;
 
 __attribute__((visibility("default")))
-void ios_wine_process_exited(int status) {
+void kitsune_process_exited(int status) {
   void (*flush)(void) = dlsym(RTLD_DEFAULT, "wineserver_inproc_flush");
   if (flush) flush();
   g_wine_status = status;
@@ -376,7 +376,7 @@ int WineBootRun(NSArray<NSString *> *args, WineBootLog log, char *err,
     if (e && strstr(e, "code signature"))
       snprintf(err, errlen,
                "dlopen refused (code signature). JIT is not enabled: tap Enable "
-               "JIT, which opens StikDebug with the ios-wine script. Detail: %s", e);
+               "JIT, which opens StikDebug with the Kitsune script. Detail: %s", e);
     else
       snprintf(err, errlen, "dlopen(ntdll.so): %s", e ? e : "?");
     return 0;
@@ -422,7 +422,7 @@ int WineBootRun(NSArray<NSString *> *args, WineBootLog log, char *err,
     return 0;
   }
   if (log) log(@"wine stderr captured to Documents/wine-stderr.log");
-  fprintf(stderr, "=== ios-wine app %s %s ===\n", __DATE__, __TIME__);
+  fprintf(stderr, "=== Kitsune app %s %s ===\n", __DATE__, __TIME__);
   for (int i = 0; i < argc; i++)
     fprintf(stderr, "=== argv[%d] %s\n", i, argv[i] ? argv[i] : "(null)");
   fprintf(stderr, "=== entering __wine_main ===\n");

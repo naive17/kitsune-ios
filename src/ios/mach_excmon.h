@@ -1,5 +1,5 @@
-#ifndef IOSWINE_MACH_EXCMON_H
-#define IOSWINE_MACH_EXCMON_H
+#ifndef KITSUNE_MACH_EXCMON_H
+#define KITSUNE_MACH_EXCMON_H
 
 #ifdef __cplusplus
 extern "C" {

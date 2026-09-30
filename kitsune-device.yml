@@ -1,6 +1,6 @@
-name: ioswine-device
+name: kitsune-device
 options:
-  bundleIdPrefix: dev.ioswine
+  bundleIdPrefix: dev.kitsune
   deploymentTarget:
     iOS: "15.0"
   xcodeVersion: "26.0"
@@ -13,7 +13,7 @@ settings:
     ONLY_ACTIVE_ARCH: YES
 
 targets:
-  ioswine-device:
+  kitsune-device:
     type: application
     platform: iOS
     deploymentTarget: "15.0"
@@ -49,7 +49,11 @@ targets:
       - path: src/ios/wine_surface.m
         compilerFlags: -fno-objc-arc
       - path: src/jit/jit_alloc.c
-      - path: jit-scripts/ios-wine.js
+      - path: jit-scripts/kitsune.js
+        buildPhase: resources
+      # The app icon, made with Icon Composer; actool compiles it into
+      # Assets.car (ASSETCATALOG_COMPILER_APPICON_NAME below).
+      - path: assets/icon.icon
         buildPhase: resources
       # The app's texts (en.lproj/Localizable.strings, InfoPlist.strings),
       # bundled as localized variant groups.
@@ -67,10 +71,11 @@ targets:
       - sdk: libz.tbd
     settings:
       base:
-        PRODUCT_NAME: ioswine
-        PRODUCT_BUNDLE_IDENTIFIER: dev.ioswine.m3boot
+        PRODUCT_NAME: Kitsune
+        PRODUCT_BUNDLE_IDENTIFIER: dev.kitsune.app
         INFOPLIST_FILE: src/ios/Info.plist
-        CODE_SIGN_ENTITLEMENTS: src/ios/ioswine.entitlements
+        CODE_SIGN_ENTITLEMENTS: src/ios/kitsune.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: icon
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
@@ -102,7 +107,7 @@ targets:
           NLS_DIR="$APP/share/wine/nls"
 
           /bin/rm -rf "$BOOTSTRAP" "$APP/lib/wine" "$APP/share/wine"
-          if test "${IOSWINE_THIN_UPDATE:-0}" = 1; then
+          if test "${KITSUNE_THIN_UPDATE:-0}" = 1; then
             RUNTIME="$SRCROOT/.deploy/runtime"
             test -f "$RUNTIME/lib/wine/aarch64-unix/winecoreaudio.so"
             /usr/bin/ditto "$RUNTIME/lib" "$APP/lib"
@@ -143,9 +148,9 @@ targets:
           fi
 
 schemes:
-  ioswine-device:
+  kitsune-device:
     build:
       targets:
-        ioswine-device: all
+        kitsune-device: all
     run:
       config: Debug

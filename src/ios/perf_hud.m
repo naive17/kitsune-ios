@@ -17,9 +17,9 @@ static BOOL resolve_winemetal(void) {
   NSString *path = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"lib/wine/aarch64-unix/winemetal.so"];
   void *h = dlopen(path.fileSystemRepresentation, RTLD_NOLOAD | RTLD_LAZY);
   if (!h) return NO;
-  present_count = dlsym(h, "ioswine_get_present_count");
-  gpu_busy_ns = dlsym(h, "ioswine_gpu_busy_ns");
-  gpu_timing_enable = dlsym(h, "ioswine_gpu_timing_enable");
+  present_count = dlsym(h, "kitsune_get_present_count");
+  gpu_busy_ns = dlsym(h, "kitsune_gpu_busy_ns");
+  gpu_timing_enable = dlsym(h, "kitsune_gpu_timing_enable");
   return present_count != NULL;
 }
 

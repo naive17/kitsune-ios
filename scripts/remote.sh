@@ -7,7 +7,7 @@
 source "$(dirname "$0")/common.sh"
 UDID=$(phone_udid)
 APP=${APP:-$APP_ID}
-SHOT=${SHOT:-/tmp/ioswine-shot.png}
+SHOT=${SHOT:-/tmp/kitsune-shot.png}
 WAIT=1500
 if [ "${1:-}" = "--wait" ]; then WAIT=$2; shift 2; fi
 if [ "${1:-}" != "--shot" ] && [ $# -gt 0 ]; then

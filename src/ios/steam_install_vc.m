@@ -140,7 +140,7 @@ typedef NS_ENUM(NSInteger, SummaryRow) {
 - (void)fetch {
   [self setStatus:NSLocalizedString(@"Checking the latest version…", nil) error:NO];
   self.navigationItem.rightBarButtonItem.enabled = NO;
-  [WineSteamInstaller fetchClientInto:IOSWinePersistentDocuments()
+  [WineSteamInstaller fetchClientInto:KitsunePersistentDocuments()
                            completion:^(NSString *version, NSArray<NSDictionary *> *packages, NSString *error) {
     if (!packages) {
       [self setStatus:error error:YES];
@@ -169,7 +169,7 @@ typedef NS_ENUM(NSInteger, SummaryRow) {
   _bar.hidden = NO;
   _bar.progress = 0;
   [_list.tableView reloadData];
-  [WineSteamInstaller installIntoDocuments:IOSWinePersistentDocuments() treeRoot:WineTreeRoot()
+  [WineSteamInstaller installIntoDocuments:KitsunePersistentDocuments() treeRoot:WineTreeRoot()
       progress:^(WineSteamStep step, NSUInteger package, double fraction, double overall) {
         [self step:step package:package fraction:fraction overall:overall];
       }

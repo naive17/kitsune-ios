@@ -1,7 +1,7 @@
 /* A sheet for work that takes time: title, stage, bar. It closes itself when
  * the work succeeds, and stays, with Done, only to show an error. */
-#ifndef IOSWINE_PROGRESS_VC_H
-#define IOSWINE_PROGRESS_VC_H
+#ifndef KITSUNE_PROGRESS_VC_H
+#define KITSUNE_PROGRESS_VC_H
 
 #import <UIKit/UIKit.h>
 

@@ -22,7 +22,7 @@ static CGFloat host_render_scale( UIScreen *screen, CGSize area_pt )
 
     @autoreleasepool
     {
-        requested = IOSWineRenderScaleStored( NSUserDefaults.standardUserDefaults );
+        requested = KitsuneRenderScaleStored( NSUserDefaults.standardUserDefaults );
         if (!(requested >= 1.0))
         {
             NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/render-scale"];
@@ -35,13 +35,13 @@ static CGFloat host_render_scale( UIScreen *screen, CGSize area_pt )
         /* Landscape and nothing chosen: the smallest scale at which an 800x600
          * mode still fits the desktop. Every render target scales with the
          * desktop, so this is also the cheapest valid configuration. */
-        cap = (CGFloat)IOSWineMinimumScaleForPoints( area_pt.width, area_pt.height );
+        cap = (CGFloat)KitsuneMinimumScaleForPoints( area_pt.width, area_pt.height );
     return MIN( native, cap );
 }
 
 static int host_safe_area_enabled( void )
 {
-    @autoreleasepool { return IOSWineSafeAreaStored( NSUserDefaults.standardUserDefaults ); }
+    @autoreleasepool { return KitsuneSafeAreaStored( NSUserDefaults.standardUserDefaults ); }
 }
 
 /* The part of the root view the desktop may use: the safe area when the

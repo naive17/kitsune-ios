@@ -111,7 +111,7 @@ enum { VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0d, VK_SHIFT = 0x10,
         queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
             typeof(self) me = weakSelf;
             if (me) {
-                IOSWinePulseCancel(&me->_keyPulses, drv_key, drv_unicode);
+                KitsunePulseCancel(&me->_keyPulses, drv_key, drv_unicode);
                 dispatch_source_set_timer(me->_keyPulseTimer, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
             }
         }];
@@ -120,7 +120,7 @@ enum { VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0d, VK_SHIFT = 0x10,
     dispatch_source_set_event_handler(_keyPulseTimer, ^{
         typeof(self) me = weakSelf;
         if (me) {
-            IOSWinePulseTick(&me->_keyPulses, (uint64_t)(CACurrentMediaTime() * 1000), drv_key, drv_unicode);
+            KitsunePulseTick(&me->_keyPulses, (uint64_t)(CACurrentMediaTime() * 1000), drv_key, drv_unicode);
             if (!me->_keyPulses.phase && me->_keyPulses.head == me->_keyPulses.tail)
                 dispatch_source_set_timer(me->_keyPulseTimer, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
         }
@@ -172,7 +172,7 @@ enum { VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0d, VK_SHIFT = 0x10,
 {
     if (_keyPulseTimer) dispatch_source_cancel(_keyPulseTimer);
     if (_keyInactiveObserver) [NSNotificationCenter.defaultCenter removeObserver:_keyInactiveObserver];
-    IOSWinePulseCancel(&_keyPulses, drv_key, drv_unicode);
+    KitsunePulseCancel(&_keyPulses, drv_key, drv_unicode);
 }
 
 /* tag is key + 1 because WineKeyEsc is 0 and so is the tag of every item that
@@ -497,12 +497,12 @@ enum { VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0d, VK_SHIFT = 0x10,
     wine_input_sent++;
     { static int n; if (n < 8) { n++; NSLog( @"[input] key vk=%d mods=%d drv_key=%p", pulse.vk, pulse.mods, drv_key ); } }
     if (!(pulse.mods & 8)) pulse.mods |= (_ctrl ? 1 : 0) | (_alt ? 2 : 0);
-    const char *mode = getenv("IOSWINE_GAME_INPUT");
+    const char *mode = getenv("KITSUNE_GAME_INPUT");
     if (!mode || !atoi(mode)) {
-        IOSWinePulseEmit(pulse, 1, drv_key, drv_unicode);
-        IOSWinePulseEmit(pulse, 0, drv_key, drv_unicode);
-    } else if (IOSWinePulsePush(&_keyPulses, pulse.vk, pulse.mods)) {
-        IOSWinePulseTick(&_keyPulses, (uint64_t)(CACurrentMediaTime() * 1000), drv_key, drv_unicode);
+        KitsunePulseEmit(pulse, 1, drv_key, drv_unicode);
+        KitsunePulseEmit(pulse, 0, drv_key, drv_unicode);
+    } else if (KitsunePulsePush(&_keyPulses, pulse.vk, pulse.mods)) {
+        KitsunePulseTick(&_keyPulses, (uint64_t)(CACurrentMediaTime() * 1000), drv_key, drv_unicode);
         dispatch_source_set_timer(_keyPulseTimer, DISPATCH_TIME_NOW, 10 * NSEC_PER_MSEC, NSEC_PER_MSEC);
     }
     else NSLog(@"[input] key pulse queue full; key %d not queued", pulse.vk);
@@ -527,8 +527,8 @@ enum { VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0d, VK_SHIFT = 0x10,
             continue;
         }
         /* Game mode queues every character, keys and text alike, in order. */
-        const char *mode = getenv("IOSWINE_GAME_INPUT");
-        if (mode && atoi(mode)) { [self sendPulse:IOSWineGameTextPulse(c)]; continue; }
+        const char *mode = getenv("KITSUNE_GAME_INPUT");
+        if (mode && atoi(mode)) { [self sendPulse:KitsuneGameTextPulse(c)]; continue; }
         if (drv_unicode) { drv_unicode( c, 1 ); drv_unicode( c, 0 ); }
     }
 }
@@ -624,7 +624,7 @@ static void remote_input_start(void)
         {
             usleep( 300000 );
             @autoreleasepool {
-                NSString *docs = IOSWinePersistentDocuments();
+                NSString *docs = KitsunePersistentDocuments();
                 if (!docs) continue;
                 NSString *src = [docs stringByAppendingPathComponent:@"remote-input.txt"];
                 if (![fm fileExistsAtPath:src]) continue;
@@ -637,7 +637,7 @@ static void remote_input_start(void)
                     remote_run_line( [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] );
                 [fm removeItemAtPath:done error:nil];
                 [fm moveItemAtPath:run toPath:done error:nil];
-                NSLog( @"[ioswine] remote-input: replayed %@", run.lastPathComponent );
+                NSLog( @"[kitsune] remote-input: replayed %@", run.lastPathComponent );
             }
         }
     });

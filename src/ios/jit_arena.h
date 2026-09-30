@@ -1,5 +1,5 @@
-#ifndef IOS_WINE_JIT_ARENA_H
-#define IOS_WINE_JIT_ARENA_H
+#ifndef KITSUNE_JIT_ARENA_H
+#define KITSUNE_JIT_ARENA_H
 #include <stddef.h>
 #include <sys/types.h>
 #ifdef __cplusplus

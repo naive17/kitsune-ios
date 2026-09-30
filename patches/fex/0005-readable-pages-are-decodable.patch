@@ -6,7 +6,7 @@ diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Comm
    std::shared_lock Lock(IntervalsLock);
    const auto XResult = XIntervals.Query(Address);
    if (!XResult.Enclosed) {
-+    // ios-wine: x64-out images (libcef, ~212MB) are mapped into plain readable
++    // Kitsune: x64-out images (libcef, ~212MB) are mapped into plain readable
 +    // memory outside the blessed JIT arena, so they never enter XIntervals and
 +    // every entry block there was rejected as "NoExec instruction in entry
 +    // block" -> C0000005 in the webhelper. FEX only READS the guest bytes to

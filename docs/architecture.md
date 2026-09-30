@@ -1,6 +1,6 @@
 # Architecture
 
-ios-wine runs Windows programs inside one iOS app process. Wine's unix side is
+Kitsune runs Windows programs inside one iOS app process. Wine's unix side is
 built for arm64-apple-ios and loaded from the app bundle, x86-64 code is
 translated by FEX through ARM64EC, Direct3D 11 is implemented on Metal by DXMT,
 and every page of code the program runs lives in a JIT arena that a debugger
@@ -15,7 +15,7 @@ would spread over several processes shares that one:
   thread (`server/ios_inproc.c`). It stays alive when its last client
   disconnects.
 - **Windows child processes** run as threads of the same Mach task, each with
-  its own Wine process state (`IOSWINE_THREADED_PROCESS`).
+  its own Wine process state (`KITSUNE_THREADED_PROCESS`).
 - **One session per app launch.** Wine boots once, with a session host
   (`src/session/session.c`) as its root process. The display driver's thread
   in the host starts each program the app queues (`src/ios/session.m`), and
@@ -87,7 +87,7 @@ bands and its CEF pools (`ios_reclaim_owner_arena_views` in `virtual.c`).
 What Wine's shared unix libraries allocate is never counted as a child's.
 
 A game started through Steam runs without Steam's web helper, its UI and its
-largest process (`IOSWINE_STEAM_LEAN`, set for game launches): the helper is
+largest process (`KITSUNE_STEAM_LEAN`, set for game launches): the helper is
 ended when Steam starts the game, refused while the game runs, and back after
 it exits (`NtCreateUserProcess` in `process.c`).
 

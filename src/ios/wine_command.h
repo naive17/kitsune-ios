@@ -1,12 +1,12 @@
 /* The command lines programs run with: argument splitting, installers, and the
  * Wine tools a bottle offers. */
-#ifndef IOSWINE_WINE_COMMAND_H
-#define IOSWINE_WINE_COMMAND_H
+#ifndef KITSUNE_WINE_COMMAND_H
+#define KITSUNE_WINE_COMMAND_H
 
 #import <Foundation/Foundation.h>
 
 /* Splits on spaces and tabs outside double quotes and drops the quotes. */
-static inline NSArray<NSString *> *IOSWineSplitArguments(NSString *raw) {
+static inline NSArray<NSString *> *KitsuneSplitArguments(NSString *raw) {
   NSMutableArray<NSString *> *args = [NSMutableArray array];
   NSMutableString *cur = [NSMutableString string];
   BOOL quoted = NO, pending = NO;
@@ -25,12 +25,12 @@ static inline NSArray<NSString *> *IOSWineSplitArguments(NSString *raw) {
 }
 
 /* A path on the phone as Windows sees it: every bottle maps Z: to the root. */
-static inline NSString *IOSWineWindowsPath(NSString *path) {
+static inline NSString *KitsuneWindowsPath(NSString *path) {
   return [@"Z:" stringByAppendingString:[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]];
 }
 
 /* One argument, quoted so CommandLineToArgvW reads it back unchanged. */
-static inline NSString *IOSWineQuoteArgument(NSString *arg) {
+static inline NSString *KitsuneQuoteArgument(NSString *arg) {
   NSCharacterSet *special = [NSCharacterSet characterSetWithCharactersInString:@" \t\n\v\""];
   if (arg.length && [arg rangeOfCharacterFromSet:special].location == NSNotFound) return arg;
   NSMutableString *out = [NSMutableString stringWithString:@"\""];
@@ -51,35 +51,35 @@ static inline NSString *IOSWineQuoteArgument(NSString *arg) {
 
 /* The command line CreateProcess takes for argv, program first. The program
  * and any argument naming an existing file on the phone become Windows paths. */
-static inline NSString *IOSWineWindowsCommandLine(NSArray<NSString *> *argv) {
+static inline NSString *KitsuneWindowsCommandLine(NSArray<NSString *> *argv) {
   NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithCapacity:argv.count];
   for (NSUInteger i = 0; i < argv.count; i++) {
     NSString *arg = argv[i];
     if ([arg hasPrefix:@"/"] && (i == 0 || [NSFileManager.defaultManager fileExistsAtPath:arg]))
-      arg = IOSWineWindowsPath(arg);
-    [parts addObject:IOSWineQuoteArgument(arg)];
+      arg = KitsuneWindowsPath(arg);
+    [parts addObject:KitsuneQuoteArgument(arg)];
   }
   return [parts componentsJoinedByString:@" "];
 }
 
 /* argv for an executable or a Windows Installer package; console programs run
  * without the display driver. */
-static inline NSArray<NSString *> *IOSWineProgramArgv(NSString *path, NSString *arguments, BOOL console,
+static inline NSArray<NSString *> *KitsuneProgramArgv(NSString *path, NSString *arguments, BOOL console,
                                                       NSString *peDir, BOOL *gui) {
   if ([path.pathExtension.lowercaseString isEqualToString:@"msi"]) {
     *gui = YES;
     return @[ @"wine", [peDir stringByAppendingPathComponent:@"msiexec.exe"], @"/i", path ];
   }
   *gui = !console;
-  return [@[ @"wine", path ] arrayByAddingObjectsFromArray:IOSWineSplitArguments(arguments ?: @"")];
+  return [@[ @"wine", path ] arrayByAddingObjectsFromArray:KitsuneSplitArguments(arguments ?: @"")];
 }
 
 typedef struct {
   const char *title, *symbol;
   const char *const argv[3];   /* program and arguments, NULL-terminated */
-} IOSWineBottleTool;
+} KitsuneBottleTool;
 
-static const IOSWineBottleTool kIOSWineBottleTools[] = {
+static const KitsuneBottleTool kKitsuneBottleTools[] = {
   { "Wine Configuration", "gearshape", { "winecfg.exe", NULL } },
   { "Control Panel", "slider.horizontal.3", { "control.exe", NULL } },
   { "Registry Editor", "list.bullet.indent", { "regedit.exe", NULL } },
@@ -87,9 +87,9 @@ static const IOSWineBottleTool kIOSWineBottleTools[] = {
   { "File Manager", "folder", { "winefile.exe", NULL } },
   { "Command Prompt", "terminal", { "wineconsole.exe", "cmd.exe", NULL } },
 };
-#define IOSWINE_BOTTLE_TOOL_COUNT (sizeof(kIOSWineBottleTools) / sizeof(kIOSWineBottleTools[0]))
+#define KITSUNE_BOTTLE_TOOL_COUNT (sizeof(kKitsuneBottleTools) / sizeof(kKitsuneBottleTools[0]))
 
-static inline NSArray<NSString *> *IOSWineToolArgv(const IOSWineBottleTool *tool, NSString *peDir) {
+static inline NSArray<NSString *> *KitsuneToolArgv(const KitsuneBottleTool *tool, NSString *peDir) {
   NSMutableArray<NSString *> *argv = [NSMutableArray arrayWithObjects:@"wine",
       [peDir stringByAppendingPathComponent:@(tool->argv[0])], nil];
   for (int i = 1; i < 3 && tool->argv[i]; i++) [argv addObject:@(tool->argv[i])];

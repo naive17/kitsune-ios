@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the macOS host harness (build/ioswine-host), which boots the iOS-shaped
+# Build the macOS host harness (build/kitsune-host), which boots the iOS-shaped
 # Wine in one process as the app does, and the tree it runs (build/host-tree).
 # Requires out/wine-tree (13-stage-wine-tree.sh) and 04-freetype.sh's output.
 source "$(dirname "$0")/common.sh"
@@ -9,7 +9,7 @@ source "$(dirname "$0")/common.sh"
 B="$BUILD/wine-host"
 TREE="$BUILD/host-tree"
 PE_SRC="$ROOT/out/wine-tree"
-HARNESS="$BUILD/ioswine-host"
+HARNESS="$BUILD/kitsune-host"
 
 export PATH="$MINGW_BIN:/opt/homebrew/opt/bison/bin:/opt/homebrew/bin:$PATH"
 
@@ -33,11 +33,21 @@ export FREETYPE_LIBS="$FT_MACOS/lib/libfreetype.a"
 export ac_cv_lib_soname_freetype="libfreetype.6.dylib"
 export ac_cv_header_ft2build_h=yes
 
+# Xcode 27's SDKs declare pipe2 as macOS/iOS 27 only, but configure's link
+# test passes against them, so HAVE_PIPE2 gets set and the call is weak-linked.
+# On an older OS it binds to NULL and server_pipe() jumps to address 0 at boot.
+# Every pipe2 call in Wine has a pipe()+fcntl fallback under !HAVE_PIPE2.
+export ac_cv_func_pipe2=no
+
 # configure bakes CFLAGS into the Makefile, so a CFLAGS change needs a fresh
 # configure; otherwise a new -D is silently ignored.
 STAMP="$B/.cflags.stamp"
 if [ -f "$B/Makefile" ] && [ "$(cat "$STAMP" 2>/dev/null)" != "$CFLAGS" ]; then
   warn "CFLAGS changed since configure; reconfiguring build/wine-host"
+  rm -rf "$B"
+fi
+if grep -qs '^#define HAVE_PIPE2 1' "$B/include/config.h"; then
+  warn "build/wine-host was configured with HAVE_PIPE2; reconfiguring"
   rm -rf "$B"
 fi
 
@@ -81,7 +91,7 @@ log "building harness"
 # common.sh points DEVELOPER_DIR at Xcode, so a bare clang has no macOS sysroot.
 MACSDK="$(xcrun --sdk macosx --show-sdk-path)"
 # host_surface.m provides the driver's device-side host hooks and an offscreen
-# compositor (dormant unless IOSWINE_HOST_SURFACE=1); -Wl,-export_dynamic, also
+# compositor (dormant unless KITSUNE_HOST_SURFACE=1); -Wl,-export_dynamic, also
 # needed by the wineserver objects, lets dlsym(RTLD_DEFAULT) find the hooks.
 xcrun --sdk macosx clang -isysroot "$MACSDK" -g -O1 -Wall -Wextra \
   -I"$ROOT/src/ios" -I"$ROOT/src/host" \
@@ -123,7 +133,7 @@ cat <<EOF
   tree : $TREE
 
   run:
-    IOSWINE_TREE=$TREE $HARNESS \\
+    KITSUNE_TREE=$TREE $HARNESS \\
         $TREE/lib/wine/aarch64-windows/wineboot.exe --init
 
   A pass here means the LOGIC is right. It does not mean iOS will allow it:

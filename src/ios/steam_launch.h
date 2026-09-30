@@ -1,6 +1,6 @@
 /* Phone-only Steam launches: the request, its checks and the JIT hand-off. */
-#ifndef IOSWINE_STEAM_LAUNCH_H
-#define IOSWINE_STEAM_LAUNCH_H
+#ifndef KITSUNE_STEAM_LAUNCH_H
+#define KITSUNE_STEAM_LAUNCH_H
 #import <Foundation/Foundation.h>
 #include "launch_request.h"
 #include "launch_profile.h"
@@ -10,15 +10,15 @@
  * the client alone; otherwise the title's directory must exist under
  * steamapps/common (from its manifest), so a half-installed game is refused
  * before the process is handed over. */
-static inline NSDictionary *IOSWineSteamRequest(NSString *appID, IOSWineLaunchOptions options,
+static inline NSDictionary *KitsuneSteamRequest(NSString *appID, KitsuneLaunchOptions options,
                                          NSString *docs, NSString **error) {
-  if (!IOSWineSteamRoot(docs)) {
+  if (!KitsuneSteamRoot(docs)) {
     if (error) *error = NSLocalizedString(@"Steam is not installed in this app's library (Documents/Apps/Steam/steam.exe).", nil);
     return nil;
   }
   if (appID.length) {
     NSDictionary *found = nil;
-    for (NSDictionary *g in IOSWineSteamGames(IOSWineSteamRoot(docs)))
+    for (NSDictionary *g in KitsuneSteamGames(KitsuneSteamRoot(docs)))
       if ([g[@"appid"] isEqualToString:appID]) { found = g; break; }
     if (!found) {
       if (error) *error = [NSString stringWithFormat:NSLocalizedString(@"Steam app %@ is not installed in this library.", nil), appID];
@@ -29,19 +29,19 @@ static inline NSDictionary *IOSWineSteamRequest(NSString *appID, IOSWineLaunchOp
       return nil;
     }
   }
-  return IOSWineValidateLaunchRequest(IOSWineSteamLaunchRequest(appID, options), docs, error);
+  return KitsuneValidateLaunchRequest(KitsuneSteamLaunchRequest(appID, options), docs, error);
 }
 
 /* The JSON that goes into Documents/launch-request.json: the unvalidated
  * request (relative exe path), which the boot path validates again. */
-static inline NSData *IOSWineSteamRequestData(NSString *appID, IOSWineLaunchOptions options) {
-  return [NSJSONSerialization dataWithJSONObject:IOSWineSteamLaunchRequest(appID, options)
+static inline NSData *KitsuneSteamRequestData(NSString *appID, KitsuneLaunchOptions options) {
+  return [NSJSONSerialization dataWithJSONObject:KitsuneSteamLaunchRequest(appID, options)
                                          options:NSJSONWritingPrettyPrinted error:nil];
 }
 
 /* StikDebug's enable-jit URL, wrapped for LiveContainer and bare. With a pid
  * StikDebug attaches to that process; without one it launches the app. */
-static inline NSArray<NSURL *> *IOSWineStikDebugURLs(NSString *bundle, NSString *pid, NSData *script) {
+static inline NSArray<NSURL *> *KitsuneStikDebugURLs(NSString *bundle, NSString *pid, NSData *script) {
   NSURLComponents *inner = [NSURLComponents new];
   inner.scheme = @"stikjit";
   inner.host = @"enable-jit";
@@ -60,15 +60,15 @@ static inline NSArray<NSURL *> *IOSWineStikDebugURLs(NSString *bundle, NSString 
 }
 
 /* JIT for the running process `pid`. */
-static inline NSArray<NSURL *> *IOSWineJITURLs(NSString *bundle, int pid, NSData *script) {
+static inline NSArray<NSURL *> *KitsuneJITURLs(NSString *bundle, int pid, NSData *script) {
   if (!bundle.length || pid <= 0 || !script.length) return @[];
-  return IOSWineStikDebugURLs(bundle, [NSString stringWithFormat:@"%d", pid], script);
+  return KitsuneStikDebugURLs(bundle, [NSString stringWithFormat:@"%d", pid], script);
 }
 
 /* A new instance of the app under JIT, for a restart: StikDebug launches it
  * once the running one has exited. */
-static inline NSArray<NSURL *> *IOSWineRelaunchURLs(NSString *bundle, NSData *script) {
+static inline NSArray<NSURL *> *KitsuneRelaunchURLs(NSString *bundle, NSData *script) {
   if (!bundle.length || !script.length) return @[];
-  return IOSWineStikDebugURLs(bundle, nil, script);
+  return KitsuneStikDebugURLs(bundle, nil, script);
 }
 #endif

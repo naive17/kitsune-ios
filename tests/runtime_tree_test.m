@@ -13,7 +13,7 @@ int main(void) {
   @autoreleasepool {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *testRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:
-        [@"ioswine-tree-test-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+        [@"kitsune-tree-test-" stringByAppendingString:NSUUID.UUID.UUIDString]];
     NSString *current = [testRoot stringByAppendingPathComponent:@"wine"];
     NSString *candidate = [testRoot stringByAppendingPathComponent:@"candidate"];
     NSString *marker = @"lib/wine/aarch64-windows/ntdll.dll";
@@ -23,23 +23,23 @@ int main(void) {
     put(candidate, marker, @"new ntdll");
 
     NSError *error = nil;
-    assert(!IOSWineInstallTree(candidate, current, @"new", &error));
-    assert(error && IOSWineTreeMatches(current, @"old"));
+    assert(!KitsuneInstallTree(candidate, current, @"new", &error));
+    assert(error && KitsuneTreeMatches(current, @"old"));
     put(candidate, @"TREE_VERSION", @"wrong");
-    assert(!IOSWineInstallTree(candidate, current, @"new", &error));
-    assert(IOSWineTreeMatches(current, @"old"));
+    assert(!KitsuneInstallTree(candidate, current, @"new", &error));
+    assert(KitsuneTreeMatches(current, @"old"));
     put(candidate, @"TREE_VERSION", @"new\n");
     assert([fm removeItemAtPath:[candidate stringByAppendingPathComponent:marker] error:nil]);
-    assert(!IOSWineInstallTree(candidate, current, @"new", &error));
-    assert(IOSWineTreeMatches(current, @"old"));
+    assert(!KitsuneInstallTree(candidate, current, @"new", &error));
+    assert(KitsuneTreeMatches(current, @"old"));
     put(candidate, marker, @"new ntdll");
-    assert(IOSWineInstallTree(candidate, current, @"new", &error));
-    assert(IOSWineTreeMatches(current, @"new"));
+    assert(KitsuneInstallTree(candidate, current, @"new", &error));
+    assert(KitsuneTreeMatches(current, @"new"));
     assert([fm fileExistsAtPath:[testRoot stringByAppendingPathComponent:@"Apps/Doom/savegame"]]);
     assert([fm contentsOfDirectoryAtPath:testRoot error:nil].count == 3);
     NSString *fresh = [testRoot stringByAppendingPathComponent:@"fresh/wine"];
-    assert(IOSWineInstallTree(candidate, fresh, @"new", &error));
-    assert(IOSWineTreeMatches(fresh, @"new"));
+    assert(KitsuneInstallTree(candidate, fresh, @"new", &error));
+    assert(KitsuneTreeMatches(fresh, @"new"));
     assert([fm removeItemAtPath:testRoot error:nil]);
     puts("PASS: missing/wrong/incomplete trees preserve existing data; valid replacement and fresh install succeed");
   }

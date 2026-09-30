@@ -55,13 +55,13 @@ static NSArray<NSString *> *ProgramArgv(NSArray<NSString *> *argv) {
 }
 
 static NSString *RequestPath(void) {
-  return [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"launch-request.json"];
+  return [KitsunePersistentDocuments() stringByAppendingPathComponent:@"launch-request.json"];
 }
 
 /* A program to open after a restart (restartToOpen:), read back once JIT is
  * granted again (finishRuntimeSetup). */
 static NSString *PendingLaunchPath(void) {
-  return [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"pending-launch.plist"];
+  return [KitsunePersistentDocuments() stringByAppendingPathComponent:@"pending-launch.plist"];
 }
 
 static NSString *ShaderCacheCensus(void) {
@@ -137,7 +137,7 @@ static BOOL PhysicalControllerConnected(void) {
   [super viewDidLoad];
   _jitRequestGate = dispatch_semaphore_create(0);
   self.view.backgroundColor = UIColor.systemBackgroundColor;
-  _log = [NSMutableString stringWithString:@"ios-wine\n\n"];
+  _log = [NSMutableString stringWithString:@"Kitsune\n\n"];
 
   _stage = [UILabel new];
   _stage.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle2];
@@ -225,7 +225,7 @@ static BOOL PhysicalControllerConnected(void) {
   _out.text = _log;
   _shownLen = _log.length;
 
-  IOSWineDiagInit();
+  KitsuneDiagInit();
 
   /* Controller input belongs to the game, not to UIKit focus navigation. */
   if (@available(iOS 18.0, *)) {
@@ -246,7 +246,7 @@ static BOOL PhysicalControllerConnected(void) {
   /* A request left by an earlier run counts only when StikDebug started this
    * process for it. Otherwise Enable JIT would start that program. */
   if (!CSDebugged(NULL) && [NSFileManager.defaultManager removeItemAtPath:RequestPath() error:nil])
-    IOSWineLog(@"REQUEST-DISCARDED left from an earlier run");
+    KitsuneLog(@"REQUEST-DISCARDED left from an earlier run");
 
   /* The JIT handshake must run while StikDebug is still attached; the
    * foreground wait for the heavy boot happens after jit_detach. */
@@ -282,9 +282,9 @@ static BOOL PhysicalControllerConnected(void) {
       if (![sc isKindOfClass:UIWindowScene.class]) continue;
       UIWindowSceneGeometryPreferencesIOS *p = [[UIWindowSceneGeometryPreferencesIOS alloc]
           initWithInterfaceOrientations:UIInterfaceOrientationMaskLandscapeRight];
-      IOSWineLog(@"landscape: requesting LandscapeRight");
+      KitsuneLog(@"landscape: requesting LandscapeRight");
       [(UIWindowScene *)sc requestGeometryUpdateWithPreferences:p errorHandler:^(NSError *e) {
-        IOSWineLog([NSString stringWithFormat:@"landscape: refused %@", e.localizedDescription ?: e]);
+        KitsuneLog([NSString stringWithFormat:@"landscape: refused %@", e.localizedDescription ?: e]);
       }];
     }
   } else {
@@ -320,7 +320,7 @@ static BOOL PhysicalControllerConnected(void) {
   [_log appendFormat:@"%@\n", line];
   if (_log.length > 512 * 1024) [_log deleteCharactersInRange:NSMakeRange(0, _log.length - 256 * 1024)];
   dispatch_async(dispatch_get_main_queue(), ^{ if (!self->_out.hidden) [self scheduleLogFlush]; });
-  IOSWineLog(line);
+  KitsuneLog(line);
 }
 
 - (void)scheduleLogFlush {
@@ -363,7 +363,7 @@ static BOOL PhysicalControllerConnected(void) {
 
 /* Lines a program printed, without Wine's own channels. */
 - (void)showProgramOutput {
-  NSString *raw = IOSWineLogTail(WineLogPath(), 128 * 1024);
+  NSString *raw = KitsuneLogTail(WineLogPath(), 128 * 1024);
   if (!raw.length) return;
   static NSRegularExpression *re;
   if (!re) re = [NSRegularExpression regularExpressionWithPattern:@"^[0-9a-f]{4}:" options:0 error:nil];
@@ -374,7 +374,7 @@ static BOOL PhysicalControllerConnected(void) {
     if ([re numberOfMatchesInString:l options:0 range:NSMakeRange(0, l.length)]) continue;
     if ([t hasPrefix:@"wine:"] || [t hasPrefix:@"==="] || [t hasPrefix:@"["]) continue;
     if ([t hasPrefix:@"err:"] || [t hasPrefix:@"fixme:"] || [t hasPrefix:@"warn:"]) continue;
-    if ([t rangeOfString:@"ioswine["].location != NSNotFound) continue;
+    if ([t rangeOfString:@"Kitsune["].location != NSNotFound) continue;
     [prog appendFormat:@"%@\n", t];
   }
   if (!prog.length) return;
@@ -385,19 +385,19 @@ static BOOL PhysicalControllerConnected(void) {
 
 /* --- boot ---------------------------------------------------------------- */
 
-/* StikDebug runs the JIT script only when it is assigned to ios-wine in its
+/* StikDebug runs the JIT script only when it is assigned to Kitsune in its
  * Scripts, for launches from its own app list; a copy in the app's Files
  * folder makes it importable there. */
 static void PublishJITScript(void) {
-  NSString *bundled = [NSBundle.mainBundle pathForResource:@"ios-wine" ofType:@"js"];
-  NSString *copy = [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"ios-wine.js"];
+  NSString *bundled = [NSBundle.mainBundle pathForResource:@"kitsune" ofType:@"js"];
+  NSString *copy = [KitsunePersistentDocuments() stringByAppendingPathComponent:@"kitsune.js"];
   NSData *script = bundled ? [NSData dataWithContentsOfFile:bundled] : nil;
   if (script && ![[NSData dataWithContentsOfFile:copy] isEqualToData:script])
     [script writeToFile:copy atomically:YES];
 }
 
 - (void)run {
-  IOSWineDiagPolicy policy = IOSWineDiagPolicyFor(IOSWineDiagLevelFromEnv());
+  KitsuneDiagPolicy policy = KitsuneDiagPolicyFor(KitsuneDiagLevelFromEnv());
   [self setPhase:WineBootPhasePreparing message:NSLocalizedString(@"Starting…", nil)];
   PublishJITScript();
   [self say:[NSString stringWithFormat:@"device: %@ / iOS %@", UIDevice.currentDevice.model, UIDevice.currentDevice.systemVersion]];
@@ -405,11 +405,11 @@ static void PublishJITScript(void) {
   /* The previous run's wine log: its tail is shown, and the file is archived
    * so Wine cannot truncate it. */
   {
-    IOSWineLog([NSString stringWithFormat:@"STARTUP os_pid=%d app=%s %s", getpid(), __DATE__, __TIME__]);
+    KitsuneLog([NSString stringWithFormat:@"STARTUP os_pid=%d app=%s %s", getpid(), __DATE__, __TIME__]);
     struct stat st;
     if (stat(WineLogPath().fileSystemRepresentation, &st) == 0 && st.st_size > 0) {
       if (policy.previous_log_preview) {
-        NSString *prev = IOSWineLogTail(WineLogPath(), 128 * 1024);
+        NSString *prev = KitsuneLogTail(WineLogPath(), 128 * 1024);
         [self say:[NSString stringWithFormat:@"previous wine log: %lu characters", (unsigned long)prev.length]];
         [self showProgramOutput];
         [_log appendString:prev];
@@ -435,17 +435,17 @@ static void PublishJITScript(void) {
     [self say:[NSString stringWithFormat:@"CS_DEBUGGED: %@ (cs_flags=0x%08x)", dbg ? @"yes" : @"no", flags]];
   }
   (void)WineLogPathC();
-  if (policy.mach_exc_monitor) MachExcMon_Install(IOSWineHeartbeatFd());
+  if (policy.mach_exc_monitor) MachExcMon_Install(KitsuneHeartbeatFd());
   GameController_Start();
 
-  /* The arena needs StikDebug attached with the ios-wine script. Enable JIT
+  /* The arena needs StikDebug attached with the Kitsune script. Enable JIT
    * and Play pass the script along; StikDebug's own app list passes it only
-   * when it is assigned to ios-wine there, and otherwise just sets the debug
+   * when it is assigned to Kitsune there, and otherwise just sets the debug
    * flag, which is why a missing script is retried rather than fatal. */
   {
     char aerr[256] = {0};
     unsigned long arena_mb = ARENA_MB;
-    const char *e = getenv("IOSWINE_ARENA_MB");
+    const char *e = getenv("KITSUNE_ARENA_MB");
     size_t pinned = ios_jit_arena_pinned_len();
     if (e && atol(e) >= 128) arena_mb = (unsigned long)atol(e);
     else if (pinned) arena_mb = (unsigned long)(pinned >> 20);
@@ -461,7 +461,7 @@ static void PublishJITScript(void) {
       if (!keepout) {
         keepout = YES;
         if (!ios_jit_arena_reserve((void *)WINE_SHARED_DATA_ADDR, 0x10000, aerr, sizeof(aerr)))
-          IOSWineLog([NSString stringWithFormat:@"KEEPOUT-FAIL %s", aerr]);
+          KitsuneLog([NSString stringWithFormat:@"KEEPOUT-FAIL %s", aerr]);
       }
       [self showBeforePause:NSLocalizedString(@"Enabling JIT…", nil)];
       ios_jit_arena_set_progress(ArenaPrepared, (__bridge void *)self);
@@ -469,26 +469,26 @@ static void PublishJITScript(void) {
       int rc = ios_jit_arena_init(want, aerr, sizeof(aerr));
       if (rc < 0) {
         [self say:[NSString stringWithFormat:@"JIT script not attached: %s", aerr]];
-        IOSWineLog([NSString stringWithFormat:@"JIT-NO-SCRIPT %s", aerr]);
+        KitsuneLog([NSString stringWithFormat:@"JIT-NO-SCRIPT %s", aerr]);
         rc = [self retryUntilScriptAnswers:want error:aerr length:sizeof(aerr)];
       }
       if (rc > 0) {
         void *lo = NULL; size_t sz = 0; ptrdiff_t delta = 0;
         ios_jit_arena_bounds(&lo, &sz, &delta);
         [self say:[NSString stringWithFormat:@"JIT arena: %zu MB at %p", sz >> 20, lo]];
-        IOSWineLog([NSString stringWithFormat:@"ARENA-OK %zuMB %p-%p delta=%lx", sz >> 20, lo, (char *)lo + sz, (long)delta]);
-        IOSWineLog([NSString stringWithUTF8String:ios_jit_arena_pin_note()]);
-        IOSWineLog(IOSWineMemLine(@"after-arena"));
+        KitsuneLog([NSString stringWithFormat:@"ARENA-OK %zuMB %p-%p delta=%lx", sz >> 20, lo, (char *)lo + sz, (long)delta]);
+        KitsuneLog([NSString stringWithUTF8String:ios_jit_arena_pin_note()]);
+        KitsuneLog(KitsuneMemLine(@"after-arena"));
         if (policy.boot_probes) {
-          WineBootDumpVM("after-arena", IOSWineLogC);
+          WineBootDumpVM("after-arena", KitsuneLogC);
           WineBootPreflightUnixLibs([NSBundle.mainBundle.bundlePath
-              stringByAppendingPathComponent:@"lib/wine/aarch64-unix"].fileSystemRepresentation, IOSWineLogC);
-          WineBootProbeFixedMap(IOSWineLogC);
+              stringByAppendingPathComponent:@"lib/wine/aarch64-unix"].fileSystemRepresentation, KitsuneLogC);
+          WineBootProbeFixedMap(KitsuneLogC);
         }
       } else {
         [self say:[NSString stringWithFormat:@"JIT arena failed: %s", aerr]];
-        IOSWineLog([NSString stringWithFormat:@"ARENA-FAIL %s", aerr]);
-        IOSWineLog([NSString stringWithUTF8String:ios_jit_arena_pin_note()]);
+        KitsuneLog([NSString stringWithFormat:@"ARENA-FAIL %s", aerr]);
+        KitsuneLog([NSString stringWithUTF8String:ios_jit_arena_pin_note()]);
         _jitFailed = YES;
       }
       break;
@@ -504,11 +504,11 @@ static void PublishJITScript(void) {
     if (ios_jit_arena_available() && ios_jit_arena_alloc(64, 64, &exec, &write)) {
       *(uint32_t *)write = 0xd65f03c0;   /* ret: fresh arena pages hold only StikDebug's marker byte */
       ios_jit_arena_publish(exec, 64);
-      IOSWineLogC("ARENA-EXEC about to call");
+      KitsuneLogC("ARENA-EXEC about to call");
       ((void (*)(void))exec)();
-      IOSWineLog(@"ARENA-EXEC ok");
+      KitsuneLog(@"ARENA-EXEC ok");
     } else {
-      IOSWineLog(@"ARENA-EXEC skipped: no arena");
+      KitsuneLog(@"ARENA-EXEC skipped: no arena");
     }
   }
   {
@@ -517,8 +517,8 @@ static void PublishJITScript(void) {
                                              : [NSString stringWithFormat:@"detach failed: %s", derr]];
   }
   if (_jitFailed) {
-    [self setPhase:WineBootPhaseFailed message:NSLocalizedString(@"JIT setup failed. Opening a program restarts ios-wine.", nil)];
-    IOSWineLog(@"HALTED-NO-JIT");
+    [self setPhase:WineBootPhaseFailed message:NSLocalizedString(@"JIT setup failed. Opening a program restarts Kitsune.", nil)];
+    KitsuneLog(@"HALTED-NO-JIT");
     return;
   }
   [self waitForForeground];
@@ -533,7 +533,7 @@ static void PublishJITScript(void) {
 /* Runs between StikDebug's preparation steps, while the app briefly runs:
  * logs the pace and draws the bar before the next step stops the app. */
 - (void)arenaPrepared:(double)done {
-  IOSWineLog([NSString stringWithFormat:@"JIT-PREP %.0f%% after %.1fs", done * 100, CFAbsoluteTimeGetCurrent() - _prepareStart]);
+  KitsuneLog([NSString stringWithFormat:@"JIT-PREP %.0f%% after %.1fs", done * 100, CFAbsoluteTimeGetCurrent() - _prepareStart]);
   [WineBootStatus.shared setProgress:done];
   dispatch_sync(dispatch_get_main_queue(), ^{
     self->_bar.hidden = NO;
@@ -555,7 +555,7 @@ static void PublishJITScript(void) {
  * started from its own app list, so the debug flag is checked meanwhile. */
 - (void)waitForDebugger:(unsigned)flags {
   [self say:[NSString stringWithFormat:@"JIT is not enabled (cs_flags=0x%08x)", flags]];
-  IOSWineLog([NSString stringWithFormat:@"JIT-NOT-ENABLED cs_flags=0x%08x", flags]);
+  KitsuneLog([NSString stringWithFormat:@"JIT-NOT-ENABLED cs_flags=0x%08x", flags]);
   [self setPhase:WineBootPhaseNeedsJIT message:_jitFailure ?: NSLocalizedString(@"JIT is off.", nil)];
   while (dispatch_semaphore_wait(_jitRequestGate, dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC)))
     if (CSDebugged(NULL)) return;
@@ -576,7 +576,7 @@ static void PublishJITScript(void) {
  * the app without the script. Retries until an attach with it arrives, which
  * Enable JIT and Play request. */
 - (int)retryUntilScriptAnswers:(size_t)want error:(char *)err length:(size_t)len {
-  NSString *prompt = NSLocalizedString(@"JIT needs the ios-wine script. Tap Enable JIT.", nil);
+  NSString *prompt = NSLocalizedString(@"JIT needs the Kitsune script. Tap Enable JIT.", nil);
   [self setPhase:WineBootPhaseNeedsJIT message:prompt];
   dispatch_async(dispatch_get_main_queue(), ^{ [self showLauncher]; });
   double asked = 0;
@@ -620,7 +620,7 @@ static void PublishJITScript(void) {
   });
   if (active) return;
   [self say:@"JIT ready; waiting for the foreground before booting Wine"];
-  [self setPhase:WineBootPhaseWaitingJIT message:NSLocalizedString(@"JIT is on. Switch back to ios-wine.", nil)];
+  [self setPhase:WineBootPhaseWaitingJIT message:NSLocalizedString(@"JIT is on. Switch back to Kitsune.", nil)];
   dispatch_semaphore_t sem = dispatch_semaphore_create(0);
   __block id tok = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
                                                                     object:nil queue:NSOperationQueue.mainQueue
@@ -637,19 +637,19 @@ static void PublishJITScript(void) {
   NSString *root = WineTreeRoot();
   NSString *bootstrap = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Bootstrap"];
   NSString *bundledTree = [bootstrap stringByAppendingPathComponent:@"wine"];
-  NSString *bundled = IOSWineTreeVersion(bundledTree);
-  NSString *have = IOSWineTreeVersion(root);
+  NSString *bundled = KitsuneTreeVersion(bundledTree);
+  NSString *have = KitsuneTreeVersion(root);
   [self say:[NSString stringWithFormat:@"tree: installed=%@ bundled=%@", have ?: @"(none)", bundled ?: @"(none)"]];
 
-  if (bundled.length && !IOSWineTreeMatches(root, bundled)) {
+  if (bundled.length && !KitsuneTreeMatches(root, bundled)) {
     NSError *error = nil;
     [self say:@"installing the bundled Wine tree"];
     [self setPhase:WineBootPhasePreparing message:NSLocalizedString(@"Installing runtime…", nil)];
-    if (!IOSWineInstallTree(bundledTree, root, bundled, &error)) {
+    if (!KitsuneInstallTree(bundledTree, root, bundled, &error)) {
       [self say:[NSString stringWithFormat:@"tree install failed: %@", error.localizedDescription]];
       return NO;
     }
-  } else if (!IOSWineTreeMatches(root, have)) {
+  } else if (!KitsuneTreeMatches(root, have)) {
     [self say:@"No Wine tree installed. Install the full build once, or sync the tree from a Mac."];
     return NO;
   }
@@ -657,7 +657,7 @@ static void PublishJITScript(void) {
 }
 
 - (void)finishRuntimeSetup {
-  IOSWineDiagPolicy policy = IOSWineDiagPolicyFor(IOSWineDiagLevelFromEnv());
+  KitsuneDiagPolicy policy = KitsuneDiagPolicyFor(KitsuneDiagLevelFromEnv());
 
   /* A queued request (Play, or one pushed from a Mac) selects the program. It is
    * consumed only now, after JIT succeeded, so a failed attach cannot lose it. */
@@ -667,7 +667,7 @@ static void PublishJITScript(void) {
     NSNumber *size = [[NSFileManager.defaultManager attributesOfItemAtPath:requestFile error:nil] objectForKey:NSFileSize];
     NSData *data = size.unsignedLongLongValue <= 32768 ? [NSData dataWithContentsOfFile:requestFile] : nil;
     id json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    _request = IOSWineValidateLaunchRequest(json, IOSWinePersistentDocuments(), &reason);
+    _request = KitsuneValidateLaunchRequest(json, KitsunePersistentDocuments(), &reason);
     pe_info info;
     char peError[256] = {0};
     if (_request && (pe_info_read([_request[@"exe"] fileSystemRepresentation], &info, peError, sizeof(peError)) || info.is_dll)) {
@@ -688,8 +688,8 @@ static void PublishJITScript(void) {
     [self say:[NSString stringWithFormat:@"launch: %@ (%s) in %@", [_request[@"exe"] lastPathComponent],
                pe_arch_name(info.arch), WineBootPrefix()]];
     setenv("WINEDEBUG", [_request[@"bottle"] isEqualToString:@"Steam"] ? policy.winedebug_steam : policy.winedebug_other, 1);
-    setenv("IOSWINE_NO_GUEST_DUMP", "1", 1);
-    setenv("IOSWINE_FAULT_STACKS", "1", 1);
+    setenv("KITSUNE_NO_GUEST_DUMP", "1", 1);
+    setenv("KITSUNE_FAULT_STACKS", "1", 1);
     NSDictionary *env = _request[@"env"];
     for (NSString *k in env) {
       setenv(k.UTF8String, ((NSString *)env[k]).UTF8String, 1);
@@ -700,8 +700,8 @@ static void PublishJITScript(void) {
   /* A program chosen before a restart: in another bottle, or after Wine stopped. */
   NSDictionary *pending = [NSDictionary dictionaryWithContentsOfFile:PendingLaunchPath()];
   [NSFileManager.defaultManager removeItemAtPath:PendingLaunchPath() error:nil];
-  if (pending && !_request && [pending[@"argv"] isKindOfClass:NSArray.class] && IOSWineBottleNameValid(pending[@"bottle"])) {
-    if (![pending[@"bottle"] isEqualToString:IOSWINE_DEFAULT_BOTTLE]) WineBootSelectBottle(pending[@"bottle"]);
+  if (pending && !_request && [pending[@"argv"] isKindOfClass:NSArray.class] && KitsuneBottleNameValid(pending[@"bottle"])) {
+    if (![pending[@"bottle"] isEqualToString:KITSUNE_DEFAULT_BOTTLE]) WineBootSelectBottle(pending[@"bottle"]);
     [self say:[NSString stringWithFormat:@"after restart: %@ in %@", pending[@"label"], pending[@"bottle"]]];
     _pendingLaunch = pending;
   }
@@ -709,10 +709,10 @@ static void PublishJITScript(void) {
   /* The prefix: rebuilt from the tree's template when it predates the tree. */
   NSString *pe = [WineTreeRoot() stringByAppendingPathComponent:@"lib/wine/aarch64-windows"];
   NSString *reg = [WineBootPrefix() stringByAppendingPathComponent:@"system.reg"];
-  NSString *treeVersion = IOSWineTreeVersion(WineTreeRoot()) ?: @"";
+  NSString *treeVersion = KitsuneTreeVersion(WineTreeRoot()) ?: @"";
   NSString *stampFile = [WineBootPrefix() stringByAppendingPathComponent:@".tree-stamp"];
   BOOL havePrefix = [NSFileManager.defaultManager fileExistsAtPath:reg];
-  BOOL defaultPrefix = [WineBootPrefix() isEqualToString:IOSWineBottlePath(IOSWinePersistentDocuments(), nil)];
+  BOOL defaultPrefix = [WineBootPrefix() isEqualToString:KitsuneBottlePath(KitsunePersistentDocuments(), nil)];
   if (havePrefix) {
     NSString *stamp = [[NSString stringWithContentsOfFile:stampFile encoding:NSUTF8StringEncoding error:nil]
                        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -721,7 +721,7 @@ static void PublishJITScript(void) {
     /* Named bottles hold installed programs and saves; they are never rebuilt
      * automatically. The default prefix holds nothing of the user's. */
     if (stale && !defaultPrefix)
-      IOSWineLog([NSString stringWithFormat:@"bottle %@ was made with runtime %@, running %@; kept as is",
+      KitsuneLog([NSString stringWithFormat:@"bottle %@ was made with runtime %@, running %@; kept as is",
                   WineBootPrefix().lastPathComponent, stamp.length ? stamp : @"unknown", treeVersion]);
     if (stale && defaultPrefix) {
       [self say:@"prefix predates this tree; rebuilding it"];
@@ -757,7 +757,7 @@ static void PublishJITScript(void) {
 
   /* Without a prefix, Set Up Default Bottle runs wineboot to make one. */
   if (!havePrefix) _argv = @[ @"wine", [pe stringByAppendingPathComponent:@"wineboot.exe"], @"--init" ];
-  IOSWineLog(havePrefix ? @"READY-LAUNCHER" : @"READY-WINEBOOT-INIT");
+  KitsuneLog(havePrefix ? @"READY-LAUNCHER" : @"READY-WINEBOOT-INIT");
   if (!havePrefix)
     [self setPhase:WineBootPhaseFailed message:NSLocalizedString(@"Wine runtime incomplete. Install the full build.", nil)];
 
@@ -864,8 +864,8 @@ static void PublishJITScript(void) {
   }
   if (_sessionBottle) {
     NSString *reason = nil;
-    NSDictionary *request = IOSWineSteamRequest(appID, IOSWineLaunchOptionsFromSettings(NSUserDefaults.standardUserDefaults),
-                                                IOSWinePersistentDocuments(), &reason);
+    NSDictionary *request = KitsuneSteamRequest(appID, KitsuneLaunchOptionsFromSettings(NSUserDefaults.standardUserDefaults),
+                                                KitsunePersistentDocuments(), &reason);
     if (!request) {
       [vc report:NSLocalizedString(@"Can't Launch", nil) message:reason ?: NSLocalizedString(@"The launch request is invalid.", nil)];
       return;
@@ -875,7 +875,7 @@ static void PublishJITScript(void) {
     if ([self runInSession:[@[ @"wine", exe ] arrayByAddingObjectsFromArray:request[@"args"]]
                 workingDir:exe.stringByDeletingLastPathComponent bottle:request[@"bottle"] label:name ?: NSLocalizedString(@"Steam", nil) from:vc] &&
         appID.length && _input) {
-      _padWanted = IOSWineTouchPadStored(NSUserDefaults.standardUserDefaults);
+      _padWanted = KitsuneTouchPadStored(NSUserDefaults.standardUserDefaults);
       [self applyPad];
     }
     return;
@@ -892,30 +892,30 @@ static void PublishJITScript(void) {
     return;
   }
   NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-  IOSWineLaunchOptions options = IOSWineLaunchOptionsFromSettings(ud);
+  KitsuneLaunchOptions options = KitsuneLaunchOptionsFromSettings(ud);
   NSString *reason = nil;
-  if (!IOSWineSteamRequest(appID, options, IOSWinePersistentDocuments(), &reason)) {
+  if (!KitsuneSteamRequest(appID, options, KitsunePersistentDocuments(), &reason)) {
     [vc report:NSLocalizedString(@"Can't Launch", nil) message:reason ?: NSLocalizedString(@"The launch request is invalid.", nil)];
     return;
   }
-  NSData *script = [NSData dataWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"ios-wine" ofType:@"js"]];
-  NSArray<NSURL *> *urls = IOSWineJITURLs(NSBundle.mainBundle.bundleIdentifier, getpid(), script);
+  NSData *script = [NSData dataWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"kitsune" ofType:@"js"]];
+  NSArray<NSURL *> *urls = KitsuneJITURLs(NSBundle.mainBundle.bundleIdentifier, getpid(), script);
   if (!jitReady && !urls.count) {
-    [vc report:NSLocalizedString(@"JIT Script Missing", nil) message:NSLocalizedString(@"Reinstall ios-wine.", nil)];
+    [vc report:NSLocalizedString(@"JIT Script Missing", nil) message:NSLocalizedString(@"Reinstall Kitsune.", nil)];
     return;
   }
   NSError *error = nil;
-  if (![IOSWineSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error]) {
+  if (![KitsuneSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error]) {
     [vc report:NSLocalizedString(@"Can't Launch", nil) message:error.localizedDescription];
     return;
   }
   [NSFileManager.defaultManager removeItemAtPath:
-      [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"dxmt-gpu-debug.txt"] error:nil];
+      [KitsunePersistentDocuments() stringByAppendingPathComponent:@"dxmt-gpu-debug.txt"] error:nil];
   [self fitSteamGameToScreen:appID];
   _quickLaunchPending = YES;
   if (jitReady) [self setPhase:WineBootPhaseLaunching message:[NSString stringWithFormat:NSLocalizedString(@"Starting %@", nil), name ?: NSLocalizedString(@"Steam", nil)]];
   else [self setPhase:WineBootPhaseWaitingJIT message:NSLocalizedString(@"Enabling JIT…", nil)];
-  IOSWineLog([NSString stringWithFormat:@"PLAY app=%@ textures=%ld cap=%d steam=%@ diag=%ld",
+  KitsuneLog([NSString stringWithFormat:@"PLAY app=%@ textures=%ld cap=%d steam=%@ diag=%ld",
                  appID ?: @"client", (long)options.textures, options.frameCap,
                  options.steamVisible ? @"visible" : @"hidden", (long)options.diag]);
   if (jitReady) {
@@ -929,18 +929,18 @@ static void PublishJITScript(void) {
 /* Steam in a new process: the request waits in launch-request.json, which
  * carries Steam's memory policy for the boot. */
 - (void)restartIntoSteamApp:(NSString *)appID named:(NSString *)name from:(WineLauncherVC *)vc {
-  IOSWineLaunchOptions options = IOSWineLaunchOptionsFromSettings(NSUserDefaults.standardUserDefaults);
+  KitsuneLaunchOptions options = KitsuneLaunchOptionsFromSettings(NSUserDefaults.standardUserDefaults);
   NSString *reason = nil;
-  if (!IOSWineSteamRequest(appID, options, IOSWinePersistentDocuments(), &reason)) {
+  if (!KitsuneSteamRequest(appID, options, KitsunePersistentDocuments(), &reason)) {
     [vc report:NSLocalizedString(@"Can't Launch", nil) message:reason ?: NSLocalizedString(@"The launch request is invalid.", nil)];
     return;
   }
   [self restartToOpen:name ?: NSLocalizedString(@"Steam", nil) bottle:@"Steam" from:vc saving:^NSString *{
     NSError *error = nil;
-    if (![IOSWineSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error])
+    if (![KitsuneSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error])
       return error.localizedDescription;
     [NSFileManager.defaultManager removeItemAtPath:
-        [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"dxmt-gpu-debug.txt"] error:nil];
+        [KitsunePersistentDocuments() stringByAppendingPathComponent:@"dxmt-gpu-debug.txt"] error:nil];
     [self fitSteamGameToScreen:appID];
     return nil;
   }];
@@ -949,12 +949,12 @@ static void PublishJITScript(void) {
 /* With Fill Screen on, the game's own config asks for the desktop's size. */
 - (void)fitSteamGameToScreen:(NSString *)appID {
   int w = 0, h = 0;
-  if (!appID.length || !IOSWineFillScreenStored(NSUserDefaults.standardUserDefaults) ||
+  if (!appID.length || !KitsuneFillScreenStored(NSUserDefaults.standardUserDefaults) ||
       !wine_surface_expected_landscape_desktop(&w, &h))
     return;
-  NSString *changed = IOSWineApplyGameResolution(appID, [IOSWinePersistentDocuments()
+  NSString *changed = KitsuneApplyGameResolution(appID, [KitsunePersistentDocuments()
       stringByAppendingPathComponent:@"Bottles/Steam"], w, h);
-  IOSWineLog([NSString stringWithFormat:@"PLAY desktop %dx%d config=%@", w, h, changed.lastPathComponent ?: @"unchanged"]);
+  KitsuneLog([NSString stringWithFormat:@"PLAY desktop %dx%d config=%@", w, h, changed.lastPathComponent ?: @"unchanged"]);
 }
 
 - (void)launcherEnableJIT:(WineLauncherVC *)vc {
@@ -969,10 +969,10 @@ static void PublishJITScript(void) {
     [self relaunch];
     return NO;
   }
-  NSData *script = [NSData dataWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"ios-wine" ofType:@"js"]];
-  NSArray<NSURL *> *urls = IOSWineJITURLs(NSBundle.mainBundle.bundleIdentifier, getpid(), script);
+  NSData *script = [NSData dataWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"kitsune" ofType:@"js"]];
+  NSArray<NSURL *> *urls = KitsuneJITURLs(NSBundle.mainBundle.bundleIdentifier, getpid(), script);
   if (!urls.count) {
-    [vc report:NSLocalizedString(@"JIT Script Missing", nil) message:NSLocalizedString(@"Reinstall ios-wine.", nil)];
+    [vc report:NSLocalizedString(@"JIT Script Missing", nil) message:NSLocalizedString(@"Reinstall Kitsune.", nil)];
     return NO;
   }
   _quickLaunchPending = YES;
@@ -984,7 +984,7 @@ static void PublishJITScript(void) {
 
 - (void)launcher:(WineLauncherVC *)vc runArgv:(NSArray<NSString *> *)argv
       workingDir:(NSString *)cwd bottle:(NSString *)bottle gui:(BOOL)gui label:(NSString *)label {
-  NSString *target = bottle.length ? bottle : IOSWINE_DEFAULT_BOTTLE;
+  NSString *target = bottle.length ? bottle : KITSUNE_DEFAULT_BOTTLE;
   if (_wineStopped || _jitFailed || (_sessionBottle && ![target isEqualToString:_sessionBottle])) {
     NSDictionary *pending = @{ @"argv": argv, @"cwd": cwd ?: @"", @"bottle": target, @"gui": @(gui),
                                @"label": label ?: NSLocalizedString(@"program", nil) };
@@ -995,12 +995,12 @@ static void PublishJITScript(void) {
     return;
   }
   if (_sessionBottle) {
-    [self runInSession:argv workingDir:cwd bottle:bottle.length ? bottle : IOSWINE_DEFAULT_BOTTLE label:label from:vc];
+    [self runInSession:argv workingDir:cwd bottle:bottle.length ? bottle : KITSUNE_DEFAULT_BOTTLE label:label from:vc];
     return;
   }
   if (vc && !ios_jit_arena_available()) {
     /* Chosen before JIT: remember it, get JIT, run it once the runtime is up. */
-    if (bottle.length && ![bottle isEqualToString:IOSWINE_DEFAULT_BOTTLE]) WineBootSelectBottle(bottle);
+    if (bottle.length && ![bottle isEqualToString:KITSUNE_DEFAULT_BOTTLE]) WineBootSelectBottle(bottle);
     NSDictionary *pending = @{ @"argv": argv, @"cwd": cwd ?: @"", @"bottle": bottle ?: @"", @"gui": @(gui), @"label": label ?: NSLocalizedString(@"program", nil) };
     if ([self requestJITFrom:vc]) _pendingLaunch = pending;
     return;
@@ -1009,18 +1009,18 @@ static void PublishJITScript(void) {
     [vc report:NSLocalizedString(@"Not ready", nil) message:WineBootStatus.shared.message];
     return;
   }
-  if (bottle.length && ![bottle isEqualToString:IOSWINE_DEFAULT_BOTTLE]) WineBootSelectBottle(bottle);
+  if (bottle.length && ![bottle isEqualToString:KITSUNE_DEFAULT_BOTTLE]) WineBootSelectBottle(bottle);
   if (gui) {
     /* Wine's root process is the session host; the program waits in its queue
      * and later ones from the same bottle join it there. */
-    if (!IOSWineSessionQueue(ProgramArgv(argv), cwd)) {
+    if (!KitsuneSessionQueue(ProgramArgv(argv), cwd)) {
       [self reportLaunchFailure:NSLocalizedString(@"The command line is too long.", nil) from:vc];
       return;
     }
-    _argv = @[ @"wine", IOSWineSessionHostPath() ];
-    _sessionBottle = bottle.length ? bottle : IOSWINE_DEFAULT_BOTTLE;
-    setenv("IOSWINE_PROCESS_CACHE_EXPERIMENT", "1", 1);
-    setenv("IOSWINE_THREADED_PROCESS", "1", 1);
+    _argv = @[ @"wine", KitsuneSessionHostPath() ];
+    _sessionBottle = bottle.length ? bottle : KITSUNE_DEFAULT_BOTTLE;
+    setenv("KITSUNE_PROCESS_CACHE_EXPERIMENT", "1", 1);
+    setenv("KITSUNE_THREADED_PROCESS", "1", 1);
   } else {
     /* Console programs run alone, as Wine's root process. Portable programs
      * resolve their files relative to their own directory. */
@@ -1030,13 +1030,13 @@ static void PublishJITScript(void) {
   }
   /* Games get landscape from their launch request; other programs follow the
    * setting. The app itself stays in whatever orientation the phone is in. */
-  const char *landscape = getenv("IOSWINE_LANDSCAPE");
+  const char *landscape = getenv("KITSUNE_LANDSCAPE");
   _landscape = landscape && *landscape ? atoi(landscape) != 0
-                                       : gui && [NSUserDefaults.standardUserDefaults boolForKey:IOSWINE_KEY_OTHER_LANDSCAPE];
+                                       : gui && [NSUserDefaults.standardUserDefaults boolForKey:KITSUNE_KEY_OTHER_LANDSCAPE];
   wine_surface_host_set_landscape(_landscape);
   _sessionLandscape = _landscape;
   [self forceLandscapeIfAsked];
-  IOSWineLog([NSString stringWithFormat:@"LAUNCH %@ gui=%d landscape=%d", label, gui, _landscape]);
+  KitsuneLog([NSString stringWithFormat:@"LAUNCH %@ gui=%d landscape=%d", label, gui, _landscape]);
   [self setPhase:WineBootPhaseLaunching message:[NSString stringWithFormat:NSLocalizedString(@"Starting %@", nil), label]];
   [self dismissViewControllerAnimated:NO completion:^{
     if (gui) {
@@ -1062,10 +1062,10 @@ static void PublishJITScript(void) {
     if (failure) { [self reportLaunchFailure:failure from:vc]; return; }
     [self relaunch];
   };
-  if (_wineStopped || _jitFailed || IOSWineSessionPrograms() <= 0) { restart(); return; }
+  if (_wineStopped || _jitFailed || KitsuneSessionPrograms() <= 0) { restart(); return; }
   UIAlertController *ask = [UIAlertController
       alertControllerWithTitle:[NSString stringWithFormat:NSLocalizedString(@"Open %@?", nil), label]
-                       message:[NSString stringWithFormat:NSLocalizedString(@"ios-wine restarts to open the %@ bottle. Programs running in the %@ bottle will close.", nil),
+                       message:[NSString stringWithFormat:NSLocalizedString(@"Kitsune restarts to open the %@ bottle. Programs running in the %@ bottle will close.", nil),
                                                           bottle, _sessionBottle]
                 preferredStyle:UIAlertControllerStyleAlert];
   [ask addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Cancel", nil) style:UIAlertActionStyleCancel handler:nil]];
@@ -1077,16 +1077,16 @@ static void PublishJITScript(void) {
 }
 
 - (void)relaunch {
-  NSData *script = [NSData dataWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"ios-wine" ofType:@"js"]];
-  IOSWineLog(@"RESTART");
+  NSData *script = [NSData dataWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"kitsune" ofType:@"js"]];
+  KitsuneLog(@"RESTART");
   [self setPhase:WineBootPhaseLaunching message:NSLocalizedString(@"Restarting…", nil)];
-  [self openRelaunchURLs:IOSWineRelaunchURLs(NSBundle.mainBundle.bundleIdentifier, script) atIndex:0];
+  [self openRelaunchURLs:KitsuneRelaunchURLs(NSBundle.mainBundle.bundleIdentifier, script) atIndex:0];
 }
 
 - (void)openRelaunchURLs:(NSArray<NSURL *> *)urls atIndex:(NSUInteger)index {
   if (index >= urls.count) {
-    /* What to open stays saved: the next start of ios-wine opens it. */
-    [self setPhase:WineBootPhaseFailed message:NSLocalizedString(@"Couldn't open StikDebug. Close ios-wine and open it again to continue.", nil)];
+    /* What to open stays saved: the next start of Kitsune opens it. */
+    [self setPhase:WineBootPhaseFailed message:NSLocalizedString(@"Couldn't open StikDebug. Close Kitsune and open it again to continue.", nil)];
     return;
   }
   [UIApplication.sharedApplication openURL:urls[index] options:@{} completionHandler:^(BOOL ok) {
@@ -1109,18 +1109,18 @@ static void PublishJITScript(void) {
 }
 
 /* A program for the running session; NO when it was refused. Another bottle
- * restarts ios-wine into that bottle (restartToOpen:). */
+ * restarts Kitsune into that bottle (restartToOpen:). */
 - (BOOL)runInSession:(NSArray<NSString *> *)argv workingDir:(NSString *)cwd bottle:(NSString *)bottle
                label:(NSString *)label from:(WineLauncherVC *)vc {
   if (![bottle isEqualToString:_sessionBottle]) {
     [self launcher:vc runArgv:argv workingDir:cwd bottle:bottle gui:YES label:label];
     return NO;
   }
-  if (!IOSWineSessionQueue(ProgramArgv(argv), cwd)) {
+  if (!KitsuneSessionQueue(ProgramArgv(argv), cwd)) {
     [self reportLaunchFailure:NSLocalizedString(@"The command line is too long.", nil) from:vc];
     return NO;
   }
-  IOSWineLog([NSString stringWithFormat:@"SESSION-LAUNCH %@", label]);
+  KitsuneLog([NSString stringWithFormat:@"SESSION-LAUNCH %@", label]);
   _sessionLaunchAt = CFAbsoluteTimeGetCurrent();
   _landscape = _sessionLandscape;
   [self forceLandscapeIfAsked];
@@ -1141,14 +1141,14 @@ static void PublishJITScript(void) {
 /* The Library comes back once no program runs: after one has, or when the
  * last launch has started nothing for a while. */
 - (void)sessionTick {
-  if (IOSWineSessionPrograms() > 0) {
+  if (KitsuneSessionPrograms() > 0) {
     _sessionBusy = YES;
     if (WineBootStatus.shared.phase != WineBootPhaseRunning) [self setPhase:WineBootPhaseRunning message:NSLocalizedString(@"Running", nil)];
     return;
   }
   if ((!_sessionBusy && CFAbsoluteTimeGetCurrent() - _sessionLaunchAt < 20) || _launcher.presentingViewController) return;
   _sessionBusy = NO;
-  IOSWineLog(@"SESSION-IDLE");
+  KitsuneLog(@"SESSION-IDLE");
   _landscape = NO;
   if (@available(iOS 16.0, *)) [self setNeedsUpdateOfSupportedInterfaceOrientations];
   [self setPhase:WineBootPhaseReady message:NSLocalizedString(@"Ready", nil)];
@@ -1186,7 +1186,7 @@ static void PublishJITScript(void) {
     b.accessibilityLabel = fallback;
     b.layer.cornerRadius = 15;
     b.clipsToBounds = YES;
-    [b.widthAnchor constraintEqualToConstant:IOSWINE_BAR_BUTTON_WIDTH].active = YES;
+    [b.widthAnchor constraintEqualToConstant:KITSUNE_BAR_BUTTON_WIDTH].active = YES;
     [b.heightAnchor constraintEqualToConstant:30].active = YES;
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     return b;
@@ -1210,7 +1210,7 @@ static void PublishJITScript(void) {
       _powerButton,
       mk(@"xmark",                   NSLocalizedString(@"hide", nil), @selector(onHideInput)),
   ];
-  NSAssert(_barButtons.count == IOSWINE_BAR_BUTTONS, @"the pad layout reserves room for %d bar buttons", IOSWINE_BAR_BUTTONS);
+  NSAssert(_barButtons.count == KITSUNE_BAR_BUTTONS, @"the pad layout reserves room for %d bar buttons", KITSUNE_BAR_BUTTONS);
   UIStackView *(^row)(void) = ^UIStackView *(void) {
     UIStackView *r = [UIStackView new];
     r.axis = UILayoutConstraintAxisHorizontal;
@@ -1272,7 +1272,7 @@ static void PublishJITScript(void) {
   ]];
   /* The pad owns the bottom corners and the screen edges, so while it is shown
    * the bar, its show button and the overlay sit at the top centre, the band
-   * IOSWinePadReservedTop keeps clear. */
+   * KitsunePadReservedTop keeps clear. */
   _chromeBottom = @[
     [blur.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-8],
     [_showBar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
@@ -1290,17 +1290,17 @@ static void PublishJITScript(void) {
   [NSLayoutConstraint activateConstraints:_chromeBottom];
 
   NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-  _input.lookSensitivity = IOSWineLookSensitivityStored(ud);
-  _input.pointerMode = (WinePointerMode)[ud integerForKey:IOSWINE_KEY_POINTER_MODE];
+  _input.lookSensitivity = KitsuneLookSensitivityStored(ud);
+  _input.pointerMode = (WinePointerMode)[ud integerForKey:KITSUNE_KEY_POINTER_MODE];
   [self updateModeButton];
-  [_hud setVisible:IOSWinePerfHUDStored(ud)];
+  [_hud setVisible:KitsunePerfHUDStored(ud)];
   [self updatePowerButton];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePowerButton)
                                              name:WinePowerDidChangeNotification object:nil];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateHUD)
                                              name:NSUserDefaultsDidChangeNotification object:nil];
 
-  _padWanted = IOSWineTouchPadStored(ud) && [_request[@"args"] containsObject:@"-applaunch"];
+  _padWanted = KitsuneTouchPadStored(ud) && [_request[@"args"] containsObject:@"-applaunch"];
   __weak WineBootVC *weakSelf = self;
   for (NSNotificationName name in @[ GCControllerDidConnectNotification, GCControllerDidDisconnectNotification ])
     [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:NSOperationQueue.mainQueue
@@ -1317,7 +1317,7 @@ static void PublishJITScript(void) {
 - (void)arrangeBar {
   if (!_barButtons) return;
   UIEdgeInsets inset = self.view.safeAreaInsets;
-  BOOL oneRow = IOSWineBarRows(self.view.bounds.size.width - inset.left - inset.right) == 1;
+  BOOL oneRow = KitsuneBarRows(self.view.bounds.size.width - inset.left - inset.right) == 1;
   NSUInteger split = oneRow ? _barButtons.count : (_barButtons.count + 1) / 2;
   for (NSUInteger i = 0; i < _barButtons.count; i++) {
     UIStackView *target = _barRows[i < split ? 0 : 1];
@@ -1367,7 +1367,7 @@ static void PublishJITScript(void) {
 
 /* The overlay's switch is in Settings, which the Library shows over a program. */
 - (void)updateHUD {
-  [_hud setVisible:IOSWinePerfHUDStored(NSUserDefaults.standardUserDefaults)];
+  [_hud setVisible:KitsunePerfHUDStored(NSUserDefaults.standardUserDefaults)];
 }
 
 - (void)updateModeButton {
@@ -1382,7 +1382,7 @@ static void PublishJITScript(void) {
 
 - (void)onToggleMode {
   _input.pointerMode = (WinePointerMode)((_input.pointerMode + 1) % 3);
-  [NSUserDefaults.standardUserDefaults setInteger:_input.pointerMode forKey:IOSWINE_KEY_POINTER_MODE];
+  [NSUserDefaults.standardUserDefaults setInteger:_input.pointerMode forKey:KITSUNE_KEY_POINTER_MODE];
   [self updateModeButton];
 }
 - (void)onToggleKeyboard { [_input toggleKeyboard]; }
@@ -1415,15 +1415,15 @@ static void PublishJITScript(void) {
 /* --- Wine ---------------------------------------------------------------- */
 
 - (void)launchWine {
-  IOSWineDiagPolicy policy = IOSWineDiagPolicyFor(IOSWineDiagLevelFromEnv());
+  KitsuneDiagPolicy policy = KitsuneDiagPolicyFor(KitsuneDiagLevelFromEnv());
   dispatch_async(dispatch_get_main_queue(), ^{ self->_runBtn.hidden = YES; });
   [self say:@"handing the process to Wine; the app exits when the program finishes"];
   if (policy.shader_cache_census) [self say:ShaderCacheCensus()];
   (void)WineLogPathC();
-  IOSWineLog(IOSWineMemLine(@"pre-launch"));
+  KitsuneLog(KitsuneMemLine(@"pre-launch"));
 
-  BOOL showPulse = IOSWineDiagLevelFromEnv() != IOSWineDiagOff;
-  IOSWineHeartbeatStart(policy, WineLogPathC(), ^(NSString *text, BOOL growing) {
+  BOOL showPulse = KitsuneDiagLevelFromEnv() != KitsuneDiagOff;
+  KitsuneHeartbeatStart(policy, WineLogPathC(), ^(NSString *text, BOOL growing) {
     if (!showPulse) return;
     self->_pulse.text = text;
     self->_pulse.textColor = growing ? UIColor.systemGreenColor : UIColor.secondaryLabelColor;
@@ -1431,28 +1431,28 @@ static void PublishJITScript(void) {
 
   char err[512] = {0};
   int ok = WineBootRun(_argv, ^(NSString *l) { [self say:[@"  " stringByAppendingString:l]]; }, err, sizeof(err));
-  IOSWineHeartbeatStop();
+  KitsuneHeartbeatStop();
   int status = 0;
   if (ok && WineBootExited(&status) && _sessionBottle) {
     /* The session host outlives every program, so Wine itself has stopped. */
     dispatch_async(dispatch_get_main_queue(), ^{ [self->_sessionTimer invalidate]; });
     _wineStopped = YES;
-    [self setPhase:WineBootPhaseFailed message:[NSString stringWithFormat:NSLocalizedString(@"Wine stopped (code %d). Opening a program restarts ios-wine.", nil), status]];
-    IOSWineLog([NSString stringWithFormat:@"SESSION-EXIT %d", status]);
+    [self setPhase:WineBootPhaseFailed message:[NSString stringWithFormat:NSLocalizedString(@"Wine stopped (code %d). Opening a program restarts Kitsune.", nil), status]];
+    KitsuneLog([NSString stringWithFormat:@"SESSION-EXIT %d", status]);
     return;
   }
   if (ok && WineBootExited(&status)) {
     _wineStopped = YES;
-    [self setPhase:WineBootPhaseFailed message:[NSString stringWithFormat:NSLocalizedString(@"The program exited (code %d). Opening another restarts ios-wine.", nil), status]];
+    [self setPhase:WineBootPhaseFailed message:[NSString stringWithFormat:NSLocalizedString(@"The program exited (code %d). Opening another restarts Kitsune.", nil), status]];
     [self say:[NSString stringWithFormat:@"program exited with code %d; opening another restarts the app", status]];
-    IOSWineLog([NSString stringWithFormat:@"PROGRAM-EXIT %d", status]);
+    KitsuneLog([NSString stringWithFormat:@"PROGRAM-EXIT %d", status]);
     [self showProgramOutput];
     return;
   }
   _wineStopped = YES;
   [self setPhase:WineBootPhaseFailed message:[NSString stringWithFormat:NSLocalizedString(@"Wine didn't start: %s", nil), err[0] ? err : NSLocalizedString(@"unknown error", nil).UTF8String]];
   [self say:[NSString stringWithFormat:@"boot failed: %s", err[0] ? err : "(no reason reported)"]];
-  IOSWineLog([NSString stringWithFormat:@"BOOT-FAILED %s", err]);
+  KitsuneLog([NSString stringWithFormat:@"BOOT-FAILED %s", err]);
 }
 
 @end

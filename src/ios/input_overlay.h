@@ -1,6 +1,6 @@
 
-#ifndef IOSWINE_INPUT_OVERLAY_H
-#define IOSWINE_INPUT_OVERLAY_H
+#ifndef KITSUNE_INPUT_OVERLAY_H
+#define KITSUNE_INPUT_OVERLAY_H
 
 #import <UIKit/UIKit.h>
 
@@ -32,4 +32,4 @@ typedef NS_ENUM(NSInteger, WinePointerMode) {
 
 @end
 
-#endif /* IOSWINE_INPUT_OVERLAY_H */
+#endif /* KITSUNE_INPUT_OVERLAY_H */

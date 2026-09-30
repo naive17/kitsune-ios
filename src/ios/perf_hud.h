@@ -1,6 +1,6 @@
 /* In-session readout: frames per second and memory headroom. */
-#ifndef IOSWINE_PERF_HUD_H
-#define IOSWINE_PERF_HUD_H
+#ifndef KITSUNE_PERF_HUD_H
+#define KITSUNE_PERF_HUD_H
 
 #import <UIKit/UIKit.h>
 

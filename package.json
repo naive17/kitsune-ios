@@ -1,7 +1,7 @@
 {
-  "name": "ios-wine",
+  "name": "kitsune",
   "private": true,
-  "description": "Developer tooling for ios-wine: the commit-msg hook.",
+  "description": "Developer tooling for Kitsune: the commit-msg hook.",
   "license": "GPL-3.0-or-later",
   "scripts": {
     "prepare": "husky",

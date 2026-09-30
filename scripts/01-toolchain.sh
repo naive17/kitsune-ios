@@ -29,7 +29,7 @@ done
 
 work="$BUILD/toolchain-selftest"; rm -rf "$work"; mkdir -p "$work"
 cat > "$work/t.c" <<'EOF'
-__declspec(dllexport) int ios_wine_probe(int x) { return x * 3 + 1; }
+__declspec(dllexport) int kitsune_probe(int x) { return x * 3 + 1; }
 EOF
 
 log "self-test: arm64ec DLL"

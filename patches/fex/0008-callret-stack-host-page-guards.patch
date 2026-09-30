@@ -4,7 +4,7 @@
  #include <FEXCore/Debug/InternalThreadState.h>
  
  namespace FEX::Windows::CallRetStack {
-+// ios-wine: the guards must be whole HOST pages. With 4KB guards on a 16KB-page
++// Kitsune: the guards must be whole HOST pages. With 4KB guards on a 16KB-page
 +// host the low guard shares a host page with the committed stack, so an
 +// underflow runs through it without faulting and walks off the bottom of the
 +// reservation; the fault then lands outside [AllocationBase, AllocationEnd),

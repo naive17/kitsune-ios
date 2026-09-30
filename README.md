@@ -1,4 +1,4 @@
-# ios-wine
+# Kitsune
 
 A port of [Wine](https://www.winehq.org) that run on iOS through JIT to run Steam games and x86 apps.
 
@@ -16,11 +16,13 @@ A port of [Wine](https://www.winehq.org) that run on iOS through JIT to run Stea
 
 ## How to use
 
-- Using iLoader or Sidestore install the unsigned ipa.
+- Using iLoader or Sidestore install the unsigned ipa of Kitsune.
 - Then either use Stikdebug in Livecontainer or sideload Stikdebug.
 - Install LocalDevVPN and enable it.
-- Launch ios-wine.
-- Install steam.
+- Copy kitsune.js from the Kitsune folder in files to the Stikdebug scripts folders.
+- Open StikDebug and longpress on Kitsune to assign the kitsune.js script to allow for JIT.
+- Launch Kitsune.
+- Install Steam.
 - Allow Steam to open stikdebug and allow JIT.
 - Wait up to 2 minutes to let steam run, login, install games and launch
 
@@ -35,7 +37,13 @@ To build you need a Mac with Apple silicon, Xcode, Homebrew and about 16 GB of f
 ```sh
 cp local.env.example local.env   # your Apple team and a bundle id registered to it
 scripts/setup.sh                 # checks available space and installed stuff, then it fetches external dependencies and compiles them
-scripts/app.sh install --full    # builds the app and installs it on the paired iPhone
+scripts/app.sh ipa               # builds the app and outputs an ipa ready to install
+
+
+# to reiterate on development
+
+scripts/app.sh install --full    # full build and coredevice install with usb cable or network
+scripts/app.sh install           # progressive build and install with usb cable or network
 ```
 
 `scripts/setup.sh` resumes where it stopped and skips finished steps, and

@@ -1,11 +1,11 @@
-// Runs jit-scripts/ios-wine.js against a simulated StikDebug and debugserver.
+// Runs jit-scripts/kitsune.js against a simulated StikDebug and debugserver.
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 
 const root = path.resolve(import.meta.dirname, '..');
-const script = fs.readFileSync(path.join(root, 'jit-scripts/ios-wine.js'), 'utf8');
+const script = fs.readFileSync(path.join(root, 'jit-scripts/kitsune.js'), 'utf8');
 const BRK_F00D = 'a0013ed4';   // brk #0xf00d, little-endian
 const PC = 0x100004000n;
 

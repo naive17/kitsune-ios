@@ -15,7 +15,7 @@ diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore
  }
  
 +/*
-+ * ios-wine: how much arena a dual-mapped guest takes up front.
++ * Kitsune: how much arena a dual-mapped guest takes up front.
 + *
 + * Whole-buffer-at-once (below) is right, but 128MB each is expensive when the
 + * arena is 1GB and Steam runs three guests: 384MB, ~46% of the measured 838MB
@@ -23,7 +23,7 @@ diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore
 + * exceeding the 16MB initial size in a 200k-iteration guest. Every MB of arena
 + * also costs 128 vm_map entries (64 pages x the RX mapping and its alias).
 + *
-+ * IOSWINE_FEX_CODE_MB sizes it, clamped to 16..128MB; unset, it is 128MB
++ * KITSUNE_FEX_CODE_MB sizes it, clamped to 16..128MB; unset, it is 128MB
 + * (MAX_CODE_SIZE). The app's Steam launch profile sets 48
 + * (src/ios/launch_profile.h).
 + *
@@ -33,7 +33,7 @@ diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore
 + */
 +static size_t DualMappedCodeSize() {
 +  static size_t Size = [] {
-+    const char *Env = getenv("IOSWINE_FEX_CODE_MB");
++    const char *Env = getenv("KITSUNE_FEX_CODE_MB");
 +    size_t MB = Env ? static_cast<size_t>(atoi(Env)) : 128;
 +    if (MB < 16) MB = 16;
 +    if (MB > 128) MB = 128;

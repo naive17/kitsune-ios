@@ -48,7 +48,7 @@
  * updateBounds for a detached layer tree and renders nothing at all, even for a
  * plain white CALayer with no Metal involved. Not pursued further.)
  *
- * OFF unless IOSWINE_HOST_SURFACE=1. With it unset every entry point below
+ * OFF unless KITSUNE_HOST_SURFACE=1. With it unset every entry point below
  * returns "no host", the driver takes its existing headless path, and nothing
  * about the other checks changes.
  */
@@ -175,7 +175,7 @@ static int host_enabled( void )
 
     if (state < 0)
     {
-        const char *e = getenv( "IOSWINE_HOST_SURFACE" );
+        const char *e = getenv( "KITSUNE_HOST_SURFACE" );
 
         state = (e && *e && strcmp( e, "0" )) ? 1 : 0;
         if (state)
@@ -233,7 +233,7 @@ static unsigned host_insert_index( void *hwnd, int role )
     return host_entry_count;
 }
 
-/* The harness's stand-in for a rotation: IOSWINE_TEST_SCREEN_CHANGE. */
+/* The harness's stand-in for a rotation: KITSUNE_TEST_SCREEN_CHANGE. */
 void wine_surface_host_test_resize( int width, int height )
 {
     if (!host_enabled()) return;
@@ -498,7 +498,7 @@ void wine_surface_host_composite( const char *path )
 /*
  * A thread, because nothing else here has a run loop.
  *
- * IOSWINE_HOST_COMPOSITE=<path> writes the composited screen there every half
+ * KITSUNE_HOST_COMPOSITE=<path> writes the composited screen there every half
  * second for as long as the process lives, overwriting. The last write before
  * the guest exits is the one a check reads, and a periodic write means the
  * check does not have to guess when the picture is ready.
@@ -523,7 +523,7 @@ static void host_surface_init( void )
     if (!host_enabled()) return;
     fprintf( stderr, "wineios:host: harness surface enabled, screen %dx%d\n",
              host_screen_w, host_screen_h );
-    if ((path = getenv( "IOSWINE_HOST_COMPOSITE" )) && *path)
+    if ((path = getenv( "KITSUNE_HOST_COMPOSITE" )) && *path)
     {
         pthread_t t;
 

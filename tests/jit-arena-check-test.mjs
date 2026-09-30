@@ -33,7 +33,7 @@ const pidsEnd = source.indexOf('\n}\n', pidsStart) + 3;
 assert(pidsStart >= 0 && pidsEnd > pidsStart);
 const helper = source.slice(pidsStart, pidsEnd);
 for (const [status, listing, expected] of [
-  [0, '7387 /private/var/containers/Bundle/Application/test/ioswine.app/ioswine', 'PID=7387'],
+  [0, '7387 /private/var/containers/Bundle/Application/test/Kitsune.app/Kitsune', 'PID=7387'],
   [0, '123 /other.app/other', 'PID='],
   [2, 'ERROR: Command timeout', 'TRANSPORT-ERROR=2'],
 ]) {

@@ -71,7 +71,7 @@ static inline LONG64 interlocked_xchg64(LONG64 *dest, LONG64 value) {
 static const HANDLE handle = (HANDLE)(ULONG_PTR)0x40;
 static int owner_a, owner_b;
 static int file_with(char byte) {
-    char name[] = "/tmp/ioswine-cache-XXXXXX";
+    char name[] = "/tmp/kitsune-cache-XXXXXX";
     int fd = mkstemp(name);
     assert(fd >= 0 && !unlink(name) && write(fd, &byte, 1) == 1);
     return fd;

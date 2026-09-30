@@ -7,7 +7,7 @@
 const CGSize WineProgramIconSize = { 36, 36 };
 const CGSize WineSteamArtSize = { 64, 30 };
 
-NSString *IOSWineSteamArtPath(NSString *steamRoot, NSString *appID) {
+NSString *KitsuneSteamArtPath(NSString *steamRoot, NSString *appID) {
   NSString *cache = [steamRoot stringByAppendingPathComponent:@"appcache/librarycache"];
   NSString *perApp = [cache stringByAppendingPathComponent:appID];
   for (NSString *path in @[ [perApp stringByAppendingPathComponent:@"header.jpg"],
@@ -53,7 +53,7 @@ static UIImage *Render(UIImage *image, CGSize size, CGFloat scale, BOOL fill, CG
   if ((self = [super init])) {
     _memory = [NSCache new];
     _waiting = [NSMutableDictionary dictionary];
-    _queue = dispatch_queue_create("dev.ioswine.icons", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+    _queue = dispatch_queue_create("dev.kitsune.icons", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
     NSString *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
     _dir = [caches stringByAppendingPathComponent:@"icons"];
     _scale = UIScreen.mainScreen.scale;
@@ -116,7 +116,7 @@ static NSString *KeyFor(NSString *kind, NSString *path) {
 }
 
 - (UIImage *)artForSteamApp:(NSString *)appID steamRoot:(NSString *)root ready:(void (^)(void))ready {
-  NSString *path = root && appID ? IOSWineSteamArtPath(root, appID) : nil;
+  NSString *path = root && appID ? KitsuneSteamArtPath(root, appID) : nil;
   return [self lookup:path kind:@"steam" ready:ready make:^UIImage * {
     UIImage *raw = [UIImage imageWithContentsOfFile:path];
     return raw ? Render(raw, WineSteamArtSize, self->_scale, YES, 5) : nil;

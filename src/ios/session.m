@@ -18,13 +18,13 @@ static unsigned queue_head, queue_count;
 
 extern int wineserver_inproc_user_processes(void);
 
-NSString *IOSWineSessionHostPath(void) {
-  return [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"lib/wine/aarch64-windows/ioswine-session.exe"];
+NSString *KitsuneSessionHostPath(void) {
+  return [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"lib/wine/aarch64-windows/kitsune-session.exe"];
 }
 
-BOOL IOSWineSessionQueue(NSArray<NSString *> *argv, NSString *cwd) {
-  NSString *cmdline = IOSWineWindowsCommandLine(argv);
-  NSString *dir = cwd.length ? IOSWineWindowsPath(cwd) : @"";
+BOOL KitsuneSessionQueue(NSArray<NSString *> *argv, NSString *cwd) {
+  NSString *cmdline = KitsuneWindowsCommandLine(argv);
+  NSString *dir = cwd.length ? KitsuneWindowsPath(cwd) : @"";
   if (!argv.count || cmdline.length >= CMDLINE_MAX || dir.length >= CWD_MAX) return NO;
   BOOL queued = NO;
   pthread_mutex_lock(&queue_lock);
@@ -58,7 +58,7 @@ int wine_surface_host_take_launch(char *cmdline, size_t cmdline_size, char *cwd,
   return fits ? 1 : -1;
 }
 
-int IOSWineSessionPrograms(void) {
+int KitsuneSessionPrograms(void) {
   int processes = wineserver_inproc_user_processes();
   return processes > 1 ? processes - 1 : 0;
 }

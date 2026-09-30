@@ -16,21 +16,21 @@ static volatile int g_hb_stop;
 static char g_wine_log[PATH_MAX];
 
 static NSString *HBLogPath(void) {
-  return [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"hb.log"];
+  return [KitsunePersistentDocuments() stringByAppendingPathComponent:@"hb.log"];
 }
 
-int IOSWineHeartbeatFd(void) { return g_hb_fd; }
+int KitsuneHeartbeatFd(void) { return g_hb_fd; }
 
-unsigned long long IOSWinePhysFootprintMB(void) {
+unsigned long long KitsunePhysFootprintMB(void) {
   task_vm_info_data_t info;
   mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
   if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return 0;
   return (unsigned long long)(info.phys_footprint >> 20);
 }
 
-NSString *IOSWineMemLine(NSString *where) {
+NSString *KitsuneMemLine(NSString *where) {
   return [NSString stringWithFormat:@"MEM %@ avail=%lluMB footprint=%lluMB", where,
-          (unsigned long long)(os_proc_available_memory() >> 20), IOSWinePhysFootprintMB()];
+          (unsigned long long)(os_proc_available_memory() >> 20), KitsunePhysFootprintMB()];
 }
 
 /* hb.log is written with write(2) on an fd opened before Wine starts, so no
@@ -43,10 +43,10 @@ static void hb_write(const char *s) {
   if (n > 0) { ssize_t w = write(g_hb_fd, line, (size_t)(n < (int)sizeof line ? n : (int)sizeof line - 1)); (void)w; }
 }
 
-void IOSWineLogC(const char *line) { hb_write(line); }
+void KitsuneLogC(const char *line) { hb_write(line); }
 
-void IOSWineLog(NSString *s) {
-  NSLog(@"[ioswine] %@", s);
+void KitsuneLog(NSString *s) {
+  NSLog(@"[kitsune] %@", s);
   strlcpy(g_last_stage, s.UTF8String ?: "?", sizeof(g_last_stage));
   hb_write(s.UTF8String);
 }
@@ -82,7 +82,7 @@ static void atexit_handler(void) {
   hb_write(buf);
 }
 
-void IOSWineDiagInit(void) {
+void KitsuneDiagInit(void) {
   static const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGABRT, SIGTRAP, SIGFPE };
   if (g_hb_fd >= 0) return;
   g_hb_fd = open(HBLogPath().fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0644);
@@ -92,7 +92,7 @@ void IOSWineDiagInit(void) {
 
 /* --- heartbeat ----------------------------------------------------------- */
 
-void IOSWineHeartbeatStart(IOSWineDiagPolicy policy, const char *wineLogPath, void (^status)(NSString *, BOOL)) {
+void KitsuneHeartbeatStart(KitsuneDiagPolicy policy, const char *wineLogPath, void (^status)(NSString *, BOOL)) {
   strlcpy(g_wine_log, wineLogPath, sizeof(g_wine_log));
   g_hb_stop = 0;
   CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
@@ -100,8 +100,8 @@ void IOSWineHeartbeatStart(IOSWineDiagPolicy policy, const char *wineLogPath, vo
     static const unsigned schedule[] = { 1, 1, 2, 2, 3 };
     unsigned n = 0;
     long prev_size = 0;
-    IOSWineLog(@"HB entered");
-    WineBootLogImageBases(IOSWineLogC);
+    KitsuneLog(@"HB entered");
+    WineBootLogImageBases(KitsuneLogC);
     while (!g_hb_stop) {
       unsigned want = n < sizeof(schedule) / sizeof(schedule[0]) ? schedule[n] : policy.heartbeat_seconds;
       if (policy.fine_first_ticks && n < 5) {
@@ -110,7 +110,7 @@ void IOSWineHeartbeatStart(IOSWineDiagPolicy policy, const char *wineLogPath, vo
           int rc = nanosleep(&ts, NULL), e = errno;
           hb_write([NSString stringWithFormat:@"HB tick-%u chunk %u rc=%d errno=%d avail=%lluMB footprint=%lluMB",
                     n + 1, chunk, rc, rc ? e : 0, (unsigned long long)(os_proc_available_memory() >> 20),
-                    IOSWinePhysFootprintMB()].UTF8String);
+                    KitsunePhysFootprintMB()].UTF8String);
         }
       } else {
         sleep(want);
@@ -133,9 +133,9 @@ void IOSWineHeartbeatStart(IOSWineDiagPolicy policy, const char *wineLogPath, vo
       extern int wine_input_overlay_alive, wine_input_gestures, wine_input_sent, wine_input_unmapped,
                  wine_input_resolved, wine_input_last_x, wine_input_last_y;
       extern const char *wine_input_status;
-      IOSWineLog([NSString stringWithFormat:
+      KitsuneLog([NSString stringWithFormat:
           @"HB %u log=%ld avail=%lluMB footprint=%lluMB in{ov=%d drv=%#x g=%d sent=%d unmapped=%d last=%d,%d} srv{%s}",
-          tick, sz, (unsigned long long)(os_proc_available_memory() >> 20), IOSWinePhysFootprintMB(),
+          tick, sz, (unsigned long long)(os_proc_available_memory() >> 20), KitsunePhysFootprintMB(),
           wine_input_overlay_alive, wine_input_resolved, wine_input_gestures, wine_input_sent, wine_input_unmapped,
           wine_input_last_x, wine_input_last_y, wine_input_status ? wine_input_status : "-"]);
       if (status) {
@@ -143,21 +143,21 @@ void IOSWineHeartbeatStart(IOSWineDiagPolicy policy, const char *wineLogPath, vo
         long delta = (prev_size > 0 && sz >= prev_size) ? sz - prev_size : 0;
         unsigned up = (unsigned)(CFAbsoluteTimeGetCurrent() - start);
         NSString *text = [NSString stringWithFormat:@" %c %um%02us  log+%ldB  %lluMB ",
-                          spin[tick & 3], up / 60, up % 60, delta, IOSWinePhysFootprintMB()];
+                          spin[tick & 3], up / 60, up % 60, delta, KitsunePhysFootprintMB()];
         dispatch_async(dispatch_get_main_queue(), ^{ status(text, delta > 0); });
         prev_size = sz;
       }
       if (policy.thread_dumps) {
         static CFAbsoluteTime last_dump;
-        const char *e = getenv("IOSWINE_THREAD_DUMP");
+        const char *e = getenv("KITSUNE_THREAD_DUMP");
         int every = e ? atoi(e) : 0;
         if (e && every <= 0) every = 60;
         if (every > 0 && CFAbsoluteTimeGetCurrent() - last_dump >= every) {
           char tag[32];
           last_dump = CFAbsoluteTimeGetCurrent();
           snprintf(tag, sizeof tag, "tick-%u", tick);
-          WineBootDumpThreads(tag, IOSWineLogC);
-          WineBootDumpVM(tag, IOSWineLogC);
+          WineBootDumpThreads(tag, KitsuneLogC);
+          WineBootDumpVM(tag, KitsuneLogC);
           if (policy.log_snapshot) {
             char snap[PATH_MAX];
             snprintf(snap, sizeof snap, "%s.snap", g_wine_log);
@@ -176,18 +176,18 @@ void IOSWineHeartbeatStart(IOSWineDiagPolicy policy, const char *wineLogPath, vo
           dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             char guest[256];
             WineBootSampleGuest(guest, sizeof guest);
-            IOSWineLog([NSString stringWithFormat:@"HB %u guest %s", tick, guest]);
+            KitsuneLog([NSString stringWithFormat:@"HB %u guest %s", tick, guest]);
             busy = 0;
           });
         } else {
-          IOSWineLog([NSString stringWithFormat:@"HB %u guest sampler busy since tick %u", tick, since]);
+          KitsuneLog([NSString stringWithFormat:@"HB %u guest sampler busy since tick %u", tick, since]);
         }
       }
     }
   }];
   thread.stackSize = 4 * 1024 * 1024;
   [thread start];
-  IOSWineLog(@"HB thread requested");
+  KitsuneLog(@"HB thread requested");
 }
 
-void IOSWineHeartbeatStop(void) { g_hb_stop = 1; }
+void KitsuneHeartbeatStop(void) { g_hb_stop = 1; }

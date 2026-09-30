@@ -1,6 +1,6 @@
 /* Nonblocking key pulses for frame-polled games. All calls on UIKit's queue. */
-#ifndef IOSWINE_KEY_PULSE_H
-#define IOSWINE_KEY_PULSE_H
+#ifndef KITSUNE_KEY_PULSE_H
+#define KITSUNE_KEY_PULSE_H
 #include <stdint.h>
 #include <string.h>
 
@@ -17,14 +17,14 @@ typedef void (*ios_text_sink)(int codepoint, int down);
 /* A character typed in game mode. Letters, digits and space become their keys,
  * capitals with Shift, so a frame-polled game sees them held; anything else
  * stays a character. Both go through one queue, so text keeps its order. */
-static inline struct ios_key_pulse IOSWineGameTextPulse(uint16_t c) {
+static inline struct ios_key_pulse KitsuneGameTextPulse(uint16_t c) {
     if (c >= 'a' && c <= 'z') return (struct ios_key_pulse){ (uint16_t)(c - 'a' + 'A'), 0 };
     if (c >= 'A' && c <= 'Z') return (struct ios_key_pulse){ c, 4 };
     if ((c >= '0' && c <= '9') || c == ' ') return (struct ios_key_pulse){ c, 0 };
     return (struct ios_key_pulse){ c, 8 };
 }
 
-static inline void IOSWinePulseEmit(struct ios_key_pulse p, int down, ios_key_sink sink, ios_text_sink text) {
+static inline void KitsunePulseEmit(struct ios_key_pulse p, int down, ios_key_sink sink, ios_text_sink text) {
     if (p.mods & 8) {
         if (text) text(p.vk, down);
         return;
@@ -43,7 +43,7 @@ static inline void IOSWinePulseEmit(struct ios_key_pulse p, int down, ios_key_si
     }
 }
 
-static inline int IOSWinePulsePush(struct ios_key_pulses *q, int vk, int mods) {
+static inline int KitsunePulsePush(struct ios_key_pulses *q, int vk, int mods) {
     unsigned next = (q->head + 1) % 64;
     if (next == q->tail) return 0;
     q->items[q->head] = (struct ios_key_pulse){ (uint16_t)vk, (uint16_t)mods };
@@ -51,10 +51,10 @@ static inline int IOSWinePulsePush(struct ios_key_pulses *q, int vk, int mods) {
     return 1;
 }
 
-static inline void IOSWinePulseTick(struct ios_key_pulses *q, uint64_t now, ios_key_sink sink, ios_text_sink text) {
+static inline void KitsunePulseTick(struct ios_key_pulses *q, uint64_t now, ios_key_sink sink, ios_text_sink text) {
     if (q->phase && now < q->deadline) return;
     if (q->phase == 1) {
-        IOSWinePulseEmit(q->items[q->tail], 0, sink, text);
+        KitsunePulseEmit(q->items[q->tail], 0, sink, text);
         q->tail = (q->tail + 1) % 64;
         q->phase = 2;
         q->deadline = now + 50; // A game must observe release before a repeated E.
@@ -62,14 +62,14 @@ static inline void IOSWinePulseTick(struct ios_key_pulses *q, uint64_t now, ios_
     }
     q->phase = 0;
     if (q->tail != q->head) {
-        IOSWinePulseEmit(q->items[q->tail], 1, sink, text);
+        KitsunePulseEmit(q->items[q->tail], 1, sink, text);
         q->phase = 1;
         q->deadline = now + 80;
     }
 }
 
-static inline void IOSWinePulseCancel(struct ios_key_pulses *q, ios_key_sink sink, ios_text_sink text) {
-    if (q->phase == 1) IOSWinePulseEmit(q->items[q->tail], 0, sink, text);
+static inline void KitsunePulseCancel(struct ios_key_pulses *q, ios_key_sink sink, ios_text_sink text) {
+    if (q->phase == 1) KitsunePulseEmit(q->items[q->tail], 0, sink, text);
     memset(q, 0, sizeof(*q));
 }
 #endif

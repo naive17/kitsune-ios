@@ -105,10 +105,10 @@ static NSString *HumanSize(unsigned long long bytes) {
 /* Disk work off the main thread; the table reloads when the lists arrive. */
 - (void)refresh {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-    NSString *docs = IOSWinePersistentDocuments();
-    NSString *steam = IOSWineSteamRoot(docs);
-    NSArray *games = steam ? IOSWineSteamGames(steam) : @[];
-    NSArray *bottles = IOSWineBottleNames(docs);
+    NSString *docs = KitsunePersistentDocuments();
+    NSString *steam = KitsuneSteamRoot(docs);
+    NSArray *games = steam ? KitsuneSteamGames(steam) : @[];
+    NSArray *bottles = KitsuneBottleNames(docs);
     BOOL wow = HaveWow64();
     NSArray *apps = WineAppLibrary.shared.apps;
     NSPredicate *(^by)(WineAppOrigin) = ^(WineAppOrigin o) {
@@ -169,7 +169,7 @@ static NSString *HumanSize(unsigned long long bytes) {
 
 - (void)onInstallSteam {
   if (WineSteamInstaller.isRunning) return;
-  if (!IOSWineTreeVersion(WineTreeRoot()).length) {
+  if (!KitsuneTreeVersion(WineTreeRoot()).length) {
     [self.host report:NSLocalizedString(@"Enable JIT First", nil) message:NSLocalizedString(@"Steam can be installed once JIT is on.", nil)];
     return;
   }
@@ -279,7 +279,7 @@ static NSString *HumanSize(unsigned long long bytes) {
                                                              : app.subsystem == PE_SUBSYSTEM_CONSOLE ? @"terminal" : @"app.badge"];
   cell.textLabel.text = app.name;
   cell.textLabel.textColor = runnable ? UIColor.labelColor : UIColor.tertiaryLabelColor;
-  NSString *bottle = app.bottle ?: IOSWINE_DEFAULT_BOTTLE;
+  NSString *bottle = app.bottle ?: KITSUNE_DEFAULT_BOTTLE;
   if (msi)
     cell.detailTextLabel.text = [NSString stringWithFormat:NSLocalizedString(@"Installer · %@ bottle", nil), bottle];
   else if (!runnable)
@@ -340,7 +340,7 @@ static NSString *HumanSize(unsigned long long bytes) {
   BOOL isMSI = [app.exePath.pathExtension.lowercaseString isEqualToString:@"msi"];
   BOOL runnable = [app runnableWithWow64:_haveWow64];
   UIAlertController *a = [UIAlertController alertControllerWithTitle:app.name
-      message:[NSString stringWithFormat:NSLocalizedString(@"%@\nBottle: %@%@", nil), app.archLabel, app.bottle ?: IOSWINE_DEFAULT_BOTTLE,
+      message:[NSString stringWithFormat:NSLocalizedString(@"%@\nBottle: %@%@", nil), app.archLabel, app.bottle ?: KITSUNE_DEFAULT_BOTTLE,
                app.arguments.length ? [NSLocalizedString(@"\nArguments: ", nil) stringByAppendingString:app.arguments] : @""]
       preferredStyle:UIAlertControllerStyleActionSheet];
   if (runnable && [self ready])
@@ -348,7 +348,7 @@ static NSString *HumanSize(unsigned long long bytes) {
       /* Outside a session a console program is Wine's root process, and Wine
        * ends with it. */
       NSString *detail = !isMSI && app.subsystem == PE_SUBSYSTEM_CONSOLE
-          ? NSLocalizedString(@"A console program runs on its own. Opening something else afterwards restarts ios-wine.", nil) : nil;
+          ? NSLocalizedString(@"A console program runs on its own. Opening something else afterwards restarts Kitsune.", nil) : nil;
       [self confirmLaunch:app.name detail:detail action:^{ [self launch:app]; }];
     }]];
   if (!isMSI)
@@ -384,7 +384,7 @@ static NSString *HumanSize(unsigned long long bytes) {
                                                          preferredStyle:UIAlertControllerStyleActionSheet];
   for (NSString *name in _bottles)
     [pick addAction:[UIAlertAction actionWithTitle:name style:UIAlertActionStyleDefault handler:^(UIAlertAction *y __unused) {
-      app.bottle = [name isEqualToString:IOSWINE_DEFAULT_BOTTLE] ? nil : name;
+      app.bottle = [name isEqualToString:KITSUNE_DEFAULT_BOTTLE] ? nil : name;
       [WineAppLibrary.shared save];
       [self.tableView reloadData];
     }]];
@@ -408,7 +408,7 @@ static NSString *HumanSize(unsigned long long bytes) {
 - (void)launch:(WineApp *)app {
   BOOL gui = YES;
   NSString *pe = [WineTreeRoot() stringByAppendingPathComponent:@"lib/wine/aarch64-windows"];
-  NSArray<NSString *> *argv = IOSWineProgramArgv(app.exePath, app.arguments, app.subsystem == PE_SUBSYSTEM_CONSOLE, pe, &gui);
+  NSArray<NSString *> *argv = KitsuneProgramArgv(app.exePath, app.arguments, app.subsystem == PE_SUBSYSTEM_CONSOLE, pe, &gui);
   [self.host.launcherDelegate launcher:self.host runArgv:argv workingDir:app.workingDir bottle:app.bottle gui:gui label:app.name];
 }
 

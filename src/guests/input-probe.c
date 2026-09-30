@@ -1,7 +1,7 @@
 /*
  * Does input actually reach a guest window?
  *
- * Copyright 2026 the ios-wine project
+ * Copyright 2026 the Kitsune project
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@
  * given rather than merely a count: a click delivered to the wrong place still
  * fails the check.
  *
- * Runs against the harness's IOSWINE_TEST_INPUT injection, which sends five
+ * Runs against the harness's KITSUNE_TEST_INPUT injection, which sends five
  * moves, a left click and the 'A' key about twelve seconds in. The verdict is
  * a single line so the regression suite can grep it.
  *
@@ -232,7 +232,7 @@ static LRESULT CALLBACK wnd_proc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
 
 void mainCRTStartup(void)
 {
-    static const WCHAR class_name[] = L"ioswine_input_probe";
+    static const WCHAR class_name[] = L"kitsune_input_probe";
     WNDCLASSEXW wc;
     HWND hwnd, popup = NULL;
     MSG msg;
@@ -244,14 +244,14 @@ void mainCRTStartup(void)
     int seconds = 20;
     WCHAR secbuf[16];
 
-    if (GetEnvironmentVariableW( L"IOSWINE_PROBE_SECONDS", secbuf, 16 ))
+    if (GetEnvironmentVariableW( L"KITSUNE_PROBE_SECONDS", secbuf, 16 ))
     {
         int v = 0, i;
         for (i = 0; secbuf[i] >= '0' && secbuf[i] <= '9'; i++) v = v * 10 + (secbuf[i] - '0');
         if (v > 0) seconds = v;
     }
     if (w <= 0) { x = y = 0; w = 800; h = 600; }
-    getenv_flag_noactivate = GetEnvironmentVariableW( L"IOSWINE_PROBE_NOACTIVATE", secbuf, 16 ) != 0;
+    getenv_flag_noactivate = GetEnvironmentVariableW( L"KITSUNE_PROBE_NOACTIVATE", secbuf, 16 ) != 0;
 
     memset( &wc, 0, sizeof(wc) );
     wc.cbSize = sizeof(wc);
@@ -288,7 +288,7 @@ void mainCRTStartup(void)
      * window, which is the point of it and would make the single-window checks
      * read as failures. The suite runs the probe twice.
      */
-    if (GetEnvironmentVariableW( L"IOSWINE_PROBE_POPUP", secbuf, 16 ))
+    if (GetEnvironmentVariableW( L"KITSUNE_PROBE_POPUP", secbuf, 16 ))
     {
         WNDCLASSEXW pc;
 
@@ -298,7 +298,7 @@ void mainCRTStartup(void)
         pc.hInstance = wc.hInstance;
         pc.hCursor = LoadCursorW( NULL, (const WCHAR *)IDC_ARROW );
         pc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-        pc.lpszClassName = L"ioswine_input_probe_popup";
+        pc.lpszClassName = L"kitsune_input_probe_popup";
         if (RegisterClassExW( &pc ))
             popup = CreateWindowExW( 0, pc.lpszClassName, L"popup",
                                      WS_POPUP | WS_BORDER | WS_VISIBLE,
@@ -320,7 +320,7 @@ void mainCRTStartup(void)
     /*
      * A push button straddling 640,300, where the harness clicks.
      */
-    if (GetEnvironmentVariableW( L"IOSWINE_PROBE_BUTTON", secbuf, 16 ))
+    if (GetEnvironmentVariableW( L"KITSUNE_PROBE_BUTTON", secbuf, 16 ))
     {
         HWND b = CreateWindowExW( 0, L"Button", L"Press me",
                                   WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
@@ -375,7 +375,7 @@ void mainCRTStartup(void)
      * moves ending at 640,300 and then a left click, about twelve seconds in;
      * a menu at 600,280 puts its first item under that point.
      */
-    if (GetEnvironmentVariableW( L"IOSWINE_PROBE_MENU", secbuf, 16 ))
+    if (GetEnvironmentVariableW( L"KITSUNE_PROBE_MENU", secbuf, 16 ))
     {
         HMENU menu = CreatePopupMenu();
 
@@ -409,7 +409,7 @@ void mainCRTStartup(void)
      * window does to its visible rect -- and what left a ladder of stale
      * layers on the glass.
      */
-    if (GetEnvironmentVariableW( L"IOSWINE_PROBE_RESIZE", secbuf, 16 ))
+    if (GetEnvironmentVariableW( L"KITSUNE_PROBE_RESIZE", secbuf, 16 ))
     {
         int i;
         for (i = 0; i < 6; i++)
@@ -431,9 +431,9 @@ void mainCRTStartup(void)
          * default made that test fail, which is a fair warning about tests
          * that quietly change the scenario they share. */
         DWORD kill_at = GetTickCount() + 6000;
-        int killed = !GetEnvironmentVariableW( L"IOSWINE_PROBE_DESTROY", secbuf, 16 );
+        int killed = !GetEnvironmentVariableW( L"KITSUNE_PROBE_DESTROY", secbuf, 16 );
         /* Hidden, not destroyed: Steam's menus come and go this way. */
-        int hide = !!GetEnvironmentVariableW( L"IOSWINE_PROBE_HIDE", secbuf, 16 );
+        int hide = !!GetEnvironmentVariableW( L"KITSUNE_PROBE_HIDE", secbuf, 16 );
         for (;;)
         {
         if (popup && !killed && (int)(GetTickCount() - kill_at) >= 0)
@@ -494,7 +494,7 @@ done:
     if (n_char) print( "input-probe: OK window received keyboard\n" );
     else print( "input-probe: FAIL window received no keyboard\n" );
 
-    if (GetEnvironmentVariableW( L"IOSWINE_PROBE_BUTTON", secbuf, 16 ))
+    if (GetEnvironmentVariableW( L"KITSUNE_PROBE_BUTTON", secbuf, 16 ))
     {
         print( "input-probe: button clicked=" ); print_int( btn_clicked );
         print( " raw-down=" );                   print_int( btn_raw_down );

@@ -49,7 +49,7 @@ cmd_logs() {
       warn "could not copy Documents/$name; incomplete capture retained at $partial"
     fi
   done
-  [ "$copied" = 1 ] || die "no ios-wine logs were present"
+  [ "$copied" = 1 ] || die "no Kitsune logs were present"
   [ "$failed" = 0 ] || die "log capture is incomplete; check the .partial files"
 }
 

@@ -74,11 +74,11 @@ static void *wine_thread(void *p) {
  * The device hung on the first delivered event, and nothing here could
  * reproduce it: the host normally never sends input, so the drain thread's
  * NtUserSendHardwareInput was only ever executed on a phone. With
- * IOSWINE_TEST_INPUT=1 the harness waits for the guest to come up, resolves
+ * KITSUNE_TEST_INPUT=1 the harness waits for the guest to come up, resolves
  * the driver entry points (dlsym works here even though it does not on iOS)
  * and sends a few events, so a hang in that path shows up locally.
  */
-static void *ioswine_test_input( void *arg )
+static void *kitsune_test_input( void *arg )
 {
     void (*move)( int, int );
     void (*button)( int, int );
@@ -92,13 +92,13 @@ static void *ioswine_test_input( void *arg )
     fprintf( stderr, "test-input: move=%p button=%p key=%p\n", move, button, key );
     if (!move || !button || !key) return NULL;
 
-    /* Rotations, as the app reports them (IOSWINE_TEST_SCREEN_CHANGE=WxH[,WxH...]):
+    /* Rotations, as the app reports them (KITSUNE_TEST_SCREEN_CHANGE=WxH[,WxH...]):
      * each must reach Wine, and input must still arrive after them. */
-    if (getenv( "IOSWINE_TEST_SCREEN_CHANGE" ))
+    if (getenv( "KITSUNE_TEST_SCREEN_CHANGE" ))
     {
         void wine_surface_host_test_resize( int width, int height );
         void (*changed)( void ) = dlsym( RTLD_DEFAULT, "wineios_metal_screen_changed" );
-        const char *p = getenv( "IOSWINE_TEST_SCREEN_CHANGE" );
+        const char *p = getenv( "KITSUNE_TEST_SCREEN_CHANGE" );
         int w, h, n;
 
         while (sscanf( p, "%dx%d%n", &w, &h, &n ) == 2)
@@ -144,7 +144,7 @@ static void *ioswine_test_input( void *arg )
 
 /*
  * The app's part in a session, for a run of the session host: with
- * IOSWINE_SESSION_LAUNCH set, that Windows command line is handed to the
+ * KITSUNE_SESSION_LAUNCH set, that Windows command line is handed to the
  * host's drain thread once, and the harness exits when no program is left,
  * since the host itself never exits.
  */
@@ -153,7 +153,7 @@ static int session_launch_taken;
 __attribute__((visibility("default")))
 int wine_surface_host_take_launch( char *cmdline, size_t cmdline_size, char *cwd, size_t cwd_size )
 {
-    const char *want = getenv( "IOSWINE_SESSION_LAUNCH" ), *dir = getenv( "IOSWINE_SESSION_CWD" );
+    const char *want = getenv( "KITSUNE_SESSION_LAUNCH" ), *dir = getenv( "KITSUNE_SESSION_CWD" );
 
     if (!want || __atomic_exchange_n( &session_launch_taken, 1, __ATOMIC_ACQ_REL )) return 0;
     snprintf( cmdline, cmdline_size, "%s", want );
@@ -188,13 +188,13 @@ static void *session_watch( void *arg __attribute__((unused)) )
 int main(int argc, char **argv) {
   char prefix[4096], home[4096], dllpath[4096], ntdll[4096], datadir[4096];
 
-  const char *root = getenv("IOSWINE_TREE");
-  const char *pfx  = getenv("IOSWINE_PREFIX");
+  const char *root = getenv("KITSUNE_TREE");
+  const char *pfx  = getenv("KITSUNE_PREFIX");
 
-  if (!root) { fprintf(stderr, "harness: set IOSWINE_TREE\n"); return 2; }
+  if (!root) { fprintf(stderr, "harness: set KITSUNE_TREE\n"); return 2; }
   snprintf(tree, sizeof(tree), "%s", root);
   /*
-   * IOSWINE_UNIX lets the unix halves live somewhere OTHER than the PE tree,
+   * KITSUNE_UNIX lets the unix halves live somewhere OTHER than the PE tree,
    * which is the device layout: the .so files must be inside the signed app
    * bundle (iOS will not dlopen a dylib that arrived after install) while the
    * PE modules are a downloaded tree in Documents.
@@ -205,7 +205,7 @@ int main(int argc, char **argv) {
    * and ws2_32's DllMain failed. An earlier attempt to model the split with a
    * SYMLINK passed, precisely because the symlink made the wrong path valid.
    */
-  const char *unixroot = getenv("IOSWINE_UNIX");
+  const char *unixroot = getenv("KITSUNE_UNIX");
   if (unixroot) snprintf(unixdir, sizeof(unixdir), "%s/lib/wine/aarch64-unix", unixroot);
   else snprintf(unixdir, sizeof(unixdir), "%s/lib/wine/aarch64-unix", tree);
 
@@ -245,13 +245,13 @@ int main(int argc, char **argv) {
    * trips over Doom.
    */
   setenv("SDL_RENDER_DRIVER", "software", 0);
-  if (getenv("IOSWINE_TEST_INPUT"))
+  if (getenv("KITSUNE_TEST_INPUT"))
   {
     pthread_t t;
-    pthread_create( &t, NULL, ioswine_test_input, NULL );
+    pthread_create( &t, NULL, kitsune_test_input, NULL );
     pthread_detach( t );
   }
-  if (getenv("IOSWINE_SESSION_LAUNCH"))
+  if (getenv("KITSUNE_SESSION_LAUNCH"))
   {
     pthread_t t;
     pthread_create( &t, NULL, session_watch, NULL );

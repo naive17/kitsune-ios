@@ -1,7 +1,7 @@
 /*
  * D3D11 through a real swapchain: the shape a game actually has.
  *
- * Copyright 2026 the ios-wine project
+ * Copyright 2026 the Kitsune project
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -48,9 +48,9 @@
  * shape: translated code calling into an ARM64EC d3d11.dll through the EC
  * thunks and out to Metal.
  *
- * IOSWINE_D3D_SECONDS   how long to run (default 5)
- * IOSWINE_D3D_W / _H    swapchain size (default 640x480)
- * IOSWINE_D3D_VSYNC     Present(1,0) instead of Present(0,0)
+ * KITSUNE_D3D_SECONDS   how long to run (default 5)
+ * KITSUNE_D3D_W / _H    swapchain size (default 640x480)
+ * KITSUNE_D3D_VSYNC     Present(1,0) instead of Present(0,0)
  */
 
 #define COBJMACROS
@@ -77,7 +77,7 @@ static const GUID iid_texture2d =
  * buffer, which is how every real game moves anything. Running the same test
  * both ways separates "the swapchain presents nothing" from "constant buffers
  * do not arrive", and those have nothing to do with each other. Selected with
- * IOSWINE_D3D_CBUF so the regression suite can check both.
+ * KITSUNE_D3D_CBUF so the regression suite can check both.
  */
 static const char *hlsl_plain =
     "struct VSOut { float4 pos : SV_POSITION; float4 col : COLOR; };\n"
@@ -199,7 +199,7 @@ static int verify_backbuffer( ID3D11Device *dev, ID3D11DeviceContext *ctx,
 
 int main( void )
 {
-    static const WCHAR class_name[] = L"ioswine_d3d11_swapchain";
+    static const WCHAR class_name[] = L"kitsune_d3d11_swapchain";
     WNDCLASSEXW wc = {0};
     DXGI_SWAP_CHAIN_DESC scd = {0};
     IDXGISwapChain *swap = NULL;
@@ -216,11 +216,11 @@ int main( void )
     D3D_FEATURE_LEVEL got;
     LARGE_INTEGER freq;
     const float clear[4] = { 0.0f, 0.0f, 1.0f, 1.0f };   /* blue */
-    int width  = env_int( "IOSWINE_D3D_W", 640 );
-    int height = env_int( "IOSWINE_D3D_H", 480 );
-    int seconds = env_int( "IOSWINE_D3D_SECONDS", 5 );
-    int vsync = getenv( "IOSWINE_D3D_VSYNC" ) != NULL;
-    int use_cbuf = getenv( "IOSWINE_D3D_CBUF" ) != NULL;
+    int width  = env_int( "KITSUNE_D3D_W", 640 );
+    int height = env_int( "KITSUNE_D3D_H", 480 );
+    int seconds = env_int( "KITSUNE_D3D_SECONDS", 5 );
+    int vsync = getenv( "KITSUNE_D3D_VSYNC" ) != NULL;
+    int use_cbuf = getenv( "KITSUNE_D3D_CBUF" ) != NULL;
     const char *hlsl = use_cbuf ? hlsl_cbuf : hlsl_plain;
     LONGLONG start, mark, deadline, t_present = 0;
     unsigned frames = 0, total_frames = 0, present_fail = 0;

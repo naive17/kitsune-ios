@@ -1,10 +1,10 @@
 /* One-shot launch requests (Documents/launch-request.json), from Play or pushed
  * from a Mac. No shell expansion or absolute paths. */
-#ifndef IOSWINE_LAUNCH_REQUEST_H
-#define IOSWINE_LAUNCH_REQUEST_H
+#ifndef KITSUNE_LAUNCH_REQUEST_H
+#define KITSUNE_LAUNCH_REQUEST_H
 #import <Foundation/Foundation.h>
 
-static inline BOOL IOSWineBottleNameValid(id value) {
+static inline BOOL KitsuneBottleNameValid(id value) {
   if (![value isKindOfClass:NSString.class] || ![value length] || [value length] > 64)
     return NO;
   NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
@@ -12,10 +12,10 @@ static inline BOOL IOSWineBottleNameValid(id value) {
   return [value rangeOfCharacterFromSet:allowed.invertedSet].location == NSNotFound;
 }
 
-static inline NSDictionary *IOSWineValidateLaunchRequest(id json, NSString *docs, NSString **error) {
+static inline NSDictionary *KitsuneValidateLaunchRequest(id json, NSString *docs, NSString **error) {
 #define REJECT(why) do { if (error) *error = (why); return nil; } while (0)
   if (![json isKindOfClass:NSDictionary.class]) REJECT(NSLocalizedString(@"request must be a JSON object", nil));
-  if (!IOSWineBottleNameValid(json[@"bottle"])) REJECT(NSLocalizedString(@"invalid bottle name", nil));
+  if (!KitsuneBottleNameValid(json[@"bottle"])) REJECT(NSLocalizedString(@"invalid bottle name", nil));
   id exe = json[@"exe"], args = json[@"args"] ?: @[];
   if (![exe isKindOfClass:NSString.class] || ![exe hasPrefix:@"Apps/"] ||
       [exe length] > 4096 || [exe containsString:@"\\"] ||
@@ -51,7 +51,7 @@ static inline NSDictionary *IOSWineValidateLaunchRequest(id json, NSString *docs
   /* Optional per-launch environment, kept sane: names must look like env var
    * names (A-Z, 0-9, _), values are NUL-free and bounded. The host setenv's
    * each key before Wine starts, so any getenv() toggle in ntdll/wineios (e.g.
-   * IOSWINE_FORCE_SWRAST, WINE_IOS_STACKPOOL_MB) is reachable for this launch
+   * KITSUNE_FORCE_SWRAST, WINE_IOS_STACKPOOL_MB) is reachable for this launch
    * only. */
   NSDictionary *env = nil;
   if (json[@"env"] && json[@"env"] != NSNull.null) {

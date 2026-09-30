@@ -1,4 +1,4 @@
-// ios-wine JIT script for StikDebug.
+// Kitsune JIT script for StikDebug.
 //
 // Serves the app's brk #0xf00d requests: x16 is the command, x0 and x1 the
 // arguments, and the answer goes back in x0.
@@ -20,7 +20,7 @@ const BRK_JIT = 0xf00d;
 
 let detached = false;
 let pid = get_pid();
-log(`ios-wine JIT script: attaching to ${pid}`);
+log(`Kitsune JIT script: attaching to ${pid}`);
 
 // Signals worth handing back to the app. Everything else (notably the SIGSTOP
 // that vAttach itself produces, and SIGTRAP from our own brk) must be resumed
@@ -124,7 +124,7 @@ while (!detached) {
     stop = send_command('c');
 }
 
-log('ios-wine JIT script: done');
+log('Kitsune JIT script: done');
 
 // A PID attach comes from the running app itself (Enable JIT or Play). Switch
 // back to it once it has detached; otherwise it stays in the background behind

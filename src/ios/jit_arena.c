@@ -307,11 +307,11 @@ int    ios_jit_arena_available(void) { return g_ready; }
 static size_t g_win_lo = (size_t)-1, g_win_hi;
 
 static void arena_setup_exe_window(void) {
-  const char *e = getenv("IOSWINE_EXE_WINDOW_MB");
+  const char *e = getenv("KITSUNE_EXE_WINDOW_MB");
   size_t mb = e ? (size_t)atol(e) : 64;
   uintptr_t lo = (uintptr_t)g_arena.exec, hi = lo + g_arena.size;
 
-  if (!mb) { fprintf(stderr, "ios: exe window DISABLED by IOSWINE_EXE_WINDOW_MB=0\n"); return; }
+  if (!mb) { fprintf(stderr, "ios: exe window DISABLED by KITSUNE_EXE_WINDOW_MB=0\n"); return; }
   if (EXE_WINDOW_BASE < lo || EXE_WINDOW_BASE + (mb << 20) > hi) {
     fprintf(stderr,
             "ios: EXE WINDOW LOST -- arena %p-%p does not cover %#llx+%zuMB. "
@@ -340,7 +340,7 @@ static unsigned g_code_slots;               /* how many slots exist */
 static unsigned char g_code_used[ARENA_CODE_SLOTS_MAX];
 
 static void arena_setup_code_region(void) {
-  const char *e = getenv("IOSWINE_ARENA_CODE_MB");
+  const char *e = getenv("KITSUNE_ARENA_CODE_MB");
   size_t mb = e ? (size_t)atol(e) : 512;   /* ceiling, not a reservation */
 
   g_code_max = mb << 20;

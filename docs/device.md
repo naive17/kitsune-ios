@@ -1,6 +1,6 @@
 # Device
 
-The app's bundle id is `dev.ioswine.m3boot`, or your `IOSWINE_BUNDLE_ID`. iOS
+The app's bundle id is `dev.kitsune.app`, or your `KITSUNE_BUNDLE_ID`. iOS
 lets an app run generated code only while a debugger is attached, so the app
 gets JIT from StikDebug running inside LiveContainer. The Mac-side scripts use
 the only paired iPhone and the LiveContainer installed on it; `UDID` and
@@ -37,12 +37,12 @@ build from source.
 ## Launch
 
 The app's Play rows queue `Documents/launch-request.json`. When JIT is not yet
-granted, the app opens StikDebug with its bundled `jit-scripts/ios-wine.js`,
+granted, the app opens StikDebug with its bundled `jit-scripts/kitsune.js`,
 and the Enable JIT button does the same.
 
 StikDebug's own app list runs a script only when one is assigned to the app.
-To use it: in the Files app, open the app's folder, import `ios-wine.js` into
-StikDebug's Scripts, and assign it to ios-wine. Without that, StikDebug only
+To use it: in the Files app, open the app's folder, import `kitsune.js` into
+StikDebug's Scripts, and assign it to Kitsune. Without that, StikDebug only
 sets the debug flag, and the app asks you to tap Enable JIT to attach the
 script.
 
@@ -81,7 +81,7 @@ Settings > Diagnostics sets how much the app records:
     - 3 does both.
   - It is read only with Diagnostics at Basic or Full, on the first present and then every 60th.
   - A Steam launch deletes it. For a Steam game, write the file after tapping Play; it takes effect within 60 frames.
-- **`IOSWINE_NIL_DRAWABLE_EVERY=N`**, in a launch request's `env`, makes every Nth `nextDrawable` return nil. This exercises DXMT's dropped-frame path. The log reports the first nil and every 240th.
+- **`KITSUNE_NIL_DRAWABLE_EVERY=N`**, in a launch request's `env`, makes every Nth `nextDrawable` return nil. This exercises DXMT's dropped-frame path. The log reports the first nil and every 240th.
 - **`Documents/render-scale`** overrides the render scale that the Resolution setting chooses.
 
 ## Runtime files
@@ -89,7 +89,7 @@ Settings > Diagnostics sets how much the app records:
 - **PE modules** load from the app bundle first, and from the phone's `Documents/wine` tree otherwise. The bundle carries ntdll, apisetschema, DXMT and XInput, so DXMT's PE modules always match the bundle's `winemetal.so`.
 - **iOS unix halves** load only from the signed bundle.
 - **Documents also holds:** `Bottles/<name>`, `Apps/` (imported programs and Steam), and `render-scale`.
-- **Orientation** is decided when a program starts: from `IOSWINE_LANDSCAPE` in a launch request's environment, otherwise from the Other Programs setting.
+- **Orientation** is decided when a program starts: from `KITSUNE_LANDSCAPE` in a launch request's environment, otherwise from the Other Programs setting.
 
 `scripts/device.sh sync-tree` replaces `Documents/wine` with `out/wine-core`.
 `scripts/device.sh sync-fex` replaces only the x86-64 emulator in it. Relaunch

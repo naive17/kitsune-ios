@@ -1,6 +1,6 @@
 /* Boot state shared with the launcher screens. Main thread only. */
-#ifndef IOSWINE_BOOT_STATUS_H
-#define IOSWINE_BOOT_STATUS_H
+#ifndef KITSUNE_BOOT_STATUS_H
+#define KITSUNE_BOOT_STATUS_H
 
 #import <Foundation/Foundation.h>
 

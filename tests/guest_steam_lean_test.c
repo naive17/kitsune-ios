@@ -1,4 +1,4 @@
-/* Steam without its UI while a game runs (IOSWINE_STEAM_LEAN): stand-ins named
+/* Steam without its UI while a game runs (KITSUNE_STEAM_LEAN): stand-ins named
  * like Steam's processes. steam.exe starts its web helper, then a game under
  * steamapps\common; the helper must be ended and its memory returned, its
  * restart refused while the game runs, and allowed once the game has exited.
@@ -15,7 +15,7 @@ static void emit(const char *s) {
 
 static volatile ULONG_PTR *shared_block(void) {
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4096,
-                                        L"Local\\ioswine-steam-lean");
+                                        L"Local\\kitsune-steam-lean");
     return mapping ? MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, 4096) : NULL;
 }
 
@@ -38,7 +38,7 @@ static BOOL helper_ready(HANDLE ready, PROCESS_INFORMATION *helper) {
 
 void mainCRTStartup(void) {
     volatile ULONG_PTR *shared = shared_block();
-    HANDLE ready = CreateEventW(NULL, FALSE, FALSE, L"Local\\ioswine-lean-ready");
+    HANDLE ready = CreateEventW(NULL, FALSE, FALSE, L"Local\\kitsune-lean-ready");
     if (!shared || !ready) { emit("STEAM-LEAN FAIL: shared objects\n"); ExitProcess(1); }
 #if LEAN_ROLE == 1
     char *block = VirtualAlloc(NULL, HELPER_BLOCK, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);

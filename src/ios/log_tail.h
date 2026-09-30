@@ -7,7 +7,7 @@
 
 /* Diagnostic previews must have bounded memory even after a runaway trace.
  * Keep the full file on disk; tolerate a tail starting inside a UTF-8 codepoint. */
-static inline NSString *IOSWineLogTail(NSString *path, NSUInteger limit) {
+static inline NSString *KitsuneLogTail(NSString *path, NSUInteger limit) {
     if (!limit) return @"";
     int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NONBLOCK);
     if (fd < 0) return @"";

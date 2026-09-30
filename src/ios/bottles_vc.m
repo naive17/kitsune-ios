@@ -89,15 +89,15 @@ static void RunBottleWork(NSString *name, NSString *stage, WineLauncherVC *host,
 
 - (void)refresh {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-    NSString *docs = IOSWinePersistentDocuments();
-    NSArray *names = IOSWineBottleNames(docs);
+    NSString *docs = KitsunePersistentDocuments();
+    NSArray *names = KitsuneBottleNames(docs);
     NSMutableDictionary *sizes = [NSMutableDictionary dictionary], *programs = [NSMutableDictionary dictionary];
     for (NSString *n in names) {
-      sizes[n] = @(IOSWineDirectorySize(IOSWineBottlePath(docs, n)));
+      sizes[n] = @(KitsuneDirectorySize(KitsuneBottlePath(docs, n)));
       NSUInteger count = 0;
       for (WineApp *a in WineAppLibrary.shared.apps)
-        if ([(a.bottle ?: IOSWINE_DEFAULT_BOTTLE) isEqualToString:n]) count++;
-      if ([n isEqualToString:@"Steam"] && IOSWineSteamRoot(docs)) count += IOSWineSteamGames(IOSWineSteamRoot(docs)).count;
+        if ([(a.bottle ?: KITSUNE_DEFAULT_BOTTLE) isEqualToString:n]) count++;
+      if ([n isEqualToString:@"Steam"] && KitsuneSteamRoot(docs)) count += KitsuneSteamGames(KitsuneSteamRoot(docs)).count;
       programs[n] = @(count);
     }
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -127,12 +127,12 @@ static void RunBottleWork(NSString *name, NSString *stage, WineLauncherVC *host,
     NSString *name = a.textFields.firstObject.text;
     WineLauncherVC *host = (WineLauncherVC *)self.tabBarController;
     NSString *err = nil;
-    if (BusyBottles()[name] || !IOSWineBottleNameFree(IOSWinePersistentDocuments(), name, &err)) {
+    if (BusyBottles()[name] || !KitsuneBottleNameFree(KitsunePersistentDocuments(), name, &err)) {
       [host report:NSLocalizedString(@"Can't Create", nil) message:err ?: [NSString stringWithFormat:NSLocalizedString(@"A bottle named %@ already exists.", nil), name]];
       return;
     }
     RunBottleWork(name, NSLocalizedString(@"Creating…", nil), host, NSLocalizedString(@"Can't Create", nil), ^BOOL(NSString **error) {
-      return IOSWineCreateBottle(IOSWinePersistentDocuments(), WineTreeRoot(), name, error);
+      return KitsuneCreateBottle(KitsunePersistentDocuments(), WineTreeRoot(), name, error);
     });
   }]];
   [self presentViewController:a animated:YES completion:nil];
@@ -210,7 +210,7 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
   NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
   [items addObject:[UIAction actionWithTitle:NSLocalizedString(@"Duplicate…", nil) image:[UIImage systemImageNamed:@"plus.square.on.square"]
                                   identifier:nil handler:^(UIAction *a __unused) { [weakSelf askName:NO]; }]];
-  if (![_name isEqualToString:IOSWINE_DEFAULT_BOTTLE] && ![_name isEqualToString:@"Steam"])
+  if (![_name isEqualToString:KITSUNE_DEFAULT_BOTTLE] && ![_name isEqualToString:@"Steam"])
     [items addObject:[UIAction actionWithTitle:NSLocalizedString(@"Rename…", nil) image:[UIImage systemImageNamed:@"pencil"]
                                     identifier:nil handler:^(UIAction *a __unused) { [weakSelf askName:YES]; }]];
   self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
@@ -238,7 +238,7 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
 
 - (void)renameTo:(NSString *)to {
   NSString *err = nil;
-  if (!IOSWineRenameBottle(IOSWinePersistentDocuments(), _name, to, &err)) {
+  if (!KitsuneRenameBottle(KitsunePersistentDocuments(), _name, to, &err)) {
     [self.host report:NSLocalizedString(@"Can't Rename", nil) message:err];
     return;
   }
@@ -255,36 +255,36 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
 - (void)duplicateTo:(NSString *)to {
   NSString *from = _name;
   NSString *err = nil;
-  if (BusyBottles()[to] || !IOSWineBottleNameFree(IOSWinePersistentDocuments(), to, &err)) {
+  if (BusyBottles()[to] || !KitsuneBottleNameFree(KitsunePersistentDocuments(), to, &err)) {
     [self.host report:NSLocalizedString(@"Can't Duplicate", nil) message:err ?: [NSString stringWithFormat:NSLocalizedString(@"A bottle named %@ already exists.", nil), to]];
     return;
   }
   RunBottleWork(to, NSLocalizedString(@"Duplicating…", nil), self.host, NSLocalizedString(@"Can't Duplicate", nil), ^BOOL(NSString **error) {
-    return IOSWineDuplicateBottle(IOSWinePersistentDocuments(), from, to, error);
+    return KitsuneDuplicateBottle(KitsunePersistentDocuments(), from, to, error);
   });
   [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (NSString *)driveC {
-  return [IOSWineBottlePath(IOSWinePersistentDocuments(), _name) stringByAppendingPathComponent:@"drive_c"];
+  return [KitsuneBottlePath(KitsunePersistentDocuments(), _name) stringByAppendingPathComponent:@"drive_c"];
 }
 
 - (void)load {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-    NSString *docs = IOSWinePersistentDocuments();
-    NSString *path = IOSWineBottlePath(docs, self->_name);
+    NSString *docs = KitsunePersistentDocuments();
+    NSString *path = KitsuneBottlePath(docs, self->_name);
     NSMutableArray *facts = [NSMutableArray array], *programs = [NSMutableArray array];
-    [facts addObject:[NSString stringWithFormat:NSLocalizedString(@"Size: %@", nil), HumanSize(IOSWineDirectorySize(path))]];
+    [facts addObject:[NSString stringWithFormat:NSLocalizedString(@"Size: %@", nil), HumanSize(KitsuneDirectorySize(path))]];
     NSString *stamp = [[NSString stringWithContentsOfFile:[path stringByAppendingPathComponent:@".tree-stamp"] encoding:NSUTF8StringEncoding error:nil]
                        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     [facts addObject:[NSString stringWithFormat:NSLocalizedString(@"Runtime: %@", nil), stamp.length ? stamp : NSLocalizedString(@"unknown", nil)]];
     [facts addObject:[NSString stringWithFormat:NSLocalizedString(@"Path: %@", nil), [path stringByReplacingOccurrencesOfString:docs withString:@"Documents"]]];
     for (WineApp *a in WineAppLibrary.shared.apps)
-      if (a.origin != WineAppOriginBuiltin && [(a.bottle ?: IOSWINE_DEFAULT_BOTTLE) isEqualToString:self->_name])
+      if (a.origin != WineAppOriginBuiltin && [(a.bottle ?: KITSUNE_DEFAULT_BOTTLE) isEqualToString:self->_name])
         [programs addObject:@{ @"name": a.name, @"app": a }];
-    if ([self->_name isEqualToString:@"Steam"] && IOSWineSteamRoot(docs)) {
+    if ([self->_name isEqualToString:@"Steam"] && KitsuneSteamRoot(docs)) {
       [programs addObject:@{ @"name": NSLocalizedString(@"Steam", nil), @"steam": @"" }];
-      for (NSDictionary *g in IOSWineSteamGames(IOSWineSteamRoot(docs)))
+      for (NSDictionary *g in KitsuneSteamGames(KitsuneSteamRoot(docs)))
         [programs addObject:@{ @"name": g[@"name"], @"steam": g[@"appid"] }];
     }
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -301,7 +301,7 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
   switch (s) {
   case BottleAbout: return (NSInteger)_facts.count;
   case BottlePrograms: return (NSInteger)MAX(_programs.count, 1u);
-  case BottleTools: return (NSInteger)IOSWINE_BOTTLE_TOOL_COUNT + 1;
+  case BottleTools: return (NSInteger)KITSUNE_BOTTLE_TOOL_COUNT + 1;
   default: return 1;
   }
 }
@@ -314,7 +314,7 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
 
 - (NSString *)tableView:(UITableView *__unused)t titleForFooterInSection:(NSInteger)s {
   if (s != BottleDelete) return nil;
-  if ([_name isEqualToString:IOSWINE_DEFAULT_BOTTLE]) return NSLocalizedString(@"Deleting resets it to a fresh bottle.", nil);
+  if ([_name isEqualToString:KITSUNE_DEFAULT_BOTTLE]) return NSLocalizedString(@"Deleting resets it to a fresh bottle.", nil);
   if ([_name isEqualToString:@"Steam"]) return NSLocalizedString(@"Deletes Steam, your games and their saves.", nil);
   return NSLocalizedString(@"Deletes everything installed in it.", nil);
 }
@@ -341,8 +341,8 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
     }
     break;
   case BottleTools:
-    if ((NSUInteger)ip.row < IOSWINE_BOTTLE_TOOL_COUNT) {
-      const IOSWineBottleTool *tool = &kIOSWineBottleTools[ip.row];
+    if ((NSUInteger)ip.row < KITSUNE_BOTTLE_TOOL_COUNT) {
+      const KitsuneBottleTool *tool = &kKitsuneBottleTools[ip.row];
       cell.textLabel.text = NSLocalizedString(@(tool->title), nil);
       cell.imageView.image = [UIImage systemImageNamed:@(tool->symbol)];
     } else {
@@ -368,14 +368,14 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
   WineApp *app = p[@"app"];
   BOOL gui = YES;
   NSString *pe = [WineTreeRoot() stringByAppendingPathComponent:@"lib/wine/aarch64-windows"];
-  NSArray<NSString *> *argv = IOSWineProgramArgv(app.exePath, app.arguments, app.subsystem == PE_SUBSYSTEM_CONSOLE, pe, &gui);
+  NSArray<NSString *> *argv = KitsuneProgramArgv(app.exePath, app.arguments, app.subsystem == PE_SUBSYSTEM_CONSOLE, pe, &gui);
   [host.launcherDelegate launcher:host runArgv:argv workingDir:app.workingDir bottle:_name gui:gui label:app.name];
 }
 
-- (void)runTool:(const IOSWineBottleTool *)tool {
+- (void)runTool:(const KitsuneBottleTool *)tool {
   WineLauncherVC *host = self.host;
   NSString *pe = [WineTreeRoot() stringByAppendingPathComponent:@"lib/wine/aarch64-windows"];
-  [host.launcherDelegate launcher:host runArgv:IOSWineToolArgv(tool, pe) workingDir:[self driveC]
+  [host.launcherDelegate launcher:host runArgv:KitsuneToolArgv(tool, pe) workingDir:[self driveC]
                            bottle:_name gui:YES label:NSLocalizedString(@(tool->title), nil)];
 }
 
@@ -385,7 +385,7 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
   [UIApplication.sharedApplication openURL:url options:@{} completionHandler:^(BOOL opened) {
     if (opened) return;
     NSString *app = NSBundle.mainBundle.infoDictionary[@"CFBundleDisplayName"] ?: NSBundle.mainBundle.infoDictionary[@"CFBundleName"];
-    NSString *docs = IOSWinePersistentDocuments();
+    NSString *docs = KitsunePersistentDocuments();
     NSArray<NSString *> *parts = [[[self driveC] substringFromIndex:docs.length] pathComponents];
     NSPredicate *named = [NSPredicate predicateWithFormat:@"SELF != '/'"];
     NSString *where = [[@[ NSLocalizedString(@"On My iPhone", nil), app ] arrayByAddingObjectsFromArray:[parts filteredArrayUsingPredicate:named]]
@@ -398,7 +398,7 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
   [t deselectRowAtIndexPath:ip animated:YES];
   if (ip.section == BottlePrograms && _programs.count) { [self runProgram:_programs[(NSUInteger)ip.row]]; return; }
   if (ip.section == BottleTools) {
-    if ((NSUInteger)ip.row < IOSWINE_BOTTLE_TOOL_COUNT) [self runTool:&kIOSWineBottleTools[ip.row]];
+    if ((NSUInteger)ip.row < KITSUNE_BOTTLE_TOOL_COUNT) [self runTool:&kKitsuneBottleTools[ip.row]];
     else [self showInFiles];
     return;
   }
@@ -413,23 +413,23 @@ typedef NS_ENUM(NSInteger, BottleSection) { BottleAbout = 0, BottlePrograms, Bot
   [a addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Delete", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction *x __unused) {
     if (steam && ![a.textFields.firstObject.text isEqualToString:NSLocalizedString(@"delete", nil)]) return;
     NSString *name = self->_name;
-    BOOL reset = [name isEqualToString:IOSWINE_DEFAULT_BOTTLE];
+    BOOL reset = [name isEqualToString:KITSUNE_DEFAULT_BOTTLE];
     RunBottleWork(name, reset ? NSLocalizedString(@"Resetting…", nil) : NSLocalizedString(@"Deleting…", nil), self.host,
                   reset ? NSLocalizedString(@"Can't Reset", nil) : NSLocalizedString(@"Can't Delete", nil), ^BOOL(NSString **error) {
-      NSString *docs = IOSWinePersistentDocuments();
+      NSString *docs = KitsunePersistentDocuments();
       NSError *e = nil;
       BOOL ok;
       if (reset) {
-        ok = [NSFileManager.defaultManager removeItemAtPath:IOSWineBottlePath(docs, nil) error:&e];
+        ok = [NSFileManager.defaultManager removeItemAtPath:KitsuneBottlePath(docs, nil) error:&e];
         if (!ok) *error = e.localizedDescription;
-        else ok = IOSWineCreateDefaultPrefix(docs, WineTreeRoot(), error);
+        else ok = KitsuneCreateDefaultPrefix(docs, WineTreeRoot(), error);
       }
       else if (steam) {
-        ok = [NSFileManager.defaultManager removeItemAtPath:IOSWineBottlePath(docs, @"Steam") error:&e];
+        ok = [NSFileManager.defaultManager removeItemAtPath:KitsuneBottlePath(docs, @"Steam") error:&e];
         if (!ok) *error = e.localizedDescription;
         [NSFileManager.defaultManager removeItemAtPath:[docs stringByAppendingPathComponent:@"Apps/Steam"] error:nil];
       } else
-        ok = IOSWineDeleteBottle(docs, name, error);
+        ok = KitsuneDeleteBottle(docs, name, error);
       for (WineApp *app in WineAppLibrary.shared.apps)
         if ([app.bottle isEqualToString:name]) app.bottle = nil;
       [WineAppLibrary.shared save];

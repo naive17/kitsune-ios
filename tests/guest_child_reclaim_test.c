@@ -24,7 +24,7 @@ static DWORD WINAPI short_thread(void *arg) {
 
 void mainCRTStartup(void) {
     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4096,
-                                        L"Local\\ioswine-child-reclaim");
+                                        L"Local\\kitsune-child-reclaim");
     volatile ULONG_PTR *shared;
     if (!mapping) { emit("CHILD-RECLAIM FAIL: file mapping\n"); ExitProcess(1); }
     shared = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, 4096);

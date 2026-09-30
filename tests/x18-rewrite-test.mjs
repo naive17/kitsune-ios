@@ -18,7 +18,7 @@ function helper(name) {
   return source.slice(start, end + 1);
 }
 assert(source.includes('if (ios_image_uses_x18( image_info->machine, image_info->is_hybrid ))'));
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ioswine-x18-test-'));
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'kitsune-x18-test-'));
 try {
   const code = `#include <assert.h>
 #include <stddef.h>

@@ -30,9 +30,9 @@ later one runs too. Each step's log goes to `build/setup/`.
 | `--check` | Checks the machine without building anything |
 
 `local.env` holds per-developer settings, and every script reads it. The team
-and bundle id in `ioswine-device.yml` belong to the maintainer's Apple team;
-anyone else signs with their own, set by `IOSWINE_TEAM` and
-`IOSWINE_BUNDLE_ID`. See `local.env.example` for the rest.
+and bundle id in `kitsune-device.yml` belong to the maintainer's Apple team;
+anyone else signs with their own, set by `KITSUNE_TEAM` and
+`KITSUNE_BUNDLE_ID`. See `local.env.example` for the rest.
 
 The port is committed as patches against the upstream revisions pinned in
 `pins.env`, and the scripts apply them. Everything these steps produce is
@@ -97,7 +97,7 @@ scripts/app.sh ipa [file.ipa]    # a full build packaged for sideloading
 scripts/app.sh sign-check        # the signing identity the phone will accept
 ```
 
-The Xcode project is generated from `ioswine-device.yml` by xcodegen on every
+The Xcode project is generated from `kitsune-device.yml` by xcodegen on every
 build, and is not tracked. Signing is automatic. `-allowProvisioningUpdates`
 creates a new certificate when none is valid, and that revokes the previous
 one. If you build on more than one Mac, export the certificate as a .p12 and
@@ -105,7 +105,7 @@ import it on the others instead of letting each Mac create its own. The first
 app build fetches the Mozilla CA bundle (`scripts/stage-ca-bundle.sh`).
 
 A free (personal) Apple team can sign the app's entitlements
-(`src/ios/ioswine.entitlements`: get-task-allow and the increased memory
+(`src/ios/kitsune.entitlements`: get-task-allow and the increased memory
 limit). It cannot sign `increased-debugging-memory-limit` or
 `extended-virtual-addressing`: adding either one fails the build with
 profile errors that look like certificate problems, and both need a paid
@@ -114,12 +114,69 @@ Apple Developer Program membership.
 A phone that has never had a Wine tree needs one `--full` install, or
 `scripts/device.sh sync-tree`.
 
+## After you edit a component
+
+`setup.sh` does not notice source edits: a step it has finished stays done
+until its script or `pins.env` changes, so a plain rerun reports nothing to
+do. `--from STEP` redoes that step and every step after it; the steps after it
+rebuild incrementally.
+
+| You edited | Rebuild | Get it onto the phone |
+|---|---|---|
+| FEX | `scripts/setup.sh --from fex` | `scripts/device.sh sync-fex` |
+| Wine's unix side (`*/unix/*.c`) | `scripts/11-wine-ios.sh` | `scripts/app.sh install` |
+| Wine's PE modules | `scripts/setup.sh --from wine-macos` | `scripts/device.sh sync-tree`, or an `install --full` |
+| DXMT | `scripts/setup.sh --from dxmt` | `scripts/app.sh install` |
+| The app (`src/ios`) | `scripts/app.sh build` | `scripts/app.sh install` |
+
+A thin install carries every iOS unix half but only a few PE modules (see
+`19-stage-runtime.sh`): ntdll, apisetschema, sechost, `wineios.drv`, the
+session host, DXMT and XInput. Every other PE module, FEX included, lives in
+the phone's `Documents/wine` ([device.md](device.md#runtime-files)) and changes
+only through `sync-tree`, `sync-fex` or a `--full` install.
+
+`11-wine-ios.sh` alone refreshes `out/ios-unix`, which is all a thin install
+needs. `out/wine-core`, the prefix template and the IPA are built from it
+later, so before a `--full` install or `app.sh ipa`, run
+`scripts/setup.sh --from wine-ios` instead. After a change to `dlls/ntdll/unix`,
+run the harness and the regression suite (`CONTRIBUTING.md`) before a device
+run.
+
+### Recording a FEX change
+
+`06-fex-arm64ec.sh` resets `third_party/fex` to the pin and applies
+`patches/fex` in order, so an edit made in the checkout is lost the next time
+it runs. Record it as the next patch in the stack:
+
+```sh
+git -C third_party/fex add -A        # after 06 has run: the pin plus the stack
+# edit; for a new file: git -C third_party/fex add -N <file>
+git -C third_party/fex diff --ignore-submodules > patches/fex/0012-name.patch
+git -C third_party/fex reset -q      # 06's `git checkout -- .` restores from the index
+```
+
+Then add an `apply_patch` line for it to `06-fex-arm64ec.sh`, add a line to
+`patches/fex/README`, and run `scripts/setup.sh --from fex`. The diff holds
+only your edit because the index holds the stack. `--ignore-submodules` keeps
+out the `External/rpmalloc` dirty marker that patch 0002 leaves; an edit
+inside rpmalloc is a diff in that submodule, like 0002.
+
+To try a FEX change before recording it, rebuild in place and push the result:
+
+```sh
+cmake --build build/fex-arm64ec --target arm64ecfex -j4
+scripts/device.sh sync-fex build/fex-arm64ec/Bin/libarm64ecfex.dll
+```
+
+This skips 06's checks (imports only ntdll, no x18 reads), so run 06 before
+you commit.
+
 ## Release IPA
 
 `scripts/app.sh ipa` builds the full bundle without a development signature
 and packages it for sideloading tools (SideStore, AltStore, Sideloadly), which
 re-sign it with the installing user's certificate. It is ad-hoc signed with the
-app's entitlements (`src/ios/ioswine.entitlements`), so they travel with the
+app's entitlements (`src/ios/kitsune.entitlements`), so they travel with the
 IPA. It builds in `build/xc-ipa`, which leaves the development build alone.
 
 `.github/workflows/release.yml` builds the same IPA on GitHub:
@@ -130,7 +187,7 @@ IPA. It builds in `build/xc-ipa`, which leaves the development build alone.
   `pins.env` and their scripts. A second job restores that cache and runs
   `scripts/setup.sh` and `scripts/app.sh ipa`.
 - It runs on the `xcode-27` runner, or on the runner named by the repository
-  variable `IOSWINE_RUNNER`.
+  variable `KITSUNE_RUNNER`.
 
 ## Tests
 

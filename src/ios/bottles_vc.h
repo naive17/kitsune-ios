@@ -1,6 +1,6 @@
 /* Bottles tab: list, create, inspect, delete. */
-#ifndef IOSWINE_BOTTLES_VC_H
-#define IOSWINE_BOTTLES_VC_H
+#ifndef KITSUNE_BOTTLES_VC_H
+#define KITSUNE_BOTTLES_VC_H
 
 #import <UIKit/UIKit.h>
 

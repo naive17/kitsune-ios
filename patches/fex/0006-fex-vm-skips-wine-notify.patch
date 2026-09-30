@@ -9,7 +9,7 @@ index ded646b..8cebcdd 100644
 +
 +#ifdef _M_ARM64EC
 +namespace {
-+// ios-wine: FEX's own VM calls (JIT code buffers, lazy lookup-cache commits,
++// Kitsune: FEX's own VM calls (JIT code buffers, lazy lookup-cache commits,
 +// callret stacks) must not go through Wine's ARM64EC NtAllocate/Free/Protect
 +// wrappers. Those call NotifyMemory*, which takes ThreadCreationMutex, while
 +// the compile path already holds CodeInvalidationMutex shared.

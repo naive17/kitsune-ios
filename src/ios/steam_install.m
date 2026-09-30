@@ -67,10 +67,10 @@ static NSString *WorkDir(NSString *docs) {
 /* Fetches Valve's manifest into the work folder and reads it. */
 static NSArray<NSDictionary *> *FetchManifest(NSURLSession *session, NSString *work, NSString **version, NSString **error) {
   [NSFileManager.defaultManager createDirectoryAtPath:work withIntermediateDirectories:YES attributes:nil error:nil];
-  NSString *path = [work stringByAppendingPathComponent:IOSWINE_STEAM_MANIFEST];
-  NSString *fail = Download(session, [NSURL URLWithString:[IOSWINE_STEAM_CLIENT_BASE stringByAppendingString:IOSWINE_STEAM_MANIFEST]], path, nil);
+  NSString *path = [work stringByAppendingPathComponent:KITSUNE_STEAM_MANIFEST];
+  NSString *fail = Download(session, [NSURL URLWithString:[KITSUNE_STEAM_CLIENT_BASE stringByAppendingString:KITSUNE_STEAM_MANIFEST]], path, nil);
   if (fail) { *error = fail; return nil; }
-  NSArray *packages = IOSWineSteamPackages([NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil], version);
+  NSArray *packages = KitsuneSteamPackages([NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil], version);
   if (!packages) *error = NSLocalizedString(@"Couldn't read Steam's version list. Try again.", nil);
   return packages;
 }
@@ -109,9 +109,9 @@ static void SetFileTime(const char *path, int64_t mtime) {
  * nothing more is written into them. */
 static int entry_unpacked(const zip_entry_info *e, void *user) {
   struct unpack_report *r = user;
-  int64_t mtime = IOSWineSteamFileTime(e->dos_date, e->dos_time);
+  int64_t mtime = KitsuneSteamFileTime(e->dos_date, e->dos_time);
   NSString *name = [NSString stringWithUTF8String:e->name] ?: [NSString stringWithCString:e->name encoding:NSISOLatin1StringEncoding];
-  NSString *line = IOSWineSteamIndexLine(name, e->is_dir, e->size, mtime, e->crc);
+  NSString *line = KitsuneSteamIndexLine(name, e->is_dir, e->size, mtime, e->crc);
   NSString *key = [line substringToIndex:[line rangeOfString:@","].location].lowercaseString;
   if (!r->index[key]) [r->paths addObject:key];
   r->index[key] = line;
@@ -182,21 +182,21 @@ static NSString *Unpack(NSDictionary *package, NSString *archive, NSString *dest
     if ([fm fileExistsAtPath:[steam stringByAppendingPathComponent:@"steam.exe"]]) { finish(NSLocalizedString(@"Steam is already installed.", nil)); return; }
 
     report(WineSteamStepPreparing, NSNotFound, 0, 0);
-    NSString *bottle = IOSWineBottlePath(docs, @"Steam");
+    NSString *bottle = KitsuneBottlePath(docs, @"Steam");
     if (![fm fileExistsAtPath:[bottle stringByAppendingPathComponent:@"system.reg"]] &&
-        !IOSWineCreateBottle(docs, treeRoot, @"Steam", &error)) { finish(error); return; }
-    if (!IOSWinePrepareSteamBottle(bottle, treeRoot, &error)) { finish(error); return; }
+        !KitsuneCreateBottle(docs, treeRoot, @"Steam", &error)) { finish(error); return; }
+    if (!KitsunePrepareSteamBottle(bottle, treeRoot, &error)) { finish(error); return; }
 
     NSURLSession *session = Session();
     NSString *work = WorkDir(docs);
     NSString *packages = [work stringByAppendingPathComponent:@"packages"];
     NSString *staging = [work stringByAppendingPathComponent:@"client"];
-    NSString *manifestPath = [work stringByAppendingPathComponent:IOSWINE_STEAM_MANIFEST];
+    NSString *manifestPath = [work stringByAppendingPathComponent:KITSUNE_STEAM_MANIFEST];
     [fm removeItemAtPath:staging error:nil];
     [fm createDirectoryAtPath:packages withIntermediateDirectories:YES attributes:nil error:nil];
     [fm createDirectoryAtPath:staging withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *version = nil;
-    NSArray *list = IOSWineSteamPackages([NSString stringWithContentsOfFile:manifestPath encoding:NSUTF8StringEncoding error:nil], &version)
+    NSArray *list = KitsuneSteamPackages([NSString stringWithContentsOfFile:manifestPath encoding:NSUTF8StringEncoding error:nil], &version)
                     ?: FetchManifest(session, work, &version, &error);
     if (!list) { finish(error); return; }
     if (g_cancel) { finish(@"Cancelled"); return; }
@@ -216,7 +216,7 @@ static NSString *Unpack(NSDictionary *package, NSString *archive, NSString *dest
       BOOL have = [[fm attributesOfItemAtPath:archive error:nil] fileSize] == size &&
                   [SHA256Hex(archive) isEqualToString:p[@"downloadSha2"]];
       if (!have) {
-        NSString *fail = Download(session, [NSURL URLWithString:[IOSWINE_STEAM_CLIENT_BASE stringByAppendingString:p[@"download"]]], archive,
+        NSString *fail = Download(session, [NSURL URLWithString:[KITSUNE_STEAM_CLIENT_BASE stringByAppendingString:p[@"download"]]], archive,
                                   ^(int64_t got, int64_t expected __unused) {
           double fraction = size ? MIN(1.0, (double)MAX(got, 0) / (double)size) : 1;
           report(WineSteamStepDownloading, i, fraction, overall(0.8 * fraction * size));
@@ -262,10 +262,10 @@ static NSString *Unpack(NSDictionary *package, NSString *archive, NSString *dest
       }
     }
     NSData *manifest = [NSData dataWithContentsOfFile:manifestPath];
-    NSString *saved = [packageDir stringByAppendingPathComponent:[IOSWINE_STEAM_MANIFEST stringByAppendingString:@".manifest"]];
-    NSString *installed = [packageDir stringByAppendingPathComponent:[IOSWINE_STEAM_MANIFEST stringByAppendingString:@".installed"]];
-    if (!manifest || ![IOSWineSteamSavedManifest(manifest) writeToFile:saved atomically:YES] ||
-        ![IOSWineSteamInstalledIndex([index.index objectsForKeys:index.paths notFoundMarker:@""]) writeToFile:installed atomically:YES] ||
+    NSString *saved = [packageDir stringByAppendingPathComponent:[KITSUNE_STEAM_MANIFEST stringByAppendingString:@".manifest"]];
+    NSString *installed = [packageDir stringByAppendingPathComponent:[KITSUNE_STEAM_MANIFEST stringByAppendingString:@".installed"]];
+    if (!manifest || ![KitsuneSteamSavedManifest(manifest) writeToFile:saved atomically:YES] ||
+        ![KitsuneSteamInstalledIndex([index.index objectsForKeys:index.paths notFoundMarker:@""]) writeToFile:installed atomically:YES] ||
         ![fm fileExistsAtPath:[staging stringByAppendingPathComponent:@"steam.exe"]]) {
       finish(NSLocalizedString(@"The download was incomplete. Try again.", nil));
       return;

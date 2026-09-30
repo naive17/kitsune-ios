@@ -1,7 +1,7 @@
 /*
  * How fast can a window actually be painted?
  *
- * Copyright 2026 the ios-wine project
+ * Copyright 2026 the Kitsune project
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,7 +40,7 @@
  *          blit encoder, the main-thread present.
  *   loop   everything else -- PeekMessage, InvalidateRect, UpdateWindow.
  *
- * IOSWINE_FPS_ROWS invalidates only the top N rows. wineios_surface_flush
+ * KITSUNE_FPS_ROWS invalidates only the top N rows. wineios_surface_flush
  * currently ignores the dirty rect and uploads the entire surface every time;
  * if `end` does not fall when the damage shrinks, that is the proof it should,
  * and if it does fall the upload is not the bottleneck.
@@ -189,7 +189,7 @@ static void report( const char *tag, LONGLONG span_us )
 
 void mainCRTStartup(void)
 {
-    static const WCHAR class_name[] = L"ioswine_fps_probe";
+    static const WCHAR class_name[] = L"kitsune_fps_probe";
     WNDCLASSEXW wc;
     BITMAPINFO bi;
     HBITMAP dib;
@@ -197,18 +197,18 @@ void mainCRTStartup(void)
     MSG msg;
     LARGE_INTEGER freq;
     LONGLONG start, mark, deadline;
-    int seconds = env_int( L"IOSWINE_FPS_SECONDS", 8 );
+    int seconds = env_int( L"KITSUNE_FPS_SECONDS", 8 );
     int i, n;
 
     QueryPerformanceFrequency( &freq );
     if (freq.QuadPart > 0) qpf = freq.QuadPart;
 
-    cw = env_int( L"IOSWINE_FPS_W", 0 );
-    ch = env_int( L"IOSWINE_FPS_H", 0 );
+    cw = env_int( L"KITSUNE_FPS_W", 0 );
+    ch = env_int( L"KITSUNE_FPS_H", 0 );
     if (cw <= 0) cw = GetSystemMetrics( SM_CXVIRTUALSCREEN );
     if (ch <= 0) ch = GetSystemMetrics( SM_CYVIRTUALSCREEN );
     if (cw <= 0 || ch <= 0) { cw = 1280; ch = 720; }
-    dirty_rows = env_int( L"IOSWINE_FPS_ROWS", ch );
+    dirty_rows = env_int( L"KITSUNE_FPS_ROWS", ch );
     if (dirty_rows > ch) dirty_rows = ch;
     if (dirty_rows < 1) dirty_rows = 1;
 

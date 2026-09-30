@@ -2,7 +2,7 @@
  * Does a Win32 exception raised INSIDE translated x86-64 code get delivered
  * back to translated code, and does execution survive it?
  *
- * Copyright 2026 the ios-wine project
+ * Copyright 2026 the Kitsune project
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

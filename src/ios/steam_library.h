@@ -12,14 +12,14 @@
  * Anything else is an error for that file, not a crash, and the file is
  * skipped.
  */
-#ifndef IOSWINE_STEAM_LIBRARY_H
-#define IOSWINE_STEAM_LIBRARY_H
+#ifndef KITSUNE_STEAM_LIBRARY_H
+#define KITSUNE_STEAM_LIBRARY_H
 
 #import <Foundation/Foundation.h>
 
 /* Returns the top-level object (the value under the file's single root key,
  * e.g. "AppState"), or nil when the text is not well-formed KeyValues. */
-static inline NSDictionary *IOSWineParseKeyValues(NSString *text) {
+static inline NSDictionary *KitsuneParseKeyValues(NSString *text) {
   if (![text isKindOfClass:NSString.class] || !text.length || text.length > 4 * 1024 * 1024) return nil;
   __block NSUInteger i = 0;
   NSUInteger n = text.length;
@@ -103,7 +103,7 @@ static inline NSDictionary *IOSWineParseKeyValues(NSString *text) {
  * game directory), manifest (unix path), installed (NSNumber BOOL), size
  * (NSNumber bytes). Sorted by name. Titles whose directory is missing are
  * left out: a manifest without files cannot be launched. */
-static inline NSArray<NSDictionary *> *IOSWineSteamGames(NSString *steamRoot) {
+static inline NSArray<NSDictionary *> *KitsuneSteamGames(NSString *steamRoot) {
   NSFileManager *fm = NSFileManager.defaultManager;
   NSString *apps = [steamRoot stringByAppendingPathComponent:@"steamapps"];
   NSMutableArray<NSDictionary *> *games = [NSMutableArray array];
@@ -111,7 +111,7 @@ static inline NSArray<NSDictionary *> *IOSWineSteamGames(NSString *steamRoot) {
     if (![name hasPrefix:@"appmanifest_"] || ![name.pathExtension isEqualToString:@"acf"]) continue;
     NSString *manifest = [apps stringByAppendingPathComponent:name];
     NSString *text = [NSString stringWithContentsOfFile:manifest encoding:NSUTF8StringEncoding error:nil];
-    NSDictionary *state = IOSWineParseKeyValues(text);
+    NSDictionary *state = KitsuneParseKeyValues(text);
     NSString *appid = state[@"appid"], *title = state[@"name"], *dir = state[@"installdir"];
     if (![appid isKindOfClass:NSString.class] || ![title isKindOfClass:NSString.class] ||
         ![dir isKindOfClass:NSString.class] || !appid.length || !dir.length)
@@ -144,7 +144,7 @@ static inline NSArray<NSDictionary *> *IOSWineSteamGames(NSString *steamRoot) {
 
 /* Where the launcher expects Steam: Documents/Apps/Steam/steam.exe, where the
  * Steam install puts it. nil when it is not there. */
-static inline NSString *IOSWineSteamRoot(NSString *docs) {
+static inline NSString *KitsuneSteamRoot(NSString *docs) {
   NSString *root = [docs stringByAppendingPathComponent:@"Apps/Steam"];
   BOOL isDir = NO;
   if (![NSFileManager.defaultManager fileExistsAtPath:[root stringByAppendingPathComponent:@"steam.exe"]

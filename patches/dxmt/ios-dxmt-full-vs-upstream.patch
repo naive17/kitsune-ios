@@ -618,7 +618,7 @@ index 1b3d37c..475edfe 100644
    D3DKMT_HANDLE STDMETHODCALLTYPE GetLocalD3DKMT() final { return local_kmt_; }
 diff --git a/src/dxmt/bcdec.README b/src/dxmt/bcdec.README
 new file mode 100644
-index 0000000..6cfae40
+index 0000000..206c621
 --- /dev/null
 +++ b/src/dxmt/bcdec.README
 @@ -0,0 +1,9 @@
@@ -628,7 +628,7 @@ index 0000000..6cfae40
 +SHA-256: 134520764d96f70a27db814173616c89ad85db95fbd3328417c7a8c77e7ca189
 +License choice: MIT (complete notice is at the end of bcdec.h).
 +
-+The dxmt_bc_decode.hpp adapter is separate ios-wine code, not a modification
++The dxmt_bc_decode.hpp adapter is separate Kitsune code, not a modification
 +or contribution to bcdec. BCDEC_BC4BC5_PRECISE enables signed BC4/BC5 decoding.
 +BC6H half output uses a pitch in half values; the adapter expands RGB to RGBA16F.
 diff --git a/src/dxmt/bcdec.h b/src/dxmt/bcdec.h
@@ -2151,7 +2151,7 @@ index 0000000..553c3ec
 +*/
 diff --git a/src/dxmt/dxmt_bc_decode.hpp b/src/dxmt/dxmt_bc_decode.hpp
 new file mode 100644
-index 0000000..eb67b26
+index 0000000..7f83f68
 --- /dev/null
 +++ b/src/dxmt/dxmt_bc_decode.hpp
 @@ -0,0 +1,119 @@
@@ -2174,13 +2174,13 @@ index 0000000..eb67b26
 +#undef BCDECDEF
 +
 +namespace dxmt {
-+/* 16-bit BC1 applies only to the decoded path; with IOSWINE_BC_NATIVE the unix
++/* 16-bit BC1 applies only to the decoded path; with KITSUNE_BC_NATIVE the unix
 + * half transcodes BC1 from RGBA8 texels. Both halves must agree. */
 +inline bool bc_16bit_enabled() {
 +  static const bool enabled = [] {
-+    const char *native = std::getenv("IOSWINE_BC_NATIVE");
++    const char *native = std::getenv("KITSUNE_BC_NATIVE");
 +    if (native && *native && *native != '0') return false;
-+    const char *e = std::getenv("IOSWINE_BC_16BIT");
++    const char *e = std::getenv("KITSUNE_BC_16BIT");
 +    return e && *e && *e != '0';
 +  }();
 +  return enabled;
@@ -2507,7 +2507,7 @@ index 67e291a..58fd926 100644
 \ No newline at end of file
 +} // namespace dxmt
 diff --git a/src/dxmt/dxmt_shader_cache.hpp b/src/dxmt/dxmt_shader_cache.hpp
-index d102112..63ba9bc 100644
+index d102112..8373344 100644
 --- a/src/dxmt/dxmt_shader_cache.hpp
 +++ b/src/dxmt/dxmt_shader_cache.hpp
 @@ -4,7 +4,8 @@
@@ -2515,7 +2515,7 @@ index d102112..63ba9bc 100644
  namespace dxmt {
  
 -constexpr int kDXMTShaderCacheVersion = 18;
-+// iOSWine: cbuffer argument ABI now includes the bound length and robust loads.
++// Kitsune: cbuffer argument ABI now includes the bound length and robust loads.
 +constexpr int kDXMTShaderCacheVersion = 19;
  
  class ShaderCache {
@@ -7737,7 +7737,7 @@ index 3f20c2b..fe220e0 100644
    native              : true,
    name_suffix         : 'so',
 diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
-index eaa97c5..469017e 100644
+index 488fcb6..c0a5ee5 100644
 --- a/src/winemetal/unix/winemetal_unix.c
 +++ b/src/winemetal/unix/winemetal_unix.c
 @@ -26,6 +26,39 @@
@@ -7756,11 +7756,11 @@ index eaa97c5..469017e 100644
 +static os_unfair_lock g_gpu_lock = OS_UNFAIR_LOCK_INIT;
 +static double g_gpu_last_end;
 +
-+__attribute__((visibility("default"))) void ioswine_gpu_timing_enable(int on) {
++__attribute__((visibility("default"))) void kitsune_gpu_timing_enable(int on) {
 +  atomic_store_explicit(&g_gpu_timing, on ? 1 : 0, memory_order_relaxed);
 +}
 +
-+__attribute__((visibility("default"))) uint64_t ioswine_gpu_busy_ns(void) {
++__attribute__((visibility("default"))) uint64_t kitsune_gpu_busy_ns(void) {
 +  return atomic_load_explicit(&g_gpu_busy_ns, memory_order_relaxed);
 +}
 +
@@ -7896,7 +7896,7 @@ index eaa97c5..469017e 100644
 +static bool bc_16bit_enabled(void) {
 +  if (__builtin_expect(g_bc16_cached >= 0, 1))
 +    return g_bc16_cached != 0;
-+  const char *e = getenv("IOSWINE_BC_16BIT"), *native = getenv("IOSWINE_BC_NATIVE");
++  const char *e = getenv("KITSUNE_BC_16BIT"), *native = getenv("KITSUNE_BC_NATIVE");
 +  g_bc16_cached = (e && *e && *e != '0' && !(native && *native && *native != '0')) ? 1 : 0;
 +  dprintf(STDERR_FILENO, "[iOS DXMT] BC 16-bit decode = %s\n", g_bc16_cached ? "ON (BC1 -> BGR5A1)" : "off");
 +  return g_bc16_cached != 0;
@@ -7906,7 +7906,7 @@ index eaa97c5..469017e 100644
 +static bool bc_native_enabled(void) {
 +  if (__builtin_expect(g_bc_native_cached >= 0, 1))
 +    return g_bc_native_cached != 0;
-+  const char *e = getenv("IOSWINE_BC_NATIVE");
++  const char *e = getenv("KITSUNE_BC_NATIVE");
 +  g_bc_native_cached = (e && *e && *e != '0') ? 1 : 0;
 +  dprintf(STDERR_FILENO, "[iOS DXMT] BC native transcode = %s\n", g_bc_native_cached ? "ON (ETC2/EAC)" : "off");
 +  return g_bc_native_cached != 0;
@@ -8249,14 +8249,14 @@ index eaa97c5..469017e 100644
  }
  
 +/* Presents so far, for the host's frame-rate readout. With diagnostics on
-+ * (IOSWINE_DIAG_LEVEL >= 1) the first and every 60th present are logged, and
++ * (KITSUNE_DIAG_LEVEL >= 1) the first and every 60th present are logged, and
 + * each of those re-reads the GPU debug mask. */
 +static _Atomic uint64_t g_present_count = 0;
 +static int g_present_log = -1;
 +static inline void log_present_cadence(const char *path) {
 +  uint64_t n = atomic_fetch_add_explicit(&g_present_count, 1, memory_order_relaxed) + 1;
 +  if (__builtin_expect(g_present_log < 0, 0)) {
-+    const char *level = getenv("IOSWINE_DIAG_LEVEL");
++    const char *level = getenv("KITSUNE_DIAG_LEVEL");
 +    g_present_log = level && atoi(level) >= 1;
 +  }
 +  if (g_present_log && (n == 1 || (n % 60) == 0)) {
@@ -8272,14 +8272,14 @@ index eaa97c5..469017e 100644
 +static int g_host_min_resolved;
 +static double host_min_interval(void) {
 +  if (!g_host_min_resolved) {
-+    g_host_min_interval = dlsym(RTLD_DEFAULT, "ioswine_present_min_interval");
++    g_host_min_interval = dlsym(RTLD_DEFAULT, "kitsune_present_min_interval");
 +    g_host_min_resolved = 1;
 +  }
 +  return g_host_min_interval ? *g_host_min_interval : 0.0;
 +}
 +
 +/* Read by the app's performance HUD. */
-+__attribute__((visibility("default"))) uint64_t ioswine_get_present_count(void) {
++__attribute__((visibility("default"))) uint64_t kitsune_get_present_count(void) {
 +  return atomic_load_explicit(&g_present_count, memory_order_relaxed);
 +}
 +
@@ -8365,14 +8365,14 @@ index eaa97c5..469017e 100644
 +          layer.superlayer ? "yes" : "NO");
 +}
 +
-+/* IOSWINE_NIL_DRAWABLE_EVERY=N makes every Nth -nextDrawable return nil, so
++/* KITSUNE_NIL_DRAWABLE_EVERY=N makes every Nth -nextDrawable return nil, so
 + * the drop-frame path runs without a backgrounded app or a starved pool. */
 +static int
 +nil_drawable_forced(void) {
 +  static int every = -1;
 +
 +  if (every < 0) {
-+    const char *e = getenv("IOSWINE_NIL_DRAWABLE_EVERY");
++    const char *e = getenv("KITSUNE_NIL_DRAWABLE_EVERY");
 +    every = (e && *e) ? atoi(e) : 0;
 +  }
 +  if (every <= 0) return 0;

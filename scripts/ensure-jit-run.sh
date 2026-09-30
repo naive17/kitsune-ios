@@ -23,10 +23,10 @@ pids(){
     echo "Device process query failed; not assuming the app is absent: $listing" >&2
     return 2
   fi
-  printf '%s\n' "$listing" | grep -E "/ioswine\.app/ioswine( |$)" | awk '{print $1}' | head -1
+  printf '%s\n' "$listing" | grep -E "/Kitsune\.app/Kitsune( |$)" | awk '{print $1}' | head -1
 }
 
-script_data="$(base64 < jit-scripts/ios-wine.js | tr -d '\n' | jq -Rr '@uri')"
+script_data="$(base64 < jit-scripts/kitsune.js | tr -d '\n' | jq -Rr '@uri')"
 inner="stikjit://enable-jit?bundle-id=$APP&script-data=$script_data"
 encoded="$(printf '%s' "$inner" | base64 | tr -d '\n' | jq -Rr '@uri')"
 outer="livecontainer://open-url?url=$encoded"

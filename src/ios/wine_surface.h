@@ -1,6 +1,6 @@
 
-#ifndef IOSWINE_WINE_SURFACE_H
-#define IOSWINE_WINE_SURFACE_H
+#ifndef KITSUNE_WINE_SURFACE_H
+#define KITSUNE_WINE_SURFACE_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,4 +52,4 @@ void wine_surface_desktop_reset(void);
 }
 #endif
 
-#endif /* IOSWINE_WINE_SURFACE_H */
+#endif /* KITSUNE_WINE_SURFACE_H */

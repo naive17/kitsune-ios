@@ -6,7 +6,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const scratch = path.join(root, '.deploy/tests/xinput');
 fs.mkdirSync(scratch, {recursive:true});
 const wine = path.join(root, 'third_party/wine');
-let source = fs.readFileSync(process.env.IOSWINE_XINPUT_SOURCE ?? path.join(wine, 'dlls/xinput1_3/main.c'), 'utf8');
+let source = fs.readFileSync(process.env.KITSUNE_XINPUT_SOURCE ?? path.join(wine, 'dlls/xinput1_3/main.c'), 'utf8');
 const host = fs.readFileSync(path.join(root, 'src/ios/game_controller.m'), 'utf8');
 const sys = fs.readFileSync(path.join(wine, 'dlls/ntdll/unix/system.c'), 'utf8');
 function between(text, a, b) {
@@ -22,8 +22,8 @@ function fn(name, text=source) {
   return text.slice(m.index,end);
 }
 // Optional negative control uses the actual previous GetState implementation.
-if (process.env.IOSWINE_XINPUT_GET_STATE_BASELINE) {
-  const old = fs.readFileSync(process.env.IOSWINE_XINPUT_GET_STATE_BASELINE,'utf8');
+if (process.env.KITSUNE_XINPUT_GET_STATE_BASELINE) {
+  const old = fs.readFileSync(process.env.KITSUNE_XINPUT_GET_STATE_BASELINE,'utf8');
   source = source.replace(fn('ios_get_state'),fn('ios_get_state',old));
 }
 // A private local game copy is optional, never redistributed by this test.
@@ -122,11 +122,11 @@ static NTSTATUS NtReadVirtualMemory(void *process,const void *address,void *data
 static void put32(unsigned char *p,uint32_t value) {memcpy(p,&value,4);}
 static void put16(unsigned char *p,uint16_t value) {memcpy(p,&value,2);}
 ${xheader}
-${between(host,'static pthread_mutex_t g_pad_lock','@interface IOSWineGamepadBridge')}
+${between(host,'static pthread_mutex_t g_pad_lock','@interface KitsuneGamepadBridge')}
 // dlsym is exercised for real against the exported production snapshot reader.
 ${between(sys,'#if defined(__APPLE__) && defined(WINE_IOS_JIT_ARENA)\nstatic pthread_once_t ios_gamepad_once','/******************************************************************************\n *              NtQuerySystemInformation')}
 static NTSTATUS NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS cls,void*p,ULONG n,ULONG*len) {
- assert(cls==IOSWINE_GAMEPAD_INFO_CLASS); return ios_query_gamepads(p,n,len);
+ assert(cls==KITSUNE_GAMEPAD_INFO_CLASS); return ios_query_gamepads(p,n,len);
 }
 ${between(source,'static BOOL ios_backend;','static void set_current_state')}
 ${nativeOnly('XInputEnable','    /* Setting to false')}
@@ -292,7 +292,7 @@ for (const [input, output] of [
   execFileSync(output,[],{stdio:'inherit',timeout:30000});
 }
 const preset=JSON.parse(fs.readFileSync(path.join(root,'assets/dsr-rendering-launch.json')));
-assert.equal(preset.env.IOSWINE_GAME_INPUT,'1');
+assert.equal(preset.env.KITSUNE_GAME_INPUT,'1');
 assert(host.includes('c.handlerQueue = self->_queue'));
 assert(!host.includes('SetKeySink') && !host.includes('VK_'));
 assert(!host.includes('dlsym('));

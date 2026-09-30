@@ -10,8 +10,8 @@
 # npm install (husky).
 node_modules/
 
-# Generated from ioswine-device.yml by xcodegen.
-/ioswine-device.xcodeproj/
+# Generated from kitsune-device.yml by xcodegen.
+/kitsune-device.xcodeproj/
 
 *.log
 .env

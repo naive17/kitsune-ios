@@ -50,8 +50,17 @@ export GNUTLS_LIBS="-L$GT_IOS/lib -lgnutls"
 export ac_cv_lib_soname_gnutls="@loader_path/libgnutls.30.dylib"
 export ac_cv_func_gnutls_cipher_init=yes
 
+# Xcode 27's SDKs declare pipe2 as macOS/iOS 27 only, but configure's link
+# test passes against them, so HAVE_PIPE2 gets set and the call is weak-linked.
+# On an older OS it binds to NULL and server_pipe() jumps to address 0 at boot.
+# Every pipe2 call in Wine has a pipe()+fcntl fallback under !HAVE_PIPE2.
+export ac_cv_func_pipe2=no
+
 mkdir -p "$B"
-if [ ! -f "$B/Makefile" ] || [ "${1:-}" = --reconfigure ]; then
+# A build dir configured before the seed above has HAVE_PIPE2 baked in.
+STALE_PIPE2=0
+grep -qs '^#define HAVE_PIPE2 1' "$B/include/config.h" && STALE_PIPE2=1
+if [ ! -f "$B/Makefile" ] || [ "${1:-}" = --reconfigure ] || [ "$STALE_PIPE2" = 1 ]; then
   log "configuring wine for arm64-apple-ios"
   # arm64ec: signal_arm64ec.c, the exception path between x86 and EC code, is
   # compiled only for that architecture.

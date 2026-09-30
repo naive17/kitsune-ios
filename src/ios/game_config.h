@@ -5,15 +5,15 @@
  * from outside. For the titles listed here the launcher sets it to the
  * desktop size so the game fills the screen instead of a letterboxed 4:3.
  */
-#ifndef IOSWINE_GAME_CONFIG_H
-#define IOSWINE_GAME_CONFIG_H
+#ifndef KITSUNE_GAME_CONFIG_H
+#define KITSUNE_GAME_CONFIG_H
 
 #import <Foundation/Foundation.h>
 
 /* Replace the resolution in a Dark Souls style GraphicsConfig.xml. Handles
  * both <Resolution-Width>N</Resolution-Width> and <Width>N</Width> inside a
  * <Resolution> element. Returns NO when neither form is present. */
-static inline BOOL IOSWineRewriteGraphicsConfigXML(NSMutableString *xml, int width, int height) {
+static inline BOOL KitsuneRewriteGraphicsConfigXML(NSMutableString *xml, int width, int height) {
   NSError *err = nil;
   NSUInteger hits = 0;
   NSDictionary<NSString *, NSString *> *pairs = @{
@@ -31,7 +31,7 @@ static inline BOOL IOSWineRewriteGraphicsConfigXML(NSMutableString *xml, int wid
 }
 
 /* Find a file by name under `root`, at most `depth` levels down. */
-static inline NSString *IOSWineFindFile(NSString *root, NSString *name, int depth) {
+static inline NSString *KitsuneFindFile(NSString *root, NSString *name, int depth) {
   NSFileManager *fm = NSFileManager.defaultManager;
   NSString *direct = [root stringByAppendingPathComponent:name];
   if ([fm fileExistsAtPath:direct]) return direct;
@@ -40,7 +40,7 @@ static inline NSString *IOSWineFindFile(NSString *root, NSString *name, int dept
     NSString *path = [root stringByAppendingPathComponent:entry];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:path isDirectory:&isDir] || !isDir) continue;
-    NSString *found = IOSWineFindFile(path, name, depth - 1);
+    NSString *found = KitsuneFindFile(path, name, depth - 1);
     if (found) return found;
   }
   return nil;
@@ -48,14 +48,14 @@ static inline NSString *IOSWineFindFile(NSString *root, NSString *name, int dept
 
 /* Apply the desktop resolution to a known title. Returns the file changed,
  * or nil when the title is unknown or has no config yet (first run). */
-static inline NSString *IOSWineApplyGameResolution(NSString *appID, NSString *bottleRoot, int width, int height) {
+static inline NSString *KitsuneApplyGameResolution(NSString *appID, NSString *bottleRoot, int width, int height) {
   if (width < 640 || height < 480) return nil;
   if ([appID isEqualToString:@"570940"]) {   /* DARK SOULS: REMASTERED */
     NSString *users = [bottleRoot stringByAppendingPathComponent:@"drive_c/users"];
-    NSString *file = IOSWineFindFile(users, @"GraphicsConfig.xml", 5);
+    NSString *file = KitsuneFindFile(users, @"GraphicsConfig.xml", 5);
     if (!file || ![file containsString:@"DARK SOULS REMASTERED"]) return nil;
     NSMutableString *xml = [NSMutableString stringWithContentsOfFile:file encoding:NSUTF8StringEncoding error:nil];
-    if (!xml.length || !IOSWineRewriteGraphicsConfigXML(xml, width, height)) return nil;
+    if (!xml.length || !KitsuneRewriteGraphicsConfigXML(xml, width, height)) return nil;
     return [xml writeToFile:file atomically:YES encoding:NSUTF8StringEncoding error:nil] ? file : nil;
   }
   return nil;

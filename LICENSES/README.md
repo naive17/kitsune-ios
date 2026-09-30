@@ -5,7 +5,7 @@ license:
 
 | Component | License | Text |
 |---|---|---|
-| ios-wine: the app, its tools, and this port's changes to Wine, DXMT and FEX | GPL-3.0-or-later | GPL-3.0-or-later.txt |
+| Kitsune: the app, its tools, and this port's changes to Wine, DXMT and FEX | GPL-3.0-or-later | GPL-3.0-or-later.txt |
 | Wine | LGPL-2.1-or-later | LGPL-2.1.txt |
 | DXMT | MIT | MIT-DXMT.txt |
 | bcdec (vendored in the DXMT port) | MIT | MIT-bcdec.txt |

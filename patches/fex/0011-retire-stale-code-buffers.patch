@@ -4,7 +4,7 @@
  
    fextl::unique_ptr<GuestToHostMap> LookupCache;
  
-+  // ios-wine: retirement of superseded buffers (see
++  // Kitsune: retirement of superseded buffers (see
 +  // ContextImpl::IosRetireStaleCodeBuffers). 0 = not yet purged.
 +  uint64_t IosPurgedAtMs = 0;
 +  bool IosReleased = false;
@@ -31,7 +31,7 @@
  
    FEX_DEFAULT_VISIBILITY virtual void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) = 0;
    FEX_DEFAULT_VISIBILITY virtual void InvalidateCodeBuffersCodeRange(uint64_t Start, uint64_t Length) = 0;
-+  // ios-wine: purge, then (after a grace period) free code buffers that a newer
++  // Kitsune: purge, then (after a grace period) free code buffers that a newer
 +  // buffer has superseded. Caller holds CodeInvalidationMutex uniquely and
 +  // passes every thread of the process.
 +  FEX_DEFAULT_VISIBILITY virtual void
@@ -56,7 +56,7 @@
  }
  
 +/*
-+ * ios-wine: reclaim superseded code buffers.
++ * Kitsune: reclaim superseded code buffers.
 + *
 + * When a buffer fills, FEX starts a new one and the old one lives until every
 + * thread drops its reference -- which a thread only does when it next
@@ -121,7 +121,7 @@
      CTX.InvalidateThreadCachedCodeRange(Thread.second, Address, Size);
    }
 +
-+  // ios-wine: invalidations are frequent (every VirtualFree/VirtualProtect)
++  // Kitsune: invalidations are frequent (every VirtualFree/VirtualProtect)
 +  // and already hold the lock stale-buffer retirement needs.
 +  {
 +    fextl::vector<FEXCore::Core::InternalThreadState*> All;

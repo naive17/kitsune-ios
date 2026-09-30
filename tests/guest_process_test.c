@@ -16,7 +16,7 @@ static void emit_error(const char *message) {
 }
 void mainCRTStartup(void) {
 #if PROCESS_GATE_CHILD
-    HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\ioswine-process-gate");
+    HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\kitsune-process-gate");
     emit("PROCESS-GATE CHILD: reached PE entry\n");
     if (!event || !SetEvent(event)) { emit_error("PROCESS-GATE CHILD: shared event failed"); ExitProcess(10); }
     CloseHandle(event);
@@ -46,7 +46,7 @@ void mainCRTStartup(void) {
 #define PROCESS_GATE_CHILD_NAME L"process-child-arm64.exe"
 #endif
     lstrcpyW(child + basename, PROCESS_GATE_CHILD_NAME);
-    HANDLE event = CreateEventW(NULL, TRUE, FALSE, L"Local\\ioswine-process-gate");
+    HANDLE event = CreateEventW(NULL, TRUE, FALSE, L"Local\\kitsune-process-gate");
     if (!event) ExitProcess(1);
     emit("PROCESS-GATE PARENT: creating real child\n");
     /* Keep the child/JIT gate independent of the in-process server's current

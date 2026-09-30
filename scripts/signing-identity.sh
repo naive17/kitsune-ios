@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Print the SHA-1 of the newest unrevoked Apple Development identity of the
-# app's team (SIGN_TEAM, else IOSWINE_TEAM from local.env, else DEVELOPMENT_TEAM
-# in ioswine-device.yml; an empty SIGN_TEAM accepts any team), or explain on stderr why there is none. Revocation is checked over
+# app's team (SIGN_TEAM, else KITSUNE_TEAM from local.env, else DEVELOPMENT_TEAM
+# in kitsune-device.yml; an empty SIGN_TEAM accepts any team), or explain on stderr why there is none. Revocation is checked over
 # OCSP because only Apple's answer agrees with what the phone accepts.
 # Usage: ID=$(bash scripts/signing-identity.sh) || exit 1
 set -uo pipefail
@@ -19,7 +19,7 @@ awk 'BEGIN{n=0} /BEGIN CERTIFICATE/{n++; f=sprintf("'"$TMP"'/c%02d.pem",n)} {if(
 
 # Pin the team: a certificate from another signed-in Apple ID would install a
 # separate app, without access to this app's Documents.
-WANT_TEAM="${SIGN_TEAM-${IOSWINE_TEAM:-$(awk '/DEVELOPMENT_TEAM:/{print $2; exit}' ioswine-device.yml)}}"
+WANT_TEAM="${SIGN_TEAM-${KITSUNE_TEAM:-$(awk '/DEVELOPMENT_TEAM:/{print $2; exit}' kitsune-device.yml)}}"
 
 best_fp=""; best_nb=""; reasons=""; skipped_team=""
 for f in "$TMP"/c*.pem; do

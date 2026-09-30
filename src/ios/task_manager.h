@@ -5,8 +5,8 @@
  * here; close posts WM_CLOSE, kill terminates the owning process. Requests
  * are forwarded to entry points the driver registers at init.
  */
-#ifndef IOSWINE_TASK_MANAGER_H
-#define IOSWINE_TASK_MANAGER_H
+#ifndef KITSUNE_TASK_MANAGER_H
+#define KITSUNE_TASK_MANAGER_H
 
 #import <UIKit/UIKit.h>
 

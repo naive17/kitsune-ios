@@ -6,7 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
-const runtime = path.resolve(process.argv[2] ?? path.join(root, 'build/xc-out/ioswine.app/lib/wine'));
+const runtime = path.resolve(process.argv[2] ?? path.join(root, 'build/xc-out/Kitsune.app/lib/wine'));
 const scratch = path.join(root, '.deploy/tests/xinput');
 fs.mkdirSync(scratch, {recursive:true});
 const loader = fs.readFileSync(path.join(root, 'third_party/wine/dlls/ntdll/unix/loader.c'), 'utf8');

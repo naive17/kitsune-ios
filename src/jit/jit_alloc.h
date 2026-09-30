@@ -1,5 +1,5 @@
-#ifndef IOS_WINE_JIT_ALLOC_H
-#define IOS_WINE_JIT_ALLOC_H
+#ifndef KITSUNE_JIT_ALLOC_H
+#define KITSUNE_JIT_ALLOC_H
 
 #include <stddef.h>
 
@@ -34,4 +34,4 @@ void jit_region_publish(const jit_region *r, void *exec_addr, size_t len);
 }
 #endif
 
-#endif /* IOS_WINE_JIT_ALLOC_H */
+#endif /* KITSUNE_JIT_ALLOC_H */

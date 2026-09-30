@@ -1,12 +1,12 @@
 /* Pure state conversion/publishing, shared by production and native tests. */
-#ifndef IOSWINE_GAMEPAD_STATE_H
-#define IOSWINE_GAMEPAD_STATE_H
+#ifndef KITSUNE_GAMEPAD_STATE_H
+#define KITSUNE_GAMEPAD_STATE_H
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../../third_party/wine/include/wine/ios_gamepad.h"
 
-static inline int16_t IOSWineGamepadAxis(float value)
+static inline int16_t KitsuneGamepadAxis(float value)
 {
     if (!isfinite(value)) return 0;
     if (value <= -1) return -32768;
@@ -14,7 +14,7 @@ static inline int16_t IOSWineGamepadAxis(float value)
     return (int16_t)lroundf(value * (value < 0 ? 32768.0f : 32767.0f));
 }
 
-static inline uint8_t IOSWineGamepadTrigger(float value)
+static inline uint8_t KitsuneGamepadTrigger(float value)
 {
     if (!isfinite(value) || value <= 0) return 0;
     if (value >= 1) return 255;
@@ -30,12 +30,12 @@ struct ios_touch_pad
     int16_t lx, ly, rx, ry;
 };
 
-#define IOSWINE_XINPUT_LEFT_DEADZONE  7849
-#define IOSWINE_XINPUT_RIGHT_DEADZONE 8689
+#define KITSUNE_XINPUT_LEFT_DEADZONE  7849
+#define KITSUNE_XINPUT_RIGHT_DEADZONE 8689
 
 /* Touch input joins a physical pad in slot 0: buttons are OR'd, triggers take
  * the larger value, and a physical stick outside the XInput dead zone wins. */
-static inline void IOSWineGamepadMergeTouch(struct ios_gamepad_state *next, const struct ios_touch_pad *touch)
+static inline void KitsuneGamepadMergeTouch(struct ios_gamepad_state *next, const struct ios_touch_pad *touch)
 {
     if (!touch->active) return;
     if (!next->connected)
@@ -46,12 +46,12 @@ static inline void IOSWineGamepadMergeTouch(struct ios_gamepad_state *next, cons
     next->buttons |= touch->buttons;
     if (touch->left_trigger > next->left_trigger) next->left_trigger = touch->left_trigger;
     if (touch->right_trigger > next->right_trigger) next->right_trigger = touch->right_trigger;
-    if (abs(next->lx) < IOSWINE_XINPUT_LEFT_DEADZONE && abs(next->ly) < IOSWINE_XINPUT_LEFT_DEADZONE)
+    if (abs(next->lx) < KITSUNE_XINPUT_LEFT_DEADZONE && abs(next->ly) < KITSUNE_XINPUT_LEFT_DEADZONE)
     {
         next->lx = touch->lx;
         next->ly = touch->ly;
     }
-    if (abs(next->rx) < IOSWINE_XINPUT_RIGHT_DEADZONE && abs(next->ry) < IOSWINE_XINPUT_RIGHT_DEADZONE)
+    if (abs(next->rx) < KITSUNE_XINPUT_RIGHT_DEADZONE && abs(next->ry) < KITSUNE_XINPUT_RIGHT_DEADZONE)
     {
         next->rx = touch->rx;
         next->ry = touch->ry;
@@ -61,7 +61,7 @@ static inline void IOSWineGamepadMergeTouch(struct ios_gamepad_state *next, cons
 /* Caller serializes access. Packet changes only on connection/input changes,
  * not polls, duplicate callbacks or battery-only changes. Disconnect clears
  * held input; reconnect keeps a monotonically advancing packet sequence. */
-static inline void IOSWineGamepadPublish(struct ios_gamepad_state *dst,
+static inline void KitsuneGamepadPublish(struct ios_gamepad_state *dst,
                                          struct ios_gamepad_state next)
 {
     uint32_t packet = dst->packet;

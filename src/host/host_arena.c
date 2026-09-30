@@ -114,12 +114,12 @@ void ios_jit_arena_release_reserved(void) {
 
 static size_t g_win_lo = (size_t)-1, g_win_hi;
 
-/* IOSWINE_EXE_WINDOW_MB sizes it (default 64; 0 disables), same knob as iOS.
+/* KITSUNE_EXE_WINDOW_MB sizes it (default 64; 0 disables), same knob as iOS.
  * Silently stays off if the arena did not land somewhere that contains the
  * window -- callers must cope with no window, because on device the pin is a
  * lottery and can lose. */
 static void arena_setup_exe_window(void) {
-  const char *e = getenv("IOSWINE_EXE_WINDOW_MB");
+  const char *e = getenv("KITSUNE_EXE_WINDOW_MB");
   size_t mb = e ? (size_t)atol(e) : 64;
   uintptr_t lo = (uintptr_t)g_exec, hi = lo + g_size;
 

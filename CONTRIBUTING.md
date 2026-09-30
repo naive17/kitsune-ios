@@ -49,10 +49,13 @@ Wine, DXMT and FEX are kept as patches against the upstream revisions in
   checkout, and `scripts/02-fetch.sh` or a `git checkout` there discards it.
 - **FEX**: the port is the numbered stack in `patches/fex`, applied in order by
   `scripts/06-fex-arm64ec.sh`, which resets `third_party/fex` first. Change a
-  patch, or add the next number.
+  patch, or add the next number
+  ([Recording a FEX change](docs/building.md#recording-a-fex-change)).
 
 After a change to Wine's unix side, `scripts/11-wine-ios.sh` rebuilds it
 incrementally and `scripts/19-stage-runtime.sh` stages it for a thin app build.
+[After you edit a component](docs/building.md#after-you-edit-a-component)
+lists what to rebuild and how to get each part onto the phone.
 
 ## Tests
 
@@ -73,7 +76,7 @@ in the change what you ran there.
 
 ## Licensing
 
-ios-wine's own code, including its changes to Wine, DXMT and FEX, is
+Kitsune's own code, including its changes to Wine, DXMT and FEX, is
 GPL-3.0-or-later. Upstream code keeps its own license: leave its headers in
 place, and add a component you bundle to [LICENSES/README.md](LICENSES/README.md)
 with its license text.

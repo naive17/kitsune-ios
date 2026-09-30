@@ -1,5 +1,5 @@
 /*
- * Every text the ios-wine app shows, in one file.
+ * Every text the Kitsune app shows, in one file.
  *
  * How to edit:
  *   - Each line reads  "key" = "text";  Change only the text on the right.
@@ -53,9 +53,9 @@
 "Enabling JIT…" = "Enabling JIT";
 "JIT is off." = "JIT is off";
 "JIT didn't turn on. Check StikDebug and try again." = "JIT didn't turn on. Check StikDebug and try again.";
-"JIT needs the ios-wine script. Tap Enable JIT." = "JIT needs the ios-wine script. Tap Enable JIT.";
-"JIT is on. Switch back to ios-wine." = "JIT is on. Switch back to ios-wine.";
-"JIT setup failed. Opening a program restarts ios-wine." = "JIT setup failed. Opening a program restarts ios-wine.";
+"JIT needs the Kitsune script. Tap Enable JIT." = "JIT needs the Kitsune script. Tap Enable JIT.";
+"JIT is on. Switch back to Kitsune." = "JIT is on. Switch back to Kitsune.";
+"JIT setup failed. Opening a program restarts Kitsune." = "JIT setup failed. Opening a program restarts Kitsune.";
 "Checking runtime…" = "Checking runtime";
 "Installing runtime…" = "Installing runtime";
 "Creating default bottle…" = "Creating default bottle";
@@ -63,8 +63,8 @@
 "Wine runtime incomplete. Install the full build." = "Wine runtime incomplete. Install the full build.";
 /* button; the spaces pad it */
 "  Set Up Default Bottle  " = "  Set Up Default Bottle  ";
-"Wine stopped (code %d). Opening a program restarts ios-wine." = "Wine stopped (code %d). Opening a program restarts ios-wine.";
-"The program exited (code %d). Opening another restarts ios-wine." = "The program exited (code %d). Opening another restarts ios-wine.";
+"Wine stopped (code %d). Opening a program restarts Kitsune." = "Wine stopped (code %d). Opening a program restarts Kitsune.";
+"The program exited (code %d). Opening another restarts Kitsune." = "The program exited (code %d). Opening another restarts Kitsune.";
 /* %s is the reason, in English */
 "Wine didn't start: %s" = "Wine didn't start: %s";
 /* followed by the reason */
@@ -80,14 +80,14 @@
 /* restart alert title; %@ is the program's name */
 "Open %@?" = "Open %@?";
 /* first %@ is the bottle to open, second the running one */
-"ios-wine restarts to open the %@ bottle. Programs running in the %@ bottle will close." = "ios-wine restarts to open the %@ bottle. Programs running in the %@ bottle will close.";
-/* button that restarts ios-wine */
+"Kitsune restarts to open the %@ bottle. Programs running in the %@ bottle will close." = "Kitsune restarts to open the %@ bottle. Programs running in the %@ bottle will close.";
+/* button that restarts Kitsune */
 "Restart" = "Restart";
 "Restarting…" = "Restarting…";
-"Couldn't open StikDebug. Close ios-wine and open it again to continue." = "Couldn't open StikDebug. Close ios-wine and open it again to continue.";
+"Couldn't open StikDebug. Close Kitsune and open it again to continue." = "Couldn't open StikDebug. Close Kitsune and open it again to continue.";
 "Couldn't save the program to open after the restart." = "Couldn't save the program to open after the restart.";
 "JIT Script Missing" = "JIT Script Missing";
-"Reinstall ios-wine." = "Reinstall ios-wine.";
+"Reinstall Kitsune." = "Reinstall Kitsune.";
 "The command line is too long." = "The command line is too long.";
 /* stands in for a program without a name, as in "Starting program" */
 "program" = "program";
@@ -115,7 +115,7 @@
 "Steam can be installed once JIT is on." = "Steam can be installed once JIT is on.";
 /* %@ is the program's name */
 "Run %@?" = "Run %@?";
-"A console program runs on its own. Opening something else afterwards restarts ios-wine." = "Opening something else afterwards restarts ios-wine.";
+"A console program runs on its own. Opening something else afterwards restarts Kitsune." = "Opening something else afterwards restarts Kitsune.";
 /* architecture, bottle, then the arguments line below if any */
 "%@\nBottle: %@%@" = "%@\nBottle: %@%@";
 /* starts on a new line; followed by the arguments */
@@ -182,7 +182,7 @@
 "Deleting resets it to a fresh bottle." = "Deleting resets it to a fresh bottle.";
 "Deletes Steam, your games and their saves." = "Deletes Steam, your games and their saves.";
 "Deletes everything installed in it." = "Deletes everything installed in it.";
-/* the Files app's location, as in On My iPhone > ios-wine > Bottles */
+/* the Files app's location, as in On My iPhone > Kitsune > Bottles */
 "On My iPhone" = "On My iPhone";
 "Open in Files" = "Open in Files";
 "Delete %@?" = "Delete %@?";
@@ -220,7 +220,7 @@
 "About" = "About";
 "Applies the next time a program starts." = "Applies the next time a program starts.";
 "Battery caps games at 30 fps and turns on by itself when the phone gets hot." = "Battery caps games at 30 fps and turns on by itself when the phone gets hot.";
-"Applies the next time ios-wine opens. Full logging slows programs down." = "Applies the next time ios-wine opens. Full logging slows programs down.";
+"Applies the next time Kitsune opens. Full logging slows programs down." = "Applies the next time Kitsune opens. Full logging slows programs down.";
 "Keeps the Wine runtime and your settings." = "Keeps the Wine runtime and your settings.";
 "Avoid the Notch" = "Avoid the Notch";
 "Keep windows clear of the notch" = "Keep windows clear of the notch";
@@ -279,7 +279,7 @@
 "Wine Runtime" = "Wine Runtime";
 "Checking…" = "Checking…";
 "Licenses" = "Licenses";
-"ios-wine (GPL), Wine (LGPL), DXMT, FEX and others; included in the app" = "ios-wine (GPL), Wine (LGPL), DXMT, FEX and others; included in the app";
+"Kitsune (GPL), Wine (LGPL), DXMT, FEX and others; included in the app" = "Kitsune (GPL), Wine (LGPL), DXMT, FEX and others; included in the app";
 "Share Logs" = "Share Logs";
 "No Logs Yet" = "No Logs Yet";
 "Nothing has been logged." = "Nothing has been logged.";

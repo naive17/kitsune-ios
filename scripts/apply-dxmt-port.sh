@@ -8,14 +8,18 @@ P="$ROOT/patches/dxmt"
 [ -d "$SRC/.git" ] || die "run 02-fetch.sh first"
 
 case "$(git -C "$SRC" log -1 --format=%s)" in
-  "ios-wine base"*) ;;
+  "Kitsune base"*) ;;
+  # The project was called ios-wine; its base commit predates the renamed
+  # patches, so the full patch no longer applies on top of it.
+  "ios-wine base"*)
+    die "third_party/dxmt was set up before the rename to Kitsune. Save any DXMT edits, then run: git -C third_party/dxmt reset -q --hard $DXMT_SHA && git -C third_party/dxmt clean -fdq && scripts/02-fetch.sh" ;;
   *)
-    [ "$(git -C "$SRC" rev-parse HEAD)" = "$DXMT_SHA" ] || die "dxmt is at $(git -C "$SRC" rev-parse --short HEAD), expected $DXMT_SHA or the ios-wine base commit"
+    [ "$(git -C "$SRC" rev-parse HEAD)" = "$DXMT_SHA" ] || die "dxmt is at $(git -C "$SRC" rev-parse --short HEAD), expected $DXMT_SHA or the Kitsune base commit"
     [ -z "$(git -C "$SRC" status --porcelain)" ] || die "dxmt has local changes; commit or discard them first"
     git -C "$SRC" apply "$P/0001-xcode27-metal-and-libcxx-fixes.patch"
     git -C "$SRC" apply "$P/0002-winemetal-ios-unix-half.patch"
     git -C "$SRC" add -A
-    git -C "$SRC" -c user.name=ios-wine -c user.email=ios-wine@localhost commit -q -m "ios-wine base"
+    git -C "$SRC" -c user.name=kitsune -c user.email=kitsune@localhost commit -q -m "Kitsune base"
     log "dxmt base commit created"
     ;;
 esac

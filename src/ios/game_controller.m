@@ -7,36 +7,36 @@
 #include "gamepad_state.h"
 
 static pthread_mutex_t g_pad_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct ios_gamepad_info g_pads = { .version = IOSWINE_GAMEPAD_VERSION };
+static struct ios_gamepad_info g_pads = { .version = KITSUNE_GAMEPAD_VERSION };
 
 __attribute__((visibility("default")))
-void ioswine_gamepad_snapshot_v1(struct ios_gamepad_info *info) {
+void kitsune_gamepad_snapshot_v1(struct ios_gamepad_info *info) {
     pthread_mutex_lock(&g_pad_lock);
     *info = g_pads;
     pthread_mutex_unlock(&g_pad_lock);
 }
 
-@interface IOSWineGamepadBridge : NSObject
+@interface KitsuneGamepadBridge : NSObject
 @end
 
-@implementation IOSWineGamepadBridge {
+@implementation KitsuneGamepadBridge {
     dispatch_queue_t _queue;
-    GCController *_controllers[IOSWINE_GAMEPAD_COUNT];
+    GCController *_controllers[KITSUNE_GAMEPAD_COUNT];
     BOOL _active;
     unsigned _traceCount;
     struct ios_touch_pad _touch;
 }
 
 + (instancetype)shared {
-    static IOSWineGamepadBridge *s;
+    static KitsuneGamepadBridge *s;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ s = [IOSWineGamepadBridge new]; });
+    dispatch_once(&once, ^{ s = [KitsuneGamepadBridge new]; });
     return s;
 }
 
 - (instancetype)init {
     if ((self = [super init])) {
-        _queue = dispatch_queue_create("dev.ioswine.gamepad", DISPATCH_QUEUE_SERIAL);
+        _queue = dispatch_queue_create("dev.kitsune.gamepad", DISPATCH_QUEUE_SERIAL);
         _active = YES;
     }
     return self;
@@ -75,23 +75,23 @@ void ioswine_gamepad_snapshot_v1(struct ios_gamepad_info *info) {
             (pad.buttonX.isPressed ? 0x4000 : 0) |
             (pad.buttonY.isPressed ? 0x8000 : 0);
         if (@available(iOS 14.0, *)) if (pad.buttonHome.isPressed) next.buttons |= 0x0400;
-        next.lx = IOSWineGamepadAxis(pad.leftThumbstick.xAxis.value);
-        next.ly = IOSWineGamepadAxis(pad.leftThumbstick.yAxis.value);
-        next.rx = IOSWineGamepadAxis(pad.rightThumbstick.xAxis.value);
-        next.ry = IOSWineGamepadAxis(pad.rightThumbstick.yAxis.value);
-        next.left_trigger = IOSWineGamepadTrigger(pad.leftTrigger.value);
-        next.right_trigger = IOSWineGamepadTrigger(pad.rightTrigger.value);
+        next.lx = KitsuneGamepadAxis(pad.leftThumbstick.xAxis.value);
+        next.ly = KitsuneGamepadAxis(pad.leftThumbstick.yAxis.value);
+        next.rx = KitsuneGamepadAxis(pad.rightThumbstick.xAxis.value);
+        next.ry = KitsuneGamepadAxis(pad.rightThumbstick.yAxis.value);
+        next.left_trigger = KitsuneGamepadTrigger(pad.leftTrigger.value);
+        next.right_trigger = KitsuneGamepadTrigger(pad.rightTrigger.value);
     }
-    if (slot == 0 && _active) IOSWineGamepadMergeTouch(&next, &_touch);
+    if (slot == 0 && _active) KitsuneGamepadMergeTouch(&next, &_touch);
     pthread_mutex_lock(&g_pad_lock);
     uint32_t previousPacket = g_pads.pads[slot].packet;
-    IOSWineGamepadPublish(&g_pads.pads[slot], next);
+    KitsuneGamepadPublish(&g_pads.pads[slot], next);
     next = g_pads.pads[slot];
     pthread_mutex_unlock(&g_pad_lock);
 
     // Opt-in and bounded: capture real button releases as well as presses
     // without filling logs on every analog callback or holding the pad lock.
-    const char *trace = getenv("IOSWINE_XINPUT_TRACE");
+    const char *trace = getenv("KITSUNE_XINPUT_TRACE");
     if (next.packet != previousPacket && trace && atoi(trace) && _traceCount < 128) {
         ++_traceCount;
         NSLog(@"[gc-xinput] state slot=%lu active=%d connected=%u packet=%u buttons=%04x lt=%u rt=%u l=%d,%d r=%d,%d trace=%u/128",
@@ -103,7 +103,7 @@ void ioswine_gamepad_snapshot_v1(struct ios_gamepad_info *info) {
 - (void)refresh {
     dispatch_async(_queue, ^{
         NSArray<GCController *> *controllers = GCController.controllers;
-        for (NSUInteger i = 0; i < IOSWINE_GAMEPAD_COUNT; ++i) {
+        for (NSUInteger i = 0; i < KITSUNE_GAMEPAD_COUNT; ++i) {
             GCController *old = self->_controllers[i];
             if (old && ![controllers containsObject:old]) {
                 old.extendedGamepad.valueChangedHandler = nil;
@@ -114,13 +114,13 @@ void ioswine_gamepad_snapshot_v1(struct ios_gamepad_info *info) {
         }
         for (GCController *c in controllers) {
             if (!c.extendedGamepad) continue;
-            NSUInteger slot = IOSWINE_GAMEPAD_COUNT;
+            NSUInteger slot = KITSUNE_GAMEPAD_COUNT;
             BOOL known = NO;
-            for (NSUInteger i = 0; i < IOSWINE_GAMEPAD_COUNT; ++i) {
+            for (NSUInteger i = 0; i < KITSUNE_GAMEPAD_COUNT; ++i) {
                 if (self->_controllers[i] == c) known = YES;
-                if (!self->_controllers[i] && slot == IOSWINE_GAMEPAD_COUNT) slot = i;
+                if (!self->_controllers[i] && slot == KITSUNE_GAMEPAD_COUNT) slot = i;
             }
-            if (known || slot == IOSWINE_GAMEPAD_COUNT) continue;
+            if (known || slot == KITSUNE_GAMEPAD_COUNT) continue;
             self->_controllers[slot] = c;
             c.handlerQueue = self->_queue;
             c.playerIndex = (GCControllerPlayerIndex)slot;
@@ -144,21 +144,21 @@ void ioswine_gamepad_snapshot_v1(struct ios_gamepad_info *info) {
 - (void)setActive:(BOOL)active {
     dispatch_async(_queue, ^{
         self->_active = active;
-        for (NSUInteger i = 0; i < IOSWINE_GAMEPAD_COUNT; ++i) [self publish:i];
+        for (NSUInteger i = 0; i < KITSUNE_GAMEPAD_COUNT; ++i) [self publish:i];
     });
 }
 
 @end
 
 void GameController_SetTouchPad(const struct ios_touch_pad *state) {
-    [[IOSWineGamepadBridge shared] setTouch:*state];
+    [[KitsuneGamepadBridge shared] setTouch:*state];
 }
 
 void GameController_Start(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
     dispatch_async(dispatch_get_main_queue(), ^{
-        IOSWineGamepadBridge *b = [IOSWineGamepadBridge shared];
+        KitsuneGamepadBridge *b = [KitsuneGamepadBridge shared];
         [[NSNotificationCenter defaultCenter] addObserverForName:GCControllerDidConnectNotification
                                                           object:nil queue:NSOperationQueue.mainQueue
                                                       usingBlock:^(NSNotification *n) {

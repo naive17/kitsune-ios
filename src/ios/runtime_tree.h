@@ -1,16 +1,16 @@
 /* Shared with the host regression test; no UIKit or device dependencies. */
-#ifndef IOSWINE_RUNTIME_TREE_H
-#define IOSWINE_RUNTIME_TREE_H
+#ifndef KITSUNE_RUNTIME_TREE_H
+#define KITSUNE_RUNTIME_TREE_H
 #import <Foundation/Foundation.h>
 
-static inline NSString *IOSWineTreeVersion(NSString *root) {
+static inline NSString *KitsuneTreeVersion(NSString *root) {
   return [[NSString stringWithContentsOfFile:[root stringByAppendingPathComponent:@"TREE_VERSION"]
                                    encoding:NSUTF8StringEncoding error:nil]
       stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
-static inline BOOL IOSWineTreeMatches(NSString *root, NSString *version) {
-  return version.length && [IOSWineTreeVersion(root) isEqualToString:version] &&
+static inline BOOL KitsuneTreeMatches(NSString *root, NSString *version) {
+  return version.length && [KitsuneTreeVersion(root) isEqualToString:version] &&
       [NSFileManager.defaultManager fileExistsAtPath:[root
           stringByAppendingPathComponent:@"lib/wine/aarch64-windows/ntdll.dll"]];
 }
@@ -18,14 +18,14 @@ static inline BOOL IOSWineTreeMatches(NSString *root, NSString *version) {
 /* Never destroy a working tree to discover whether its replacement is valid.
  * Stage beside the destination so the final moves remain on one filesystem.
  * Keep the previous tree on a failed commit, including a failed rollback. */
-static inline BOOL IOSWineInstallTree(NSString *source, NSString *destination,
+static inline BOOL KitsuneInstallTree(NSString *source, NSString *destination,
                               NSString *version, NSError **error) {
   NSFileManager *fm = NSFileManager.defaultManager;
-  if (!IOSWineTreeMatches(source, version)) {
-    if (error) *error = [NSError errorWithDomain:@"ioswine.runtime" code:1 userInfo:@{
+  if (!KitsuneTreeMatches(source, version)) {
+    if (error) *error = [NSError errorWithDomain:@"kitsune.runtime" code:1 userInfo:@{
       NSLocalizedDescriptionKey: [NSString stringWithFormat:
           @"Tree version mismatch: got %@, need %@ (or ntdll.dll is missing). Existing tree preserved.",
-          IOSWineTreeVersion(source) ?: @"(missing TREE_VERSION)", version]
+          KitsuneTreeVersion(source) ?: @"(missing TREE_VERSION)", version]
     }];
     return NO;
   }

@@ -1,7 +1,7 @@
 /*
  * D3D11 correctness gate: render a triangle offscreen and read the pixels back.
  *
- * Copyright 2026 the ios-wine project
+ * Copyright 2026 the Kitsune project
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

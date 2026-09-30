@@ -56,13 +56,14 @@ log "FEX toolchain: $("$FEX_TC/bin/clang" --version | head -1)"
 patch_teb_header() {
   local h="$1"
   [ -f "$h" ] || return 0
-  if grep -q 'ios-wine: TEB in x28' "$h"; then
+  # 'ios-wine:' is the marker from before the rename; a cached toolchain has it.
+  if grep -q -e 'Kitsune: TEB in x28' -e 'ios-wine: TEB in x28' "$h"; then
     log "  already patched: $h"; return 0
   fi
   grep -q '__mingw_current_teb __asm__("x18")' "$h" \
     || die "unexpected NtCurrentTeb() in $h -- toolchain changed, re-check by hand"
-  perl -0pi -e 's{    register struct _TEB \*__mingw_current_teb __asm__\("x18"\);\n    FORCEINLINE struct _TEB \*NtCurrentTeb\(VOID\)\n    \{\n        return __mingw_current_teb;\n    \}\n}{    FORCEINLINE struct _TEB *NtCurrentTeb(VOID)\n    \{\n        /* ios-wine: TEB in x28, not x18 -- Darwin zeroes x18 on preemption.\n           Non-volatile asm so this still CSEs; x28 never changes in a thread. */\n        struct _TEB *__ios_teb;\n        __asm__ ("mov %0, x28" : "=r" (__ios_teb));\n        return __ios_teb;\n    \}\n}' "$h"
-  grep -q 'ios-wine: TEB in x28' "$h" || die "TEB patch did not apply to $h"
+  perl -0pi -e 's{    register struct _TEB \*__mingw_current_teb __asm__\("x18"\);\n    FORCEINLINE struct _TEB \*NtCurrentTeb\(VOID\)\n    \{\n        return __mingw_current_teb;\n    \}\n}{    FORCEINLINE struct _TEB *NtCurrentTeb(VOID)\n    \{\n        /* Kitsune: TEB in x28, not x18 -- Darwin zeroes x18 on preemption.\n           Non-volatile asm so this still CSEs; x28 never changes in a thread. */\n        struct _TEB *__ios_teb;\n        __asm__ ("mov %0, x28" : "=r" (__ios_teb));\n        return __ios_teb;\n    \}\n}' "$h"
+  grep -q 'Kitsune: TEB in x28' "$h" || die "TEB patch did not apply to $h"
   log "  patched NtCurrentTeb() -> x28 in $h"
 }
 log "pointing mingw-w64's NtCurrentTeb() at x28"

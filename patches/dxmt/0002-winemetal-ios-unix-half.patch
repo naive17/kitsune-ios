@@ -303,7 +303,7 @@ index 4744692..eaa97c5 100644
 + * NSScreen and an ICC profile read through ColorSync. iOS has one screen, no
 + * ColorSync, and no AppKit, so the answers are constants.
 + *
-+ * IOSWINE_DISPLAY_ID is a made-up non-zero id: DXMT treats 0 as "no display".
++ * KITSUNE_DISPLAY_ID is a made-up non-zero id: DXMT treats 0 as "no display".
 + * ---------------------------------------------------------------------------
 + */
 +/* Nothing to do with the display, and it sat in the middle of this block
@@ -329,12 +329,12 @@ index 4744692..eaa97c5 100644
 +}
 +
 +#if !TARGET_OS_OSX
-+#define IOSWINE_DISPLAY_ID 1
++#define KITSUNE_DISPLAY_ID 1
 +
 +static NTSTATUS
 +_WMTGetPrimaryDisplayId(void *obj) {
 +  struct unixcall_generic_obj_ret *params = obj;
-+  params->ret = IOSWINE_DISPLAY_ID;
++  params->ret = KITSUNE_DISPLAY_ID;
 +  return STATUS_SUCCESS;
 +}
 +
@@ -349,7 +349,7 @@ index 4744692..eaa97c5 100644
 + * path would have produced from a generic RGB profile, which is the fallback
 + * macOS itself takes when a display has no usable profile. */
 +static void
-+ioswine_fill_srgb_gamut(struct WMTDisplayDescription *d) {
++kitsune_fill_srgb_gamut(struct WMTDisplayDescription *d) {
 +  d->white_points[0] = 0.3127f; d->white_points[1] = 0.3290f;
 +  d->red_primaries[0] = 0.6400f; d->red_primaries[1] = 0.3300f;
 +  d->green_primaries[0] = 0.3000f; d->green_primaries[1] = 0.6000f;
@@ -361,7 +361,7 @@ index 4744692..eaa97c5 100644
 +  struct unixcall_generic_obj_ptr_noret *params = obj;
 +  struct WMTDisplayDescription *desc_out = params->arg.ptr;
 +
-+  ioswine_fill_srgb_gamut(desc_out);
++  kitsune_fill_srgb_gamut(desc_out);
 +  /* 1.0 is "white is the brightest thing there is", i.e. SDR. Not 0.0, which
 +   * would tell DXMT the display cannot render white. */
 +  desc_out->maximum_edr_color_component_value = 1.0;

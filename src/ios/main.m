@@ -65,7 +65,7 @@ static void PlaceMetalFrameworkCache(void) {
   (void)scene;
   if (self.bgTask != UIBackgroundTaskInvalid) return;
   __weak SceneDelegate *weakSelf = self;
-  self.bgTask = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"ioswine-boot" expirationHandler:^{
+  self.bgTask = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"kitsune-boot" expirationHandler:^{
     SceneDelegate *s = weakSelf;
     if (s && s.bgTask != UIBackgroundTaskInvalid) {
       [UIApplication.sharedApplication endBackgroundTask:s.bgTask];
@@ -92,17 +92,17 @@ int main(int argc, char *argv[]) {
   ios_jit_arena_pin_low_adaptive((void *)(WINE_SHARED_DATA_ADDR + 0x10000), (size_t)ARENA_MB << 20, (size_t)ARENA_MAX_MB << 20);
   [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidReceiveMemoryWarningNotification
                                                   object:nil queue:nil usingBlock:^(NSNotification *n __unused) {
-    IOSWineLog([NSString stringWithFormat:@"MEMORY-WARNING avail=%lluMB footprint=%lluMB",
-                   (unsigned long long)(os_proc_available_memory() >> 20), IOSWinePhysFootprintMB()]);
+    KitsuneLog([NSString stringWithFormat:@"MEMORY-WARNING avail=%lluMB footprint=%lluMB",
+                   (unsigned long long)(os_proc_available_memory() >> 20), KitsunePhysFootprintMB()]);
     static void (*rss)(const char *);
     if (!rss) rss = dlsym(RTLD_DEFAULT, "ios_rss_report");
     if (rss) rss("MEMORY-WARNING");
   }];
   @autoreleasepool {
     /* Read by Metal when it initialises, so it has to be set first. */
-    if ([NSUserDefaults.standardUserDefaults boolForKey:@"IOSWineMetalHUD"]) setenv("MTL_HUD_ENABLED", "1", 1);
+    if ([NSUserDefaults.standardUserDefaults boolForKey:@"KitsuneMetalHUD"]) setenv("MTL_HUD_ENABLED", "1", 1);
     PlaceMetalFrameworkCache();
-    IOSWineDiagApplyToEnvironment(NSUserDefaults.standardUserDefaults);
+    KitsuneDiagApplyToEnvironment(NSUserDefaults.standardUserDefaults);
     return UIApplicationMain(argc, argv, nil, NSStringFromClass(AppDelegate.class));
   }
 }

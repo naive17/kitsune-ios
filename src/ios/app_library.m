@@ -1,6 +1,6 @@
 /* The imported/installed program catalogue. See app_library.h. */
 #import "app_library.h"
-#include "wine_boot.h"   /* IOSWinePersistentDocuments() */
+#include "wine_boot.h"   /* KitsunePersistentDocuments() */
 
 #include "zip.h"
 
@@ -89,7 +89,7 @@
 
 + (NSString *)appsRoot {
   /* The imported programs live here, in Documents. */
-  NSString *root = [IOSWinePersistentDocuments() stringByAppendingPathComponent:@"Apps"];
+  NSString *root = [KitsunePersistentDocuments() stringByAppendingPathComponent:@"Apps"];
 
   [NSFileManager.defaultManager createDirectoryAtPath:root
                           withIntermediateDirectories:YES

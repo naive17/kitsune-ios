@@ -69,7 +69,7 @@ index 001adcb..00c43d1 100644
      switch (Label->Type) {
      case ForwardLabel::InstType::ADR: {
 -      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
-+      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // Kitsune: Label->Location is an EXEC address -- the branch distances below
 +      // are computed from it and must stay exec-relative -- but the read-modify-write
 +      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
 +      // does not cover this path: it only sees stores at the CURSOR, and label
@@ -93,7 +93,7 @@ index 001adcb..00c43d1 100644
      }
      case ForwardLabel::InstType::ADRP: {
 -      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
-+      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // Kitsune: Label->Location is an EXEC address -- the branch distances below
 +      // are computed from it and must stay exec-relative -- but the read-modify-write
 +      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
 +      // does not cover this path: it only sees stores at the CURSOR, and label
@@ -117,7 +117,7 @@ index 001adcb..00c43d1 100644
      }
      case ForwardLabel::InstType::B: {
 -      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
-+      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // Kitsune: Label->Location is an EXEC address -- the branch distances below
 +      // are computed from it and must stay exec-relative -- but the read-modify-write
 +      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
 +      // does not cover this path: it only sees stores at the CURSOR, and label
@@ -141,7 +141,7 @@ index 001adcb..00c43d1 100644
      }
      case ForwardLabel::InstType::TEST_BRANCH: {
 -      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
-+      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // Kitsune: Label->Location is an EXEC address -- the branch distances below
 +      // are computed from it and must stay exec-relative -- but the read-modify-write
 +      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
 +      // does not cover this path: it only sees stores at the CURSOR, and label
@@ -166,7 +166,7 @@ index 001adcb..00c43d1 100644
      case ForwardLabel::InstType::BC:
      case ForwardLabel::InstType::RELATIVE_LOAD: {
 -      uint32_t* Instruction = reinterpret_cast<uint32_t*>(Label->Location);
-+      // ios-wine: Label->Location is an EXEC address -- the branch distances below
++      // Kitsune: Label->Location is an EXEC address -- the branch distances below
 +      // are computed from it and must stay exec-relative -- but the read-modify-write
 +      // of the instruction itself has to go through the RW alias. Buffer::WriteCursor()
 +      // does not cover this path: it only sees stores at the CURSOR, and label
@@ -199,7 +199,7 @@ index 729aa63..78cea90 100644
 -  constexpr std::array<ARMEmitter::Register, 6> RA = {
 -    ARMEmitter::Reg::r6, ARMEmitter::Reg::r7, ARMEmitter::Reg::r14, ARMEmitter::Reg::r15, ARMEmitter::Reg::r16, ARMEmitter::Reg::r30,
 +  /*
-+   * ios-wine: r14 is no longer a dynamic register -- it is STATE now.
++   * Kitsune: r14 is no longer a dynamic register -- it is STATE now.
 +   *
 +   * The TEB must live in x28 on Darwin (x18 is zeroed by preemption; see the
 +   * long note in Arm64Emitter.h), x28 was STATE, and x14 is the only other
@@ -236,7 +236,7 @@ index 729aa63..78cea90 100644
 -  // Load STATE in from the CPU area as x28 is not callee saved in the ARM64EC ABI.
 -  ldr(TmpReg.X(), ARMEmitter::Reg::r18, TEB_CPU_AREA_OFFSET);
 +  // Load STATE in from the CPU area as it is not callee saved in the ARM64EC ABI.
-+  // (ios-wine: STATE is x14 here and the TEB is TEB_REG/x28 -- see Arm64Emitter.h.)
++  // (Kitsune: STATE is x14 here and the TEB is TEB_REG/x28 -- see Arm64Emitter.h.)
 +  ldr(TmpReg.X(), TEB_REG.R(), TEB_CPU_AREA_OFFSET);
    ldr(STATE, TmpReg, CPU_AREA_EMULATOR_DATA_OFFSET);
  #endif
@@ -262,7 +262,7 @@ index 5ad6e7b..a1d6e65 100644
  
  #else
 +/*
-+ * ios-wine: the TEB is in x28 on this port, so STATE cannot be.
++ * Kitsune: the TEB is in x28 on this port, so STATE cannot be.
 + *
 + * Apple's XNU ZEROES x18 on return from any exception, including ordinary
 + * timer preemption -- measured on both an arm64 Mac and the target iPhone:
@@ -435,7 +435,7 @@ index f3171d4..223f569 100644
 +
 +#ifdef _WIN32
 +/*
-+ * ios-wine: learn the RW alias of a freshly allocated code buffer.
++ * Kitsune: learn the RW alias of a freshly allocated code buffer.
 + *
 + * On iOS a page can never be writable and executable at once, so Wine hands
 + * out executable memory from a debugger-blessed arena that is mapped twice:
@@ -516,7 +516,7 @@ index f3171d4..223f569 100644
    Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
    LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");
  
-+  // ios-wine: if this buffer came from a dual-mapped region, find out where to
++  // Kitsune: if this buffer came from a dual-mapped region, find out where to
 +  // write it. Must happen before anything emits into it. No-op elsewhere.
 +  FEXCore::JIT::InstallWriteAlias(Ptr);
 +
@@ -540,7 +540,7 @@ index f3171d4..223f569 100644
    if (!Latest) {
 -    AllocateNew(INITIAL_CODE_SIZE);
 +    /*
-+     * ios-wine: on a dual-mapped region, take the whole thing at once.
++     * Kitsune: on a dual-mapped region, take the whole thing at once.
 +     *
 +     * FEX normally starts at 16 MB and grows by allocating a NEW buffer and
 +     * freeing the old one. Neither half of that works here. Executable memory
@@ -582,7 +582,7 @@ index cccce4d..3aa5789 100644
 -  return ::VirtualAlloc(Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE);
 +  void* Result = ::VirtualAlloc(Base, Size, Flags, Execute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE);
  #endif
-+  // ios-wine: executable memory may be dual-mapped (RX here, RW at a second
++  // Kitsune: executable memory may be dual-mapped (RX here, RW at a second
 +  // address). Learn the offset now, before anything emits into it. Every
 +  // Execute=true allocation goes through here -- dispatcher, block linkers and
 +  // X64ReturnInstr as well as the CodeBuffer -- and the earliest of them is
@@ -703,7 +703,7 @@ index 0c9a57a..ba5e83e 100644
  add_library(arm64ecfex SHARED
    Module.cpp
    Module.S
-+  # ios-wine: must be a TU of THIS target, not of a static library, so it wins
++  # Kitsune: must be a TU of THIS target, not of a static library, so it wins
 +  # over libc++abi's thread_local implementation on the link line. See the file.
 +  CxaEhStorage.cpp
    libarm64ecfex.def
@@ -717,7 +717,7 @@ index 0000000..6cd9e4c
 @@ -0,0 +1,137 @@
 +// SPDX-License-Identifier: MIT
 +/*
-+ * ios-wine: per-thread C++ exception state WITHOUT compiler thread-local storage.
++ * Kitsune: per-thread C++ exception state WITHOUT compiler thread-local storage.
 + *
 + * WHY THIS FILE EXISTS.  Windows thread-local storage lowers to a hard-coded
 + * TEB read.  Measured with clang 21.1.0 (bylaws) and 23.1.0-rc3, for both
@@ -860,7 +860,7 @@ index 4c18172..ae74664 100644
  .text
  .balign 16
  
-+// ios-wine: every "TEB" below is x28, not the x18 the ARM64EC ABI specifies.
++// Kitsune: every "TEB" below is x28, not the x18 the ARM64EC ABI specifies.
 +// Apple's XNU zeroes x18 on return from any exception -- including plain timer
 +// preemption, with no syscall involved -- so nothing that must survive between
 +// two arbitrary instructions can live there. Wine's whole ARM64 port moved the
@@ -929,7 +929,7 @@ index ab3e7a3..57f494a 100644
    InvalidationTracker->HandleMemoryProtectionNotification(reinterpret_cast<uint64_t>(X64ReturnInstr), FEXCore::Utils::FEX_PAGE_SIZE,
                                                            PAGE_EXECUTE_READ);
 -  *reinterpret_cast<uint8_t*>(X64ReturnInstr) = 0xc3;
-+  // ios-wine: X64ReturnInstr lives in executable memory, which on this port is
++  // Kitsune: X64ReturnInstr lives in executable memory, which on this port is
 +  // never writable at the address it executes from. Store through the alias.
 +  // Identity everywhere else (WriteAliasDelta == 0).
 +  *FEXCore::JIT::Write(reinterpret_cast<uint8_t*>(X64ReturnInstr)) = 0xc3;
@@ -950,7 +950,7 @@ index 9797823..25ade45 100644
  namespace Illegal {
 +#ifdef FEX_HOST_DARWIN
 +/*
-+ * ios-wine: on Darwin these are not "illegal", they are fatal.
++ * Kitsune: on Darwin these are not "illegal", they are fatal.
 + *
 + * The fallbacks below issue RAW LINUX syscalls -- `svc #0` with the number in
 + * x8 -- on the assumption that a Wine process really is a Linux process, which

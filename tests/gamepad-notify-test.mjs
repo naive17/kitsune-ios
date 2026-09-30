@@ -87,7 +87,7 @@ static unsigned consume(struct list *events,DWORD code) {
   struct ios_gamepad_broadcast*b=(void*)e->header;
   assert(e->ios_event==code && b->type==5 && b->reserved==0);
   assert(b->size==offsetof(struct ios_gamepad_broadcast,name)+(wcslen(b->name)+1)*sizeof(WCHAR));
-  assert(wcsstr(b->name,L"IOSWINE#GameController#"));
+  assert(wcsstr(b->name,L"KITSUNE#GameController#"));
   list_remove(&e->entry);free(e);++n;
  }
  return n;

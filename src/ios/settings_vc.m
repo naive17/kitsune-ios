@@ -108,8 +108,8 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
 
 - (void)refresh {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-    unsigned long long cache = IOSWineDirectorySize(WineShaderCacheRoot());
-    NSString *tree = IOSWineTreeVersion(WineTreeRoot());
+    unsigned long long cache = KitsuneDirectorySize(WineShaderCacheRoot());
+    NSString *tree = KitsuneTreeVersion(WineTreeRoot());
     dispatch_async(dispatch_get_main_queue(), ^{
       self->_cacheSize = [NSString stringWithFormat:NSLocalizedString(@"%llu MB", nil), cache >> 20];
       self->_treeVersion = tree.length ? tree : NSLocalizedString(@"Not installed", nil);
@@ -153,7 +153,7 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
   case SecPerformance:
     return NSLocalizedString(@"Battery caps games at 30 fps and turns on by itself when the phone gets hot.", nil);
   case SecDiagnostics:
-    return NSLocalizedString(@"Applies the next time ios-wine opens. Full logging slows programs down.", nil);
+    return NSLocalizedString(@"Applies the next time Kitsune opens. Full logging slows programs down.", nil);
   case SecStorage:
     return NSLocalizedString(@"Keeps the Wine runtime and your settings.", nil);
   default: return nil;
@@ -166,14 +166,14 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
   case SecDisplay:
     switch (ip.row) {
     case 0: return SwitchRow(NSLocalizedString(@"Avoid the Notch", nil), NSLocalizedString(@"Keep windows clear of the notch", nil),
-                             IOSWineSafeAreaStored(ud), self, @selector(onSafeArea:));
+                             KitsuneSafeAreaStored(ud), self, @selector(onSafeArea:));
     case 1: return SwitchRow(NSLocalizedString(@"Fit Games to the Screen", nil), NSLocalizedString(@"Match supported games to the screen", nil),
-                             IOSWineFillScreenStored(ud), self, @selector(onFillScreen:));
+                             KitsuneFillScreenStored(ud), self, @selector(onFillScreen:));
     case 2: return ChoiceRow(NSLocalizedString(@"Resolution", nil), NSLocalizedString(@"Higher is sharper and uses more memory", nil),
                              @[ NSLocalizedString(@"Auto", nil), NSLocalizedString(@"1.7×", nil), NSLocalizedString(@"2×", nil), NSLocalizedString(@"2.5×", nil), NSLocalizedString(@"3×", nil) ],
-                             IndexOf(kScales, 5, IOSWineRenderScaleStored(ud)), self, @selector(onScale:));
+                             IndexOf(kScales, 5, KitsuneRenderScaleStored(ud)), self, @selector(onScale:));
     default: return ChoiceRow(NSLocalizedString(@"Other Programs", nil), NSLocalizedString(@"Orientation for programs that aren't games", nil),
-                              @[ NSLocalizedString(@"Portrait", nil), NSLocalizedString(@"Landscape", nil) ], [ud boolForKey:IOSWINE_KEY_OTHER_LANDSCAPE] ? 1 : 0,
+                              @[ NSLocalizedString(@"Portrait", nil), NSLocalizedString(@"Landscape", nil) ], [ud boolForKey:KITSUNE_KEY_OTHER_LANDSCAPE] ? 1 : 0,
                               self, @selector(onOrientation:));
     }
   case SecPerformance:
@@ -181,31 +181,31 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
     case 0: return ChoiceRow(NSLocalizedString(@"Power Mode", nil), nil, @[ NSLocalizedString(@"Balanced", nil), NSLocalizedString(@"Performance", nil), NSLocalizedString(@"Battery", nil) ],
                              WinePower.shared.userMode, self, @selector(onPowerMode:));
     case 1: {
-      int cap = IOSWineFrameCapStored(ud);
+      int cap = KitsuneFrameCapStored(ud);
       return ChoiceRow(NSLocalizedString(@"Frame Rate Limit", nil), NSLocalizedString(@"Lower saves battery", nil),
                        @[ NSLocalizedString(@"None", nil), @"30", @"40", @"60" ], cap == 30 ? 1 : cap == 40 ? 2 : cap == 60 ? 3 : 0,
                        self, @selector(onFrameCap:));
     }
     case 2: return ChoiceRow(NSLocalizedString(@"Texture Size", nil), NSLocalizedString(@"Smaller uses less memory", nil),
-                             @[ NSLocalizedString(@"Small", nil), NSLocalizedString(@"Medium", nil), NSLocalizedString(@"Full", nil) ], IOSWineTextureModeStored(ud), self, @selector(onTextures:));
-    case 3: return SwitchRow(NSLocalizedString(@"Battery Mode in Low Power Mode", nil), nil, IOSWineLowPowerAutoStored(ud), self, @selector(onLowPower:));
+                             @[ NSLocalizedString(@"Small", nil), NSLocalizedString(@"Medium", nil), NSLocalizedString(@"Full", nil) ], KitsuneTextureModeStored(ud), self, @selector(onTextures:));
+    case 3: return SwitchRow(NSLocalizedString(@"Battery Mode in Low Power Mode", nil), nil, KitsuneLowPowerAutoStored(ud), self, @selector(onLowPower:));
     default: return SwitchRow(NSLocalizedString(@"Performance Overlay", nil), NSLocalizedString(@"Frame rate and memory while playing", nil),
-                              IOSWinePerfHUDStored(ud), self, @selector(onPerfHUD:));
+                              KitsunePerfHUDStored(ud), self, @selector(onPerfHUD:));
     }
   case SecControls:
     if (ip.row == 0)
       return ChoiceRow(NSLocalizedString(@"Camera Sensitivity", nil), NSLocalizedString(@"Used in look mode", nil),
-                       @[ NSLocalizedString(@"0.5×", nil), NSLocalizedString(@"1×", nil), NSLocalizedString(@"1.5×", nil), NSLocalizedString(@"2×", nil), NSLocalizedString(@"3×", nil) ], IndexOf(kLookSens, 5, IOSWineLookSensitivityStored(ud)),
+                       @[ NSLocalizedString(@"0.5×", nil), NSLocalizedString(@"1×", nil), NSLocalizedString(@"1.5×", nil), NSLocalizedString(@"2×", nil), NSLocalizedString(@"3×", nil) ], IndexOf(kLookSens, 5, KitsuneLookSensitivityStored(ud)),
                        self, @selector(onLookSens:));
     return SwitchRow(NSLocalizedString(@"On-Screen Controller", nil), NSLocalizedString(@"For Steam games without a controller", nil),
-                     IOSWineTouchPadStored(ud), self, @selector(onTouchPad:));
+                     KitsuneTouchPadStored(ud), self, @selector(onTouchPad:));
   case SecSteam:
     return ChoiceRow(NSLocalizedString(@"Steam Window", nil), NSLocalizedString(@"When opening Steam; games always start it hidden", nil), @[ NSLocalizedString(@"Visible", nil), NSLocalizedString(@"Hidden", nil) ],
-                     IOSWineSteamVisibleStored(ud) ? 0 : 1, self, @selector(onSteamWindow:));
+                     KitsuneSteamVisibleStored(ud) ? 0 : 1, self, @selector(onSteamWindow:));
   case SecDiagnostics:
     if (ip.row == 0)
-      return ChoiceRow(NSLocalizedString(@"Logging", nil), nil, @[ NSLocalizedString(@"Off", nil), NSLocalizedString(@"Basic", nil), NSLocalizedString(@"Full", nil) ], IOSWineDiagLevelStored(ud), self, @selector(onDiagnostics:));
-    return SwitchRow(NSLocalizedString(@"Metal Performance HUD", nil), NSLocalizedString(@"GPU timings overlay", nil), [ud boolForKey:IOSWINE_KEY_METAL_HUD],
+      return ChoiceRow(NSLocalizedString(@"Logging", nil), nil, @[ NSLocalizedString(@"Off", nil), NSLocalizedString(@"Basic", nil), NSLocalizedString(@"Full", nil) ], KitsuneDiagLevelStored(ud), self, @selector(onDiagnostics:));
+    return SwitchRow(NSLocalizedString(@"Metal Performance HUD", nil), NSLocalizedString(@"GPU timings overlay", nil), [ud boolForKey:KITSUNE_KEY_METAL_HUD],
                      self, @selector(onMetalHUD:));
   case SecStorage:
     if (ip.row == 0)
@@ -219,7 +219,7 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
     if (ip.row == 0) return TextRow(NSLocalizedString(@"Version", nil), [NSString stringWithFormat:NSLocalizedString(@"%@, built %s", nil), version, __DATE__], nil, NO);
     if (ip.row == 1) return TextRow(NSLocalizedString(@"Wine Runtime", nil), _treeVersion ?: NSLocalizedString(@"Checking…", nil), nil, NO);
     if (ip.row == 2)
-      return TextRow(NSLocalizedString(@"Licenses", nil), NSLocalizedString(@"ios-wine (GPL), Wine (LGPL), DXMT, FEX and others; included in the app", nil), nil, NO);
+      return TextRow(NSLocalizedString(@"Licenses", nil), NSLocalizedString(@"Kitsune (GPL), Wine (LGPL), DXMT, FEX and others; included in the app", nil), nil, NO);
     return TextRow(NSLocalizedString(@"Share Logs", nil), nil, UIColor.systemBlueColor, YES);
   }
   }
@@ -229,8 +229,8 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
   [t deselectRowAtIndexPath:ip animated:YES];
   if (ip.section == SecAbout && ip.row == 3) { [self shareLogsFrom:[t cellForRowAtIndexPath:ip]]; return; }
   if (ip.section != SecStorage) return;
-  if (ip.row == 0) { IOSWineClearShaderCache(WineShaderCacheRoot()); [self refresh]; return; }
-  if (ip.row == 1) { IOSWineClearLogs(IOSWinePersistentDocuments()); return; }
+  if (ip.row == 0) { KitsuneClearShaderCache(WineShaderCacheRoot()); [self refresh]; return; }
+  if (ip.row == 1) { KitsuneClearLogs(KitsunePersistentDocuments()); return; }
   UIAlertController *a = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Remove Everything?", nil)
       message:NSLocalizedString(@"This deletes Steam, your games, imported programs and all bottles. Type “erase” to confirm.", nil)
       preferredStyle:UIAlertControllerStyleAlert];
@@ -245,9 +245,9 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
     WineProgressVC *progress = [WineProgressVC presentFrom:self title:NSLocalizedString(@"Removing Everything", nil)];
     [progress setStage:NSLocalizedString(@"Removing…", nil) detail:nil fraction:-1];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-      IOSWineRemoveEverything(IOSWinePersistentDocuments(), WineShaderCacheRoot());
+      KitsuneRemoveEverything(KitsunePersistentDocuments(), WineShaderCacheRoot());
       NSString *err = nil;
-      BOOL prefix = IOSWineCreateDefaultPrefix(IOSWinePersistentDocuments(), WineTreeRoot(), &err);
+      BOOL prefix = KitsuneCreateDefaultPrefix(KitsunePersistentDocuments(), WineTreeRoot(), &err);
       [WineAppLibrary.shared load];
       dispatch_async(dispatch_get_main_queue(), ^{
         if (prefix) [progress finish];
@@ -261,7 +261,7 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
 }
 
 - (void)shareLogsFrom:(UIView *)source {
-  NSString *docs = IOSWinePersistentDocuments();
+  NSString *docs = KitsunePersistentDocuments();
   NSMutableArray<NSURL *> *files = [NSMutableArray array];
   for (NSString *n in [NSFileManager.defaultManager contentsOfDirectoryAtPath:docs error:nil])
     if ([n hasPrefix:@"wine-stderr.log"] || [n isEqualToString:@"hb.log"])
@@ -275,18 +275,18 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
 }
 
 - (void)onPowerMode:(UISegmentedControl *)seg { WinePower.shared.userMode = (WinePowerMode)seg.selectedSegmentIndex; }
-- (void)onMetalHUD:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:IOSWINE_KEY_METAL_HUD]; }
-- (void)onPerfHUD:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:IOSWINE_KEY_PERF_HUD]; }
-- (void)onTouchPad:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:IOSWINE_KEY_TOUCH_PAD]; }
-- (void)onLookSens:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setDouble:kLookSens[seg.selectedSegmentIndex] forKey:IOSWINE_KEY_LOOK_SENS]; }
-- (void)onSafeArea:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:IOSWINE_KEY_SAFE_AREA]; }
-- (void)onFillScreen:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:IOSWINE_KEY_FILL_SCREEN]; }
-- (void)onScale:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setDouble:kScales[seg.selectedSegmentIndex] forKey:IOSWINE_KEY_RENDER_SCALE]; }
-- (void)onOrientation:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setBool:seg.selectedSegmentIndex == 1 forKey:IOSWINE_KEY_OTHER_LANDSCAPE]; }
-- (void)onFrameCap:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setInteger:kFrameCaps[seg.selectedSegmentIndex] forKey:IOSWINE_KEY_FRAME_CAP]; }
-- (void)onTextures:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setInteger:seg.selectedSegmentIndex forKey:IOSWINE_KEY_TEXTURES]; }
-- (void)onLowPower:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:IOSWINE_KEY_LOW_POWER_AUTO]; }
-- (void)onSteamWindow:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setBool:seg.selectedSegmentIndex == 0 forKey:IOSWINE_KEY_STEAM_VISIBLE]; }
-- (void)onDiagnostics:(UISegmentedControl *)seg { IOSWineDiagStore(NSUserDefaults.standardUserDefaults, (IOSWineDiagLevel)seg.selectedSegmentIndex); }
+- (void)onMetalHUD:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_METAL_HUD]; }
+- (void)onPerfHUD:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_PERF_HUD]; }
+- (void)onTouchPad:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_TOUCH_PAD]; }
+- (void)onLookSens:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setDouble:kLookSens[seg.selectedSegmentIndex] forKey:KITSUNE_KEY_LOOK_SENS]; }
+- (void)onSafeArea:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_SAFE_AREA]; }
+- (void)onFillScreen:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_FILL_SCREEN]; }
+- (void)onScale:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setDouble:kScales[seg.selectedSegmentIndex] forKey:KITSUNE_KEY_RENDER_SCALE]; }
+- (void)onOrientation:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setBool:seg.selectedSegmentIndex == 1 forKey:KITSUNE_KEY_OTHER_LANDSCAPE]; }
+- (void)onFrameCap:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setInteger:kFrameCaps[seg.selectedSegmentIndex] forKey:KITSUNE_KEY_FRAME_CAP]; }
+- (void)onTextures:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setInteger:seg.selectedSegmentIndex forKey:KITSUNE_KEY_TEXTURES]; }
+- (void)onLowPower:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_LOW_POWER_AUTO]; }
+- (void)onSteamWindow:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setBool:seg.selectedSegmentIndex == 0 forKey:KITSUNE_KEY_STEAM_VISIBLE]; }
+- (void)onDiagnostics:(UISegmentedControl *)seg { KitsuneDiagStore(NSUserDefaults.standardUserDefaults, (KitsuneDiagLevel)seg.selectedSegmentIndex); }
 
 @end

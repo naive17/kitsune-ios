@@ -4,23 +4,23 @@
 #   scripts/app.sh build [--full]     thin update (default) or full bundle with the Wine tree
 #   scripts/app.sh install [--full]   build, then install on the paired iPhone (UDID=... picks one)
 #   scripts/app.sh sign-check         report which Apple Development identity the phone accepts
-#   scripts/app.sh ipa [file.ipa]     full bundle packaged for sideloading (build/ioswine.ipa)
+#   scripts/app.sh ipa [file.ipa]     full bundle packaged for sideloading (build/kitsune.ipa)
 #
 # The thin build reuses the staged runtime in .deploy/runtime; the full
 # build and the IPA need out/wine-core.
 source "$(dirname "$0")/common.sh"
 cd "$ROOT"
-APP=build/xc-out/ioswine.app
+APP=build/xc-out/Kitsune.app
 OUT=build/xc-out
 
 # xcbuild <thin: 0|1> [xcodebuild arguments]: builds the app into $OUT.
-# IOSWINE_TEAM and IOSWINE_BUNDLE_ID (local.env) replace the spec's team and id.
+# KITSUNE_TEAM and KITSUNE_BUNDLE_ID (local.env) replace the spec's team and id.
 xcbuild() {
   local thin=$1 signing=(); shift
-  [ -n "${IOSWINE_TEAM:-}" ] && signing+=("DEVELOPMENT_TEAM=$IOSWINE_TEAM")
-  [ -n "${IOSWINE_BUNDLE_ID:-}" ] && signing+=("PRODUCT_BUNDLE_IDENTIFIER=$IOSWINE_BUNDLE_ID")
-  xcodegen generate --spec ioswine-device.yml --project . >/dev/null
-  IOSWINE_THIN_UPDATE=$thin xcodebuild -project ioswine-device.xcodeproj -target ioswine-device \
+  [ -n "${KITSUNE_TEAM:-}" ] && signing+=("DEVELOPMENT_TEAM=$KITSUNE_TEAM")
+  [ -n "${KITSUNE_BUNDLE_ID:-}" ] && signing+=("PRODUCT_BUNDLE_IDENTIFIER=$KITSUNE_BUNDLE_ID")
+  xcodegen generate --spec kitsune-device.yml --project . >/dev/null
+  KITSUNE_THIN_UPDATE=$thin xcodebuild -project kitsune-device.xcodeproj -target kitsune-device \
     -sdk iphoneos -configuration Release CONFIGURATION_BUILD_DIR="$PWD/$OUT" \
     GCC_SYMBOLS_PRIVATE_EXTERN=NO STRIP_INSTALLED_PRODUCT=NO ${signing[@]+"${signing[@]}"} "$@" build \
     | grep -E "error:|warning: (unused|deprecated)|BUILD (SUCCEEDED|FAILED)"
@@ -33,7 +33,7 @@ build() {
   test -f .deploy/runtime/lib/wine/aarch64-unix/winecoreaudio.so \
     || { echo "no staged runtime: run the unix-side build, then scripts/19-stage-runtime.sh" >&2; exit 1; }
   xcbuild "$thin" -allowProvisioningUpdates || true
-  test -x "$APP/ioswine"
+  test -x "$APP/Kitsune"
   # Xcode skips CodeSign on an incremental build even though the post-build
   # script replaced bundle files; re-seal with the identity and entitlements
   # of the existing signature.
@@ -56,22 +56,22 @@ resign() {
 # An IPA for SideStore, AltStore, Sideloadly and the like, which re-sign it with
 # the installing user's certificate. It is ad-hoc signed with the app's
 # entitlements so that they travel with it, and built in its own directory so
-# the development-signed app in build/xc-out stays as it is. IOSWINE_VERSION
+# the development-signed app in build/xc-out stays as it is. KITSUNE_VERSION
 # sets CFBundleShortVersionString.
 ipa() {
-  local dest="${1:-build/ioswine.ipa}" OUT=build/xc-ipa APP=build/xc-ipa/ioswine.app stage
+  local dest="${1:-build/kitsune.ipa}" OUT=build/xc-ipa APP=build/xc-ipa/Kitsune.app stage
   test -f out/wine-core/TREE_VERSION || { echo "no out/wine-core: run scripts/setup.sh" >&2; exit 1; }
   rm -rf "$APP"
   # Its own build database too: Xcode deletes another build directory's app as
   # a stale output when two builds of the target share one.
   xcbuild 0 CODE_SIGNING_ALLOWED=NO SYMROOT="$PWD/build/xc-ipa-work" OBJROOT="$PWD/build/xc-ipa-work" \
     || { echo "xcodebuild failed" >&2; exit 1; }
-  test -x "$APP/ioswine"
-  if [ -n "${IOSWINE_VERSION:-}" ]; then
-    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $IOSWINE_VERSION" "$APP/Info.plist"
+  test -x "$APP/Kitsune"
+  if [ -n "${KITSUNE_VERSION:-}" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $KITSUNE_VERSION" "$APP/Info.plist"
   fi
   find "$APP" \( -name '*.so' -o -name '*.dylib' \) -exec codesign --force --sign - --timestamp=none {} \;
-  codesign --force --sign - --timestamp=none --entitlements src/ios/ioswine.entitlements \
+  codesign --force --sign - --timestamp=none --entitlements src/ios/kitsune.entitlements \
     --generate-entitlement-der "$APP"
   codesign --verify --deep --strict "$APP"
   mkdir -p "$(dirname "$dest")"

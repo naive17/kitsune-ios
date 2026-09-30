@@ -8,8 +8,8 @@
  * thermal state, which otherwise ends with iOS backgrounding and killing the
  * app.
  */
-#ifndef IOSWINE_POWER_H
-#define IOSWINE_POWER_H
+#ifndef KITSUNE_POWER_H
+#define KITSUNE_POWER_H
 
 #import <Foundation/Foundation.h>
 

@@ -1,7 +1,7 @@
 /* The Steam install sheet: what it installs, from where and how big, with the
  * packages one tap away, then the install's progress. */
-#ifndef IOSWINE_STEAM_INSTALL_VC_H
-#define IOSWINE_STEAM_INSTALL_VC_H
+#ifndef KITSUNE_STEAM_INSTALL_VC_H
+#define KITSUNE_STEAM_INSTALL_VC_H
 
 #import <UIKit/UIKit.h>
 

@@ -156,8 +156,8 @@ cp -R "$PROCESS_TESTS/lean" "$DEST/tests/"
 # Recreating DEST removes the prefix, and without the CPU-feature keys wineboot
 # writes, x86-64 dies in FEX with EXCEPTION_ILLEGAL_INSTRUCTION.
 log "initialising prefix (writes the CPU-feature keys FEX needs)"
-IOSWINE_UNIX="$DEST/bundle" IOSWINE_TREE="$DEST/tree" \
-  "$ROOT/build/ioswine-host" \
+KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
+  "$ROOT/build/kitsune-host" \
   "$DEST/tree/lib/wine/aarch64-windows/wineboot.exe" --init \
   </dev/null >"$DEST/wineboot.log" 2>&1 \
   || { tail -15 "$DEST/wineboot.log"; die "wineboot --init failed"; }

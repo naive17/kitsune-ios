@@ -11,7 +11,7 @@ index a39c9a1..f3e5291 100644
 -
 -  Thread->CurrentFrame->Pointers.L2Pointer = Thread->LookupCache->GetPagePointer();
 +#ifdef ARCHITECTURE_arm64ec
-+  // ios-wine: do NOT take the LookupCache's reservation here (about 24 MB per
++  // Kitsune: do NOT take the LookupCache's reservation here (about 24 MB per
 +  // thread with this port's sizes, 272 MB upstream).
 +  //
 +  // ThreadInit() in Source/Windows/ARM64EC/Module.cpp runs for EVERY Windows
@@ -42,7 +42,7 @@ index a39c9a1..f3e5291 100644
    FEXCORE_PROFILE_SCOPED("CompileBlock");
    FEXCORE_PROFILE_ACCUMULATION(Thread, AccumulatedJITTime);
  
-+  // ios-wine: first x86 code on this thread -- take the lookup cache backing
++  // Kitsune: first x86 code on this thread -- take the lookup cache backing
 +  // now and publish L1Pointer/L1Mask/L2Pointer before anything can be executed.
 +  Thread->LookupCache->EnsureAllocated(Thread);
 +
@@ -53,7 +53,7 @@ index a39c9a1..f3e5291 100644
    FEXCORE_PROFILE_SCOPED("CompileSingleStep");
    auto Thread = Frame->Thread;
  
-+  // ios-wine: as CompileBlock. This path does not go through FindBlock, so it
++  // Kitsune: as CompileBlock. This path does not go through FindBlock, so it
 +  // needs its own EnsureAllocated.
 +  Thread->LookupCache->EnsureAllocated(Thread);
 +
@@ -69,7 +69,7 @@ index 53ea97f..c18d2c4 100644
    ARMEmitter::ForwardLabel NoBlock;
  
 +#ifdef ARCHITECTURE_arm64ec
-+  // ios-wine: the per-thread LookupCache is allocated on first use, so
++  // Kitsune: the per-thread LookupCache is allocated on first use, so
 +  // State.L1Pointer / Pointers.L2Pointer are zero until this thread has run x86
 +  // code. Two instructions here keep the L2 load below from dereferencing null;
 +  // the compile path allocates the cache and republishes both before returning.
@@ -99,7 +99,7 @@ index 0b23030..271aca3 100644
 +    L1PointerMask = MAX_L1_ENTRIES - 1;
 +  }
 +
-+  // ios-wine: the reservation below is NOT taken here.
++  // Kitsune: the reservation below is NOT taken here.
 +  //
 +  // Every Windows thread runs FEX's ThreadInit, which unconditionally builds a
 +  // full emulator thread, one LookupCache each. A native ARM64EC process never
@@ -120,7 +120,7 @@ index 0b23030..271aca3 100644
    // We need one pointer per page of virtual memory
    // At 64GB of virtual memory this will allocate 128MB of virtual memory space
 -  PagePointer = reinterpret_cast<uintptr_t>(FEXCore::Allocator::VirtualAlloc(TotalCacheSize, false, false));
-+  // ios-wine: COMMIT up front (third arg), instead of relying on overcommit.
++  // Kitsune: COMMIT up front (third arg), instead of relying on overcommit.
 +  //
 +  // Upstream reserves this region and lets it fault in: MarkOvercommitRange()
 +  // registers it, and FEX's own ARM64EC exception handler
@@ -193,7 +193,7 @@ index 0b23030..271aca3 100644
 +
    // Clear out the page memory
    // PagePointer and PageMemory are sequential with each other. Clear both at once.
-+  // ios-wine: Recommit=true. VirtualDontNeed's two implementations do NOT
++  // Kitsune: Recommit=true. VirtualDontNeed's two implementations do NOT
 +  // agree. On Linux it is madvise(MADV_DONTNEED), which keeps the mapping and
 +  // zero-fills on next touch, so the flag is ignored and `false` costs
 +  // nothing. On Windows it is VirtualFree(MEM_DECOMMIT), which really does
@@ -211,7 +211,7 @@ index 0b23030..271aca3 100644
    // Clear L1 and L2 by clearing the full cache.
 -  FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
 +  if (PagePointer) {
-+    // ios-wine: Recommit=true -- see ClearL2Cache above. This one covers the
++    // Kitsune: Recommit=true -- see ClearL2Cache above. This one covers the
 +    // whole reservation INCLUDING the L1 table, so leaving it decommitted is
 +    // what the device fault at L1+0x3b08 on a PROT_NONE page actually was.
 +    FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, true);
@@ -227,7 +227,7 @@ index bf958d8..c513ffb 100644
    LookupCache(FEXCore::Context::ContextImpl* CTX);
    ~LookupCache();
  
-+  // ios-wine: the backing reservation (about 24 MB per thread with this port's
++  // Kitsune: the backing reservation (about 24 MB per thread with this port's
 +  // sizes) is taken on first use rather than at thread creation.
 +  // Everything that can touch L1/L2 must go through here first. Generated code
 +  // does not, so the dispatcher branches to the compile path whenever
@@ -256,7 +256,7 @@ index bf958d8..c513ffb 100644
            LookupCacheEntry* FirstZeroL1Entry = &reinterpret_cast<LookupCacheEntry*>(L1Pointer)[CurrentL1Entries];
            size_t ZeroMemorySize = (MAX_L1_ENTRIES - CurrentL1Entries) * sizeof(LookupCacheEntry);
 -          FEXCore::Allocator::VirtualDontNeed(FirstZeroL1Entry, ZeroMemorySize, false);
-+          // ios-wine: Keep dropped L1 pages mapped and zero-filled. Generated
++          // Kitsune: Keep dropped L1 pages mapped and zero-filled. Generated
 +          // lookup blocks can briefly retain the preceding mask; decommitting
 +          // here turns that harmless stale lookup into a protection fault.
 +          FEXCore::Allocator::VirtualDontNeed(FirstZeroL1Entry, ZeroMemorySize, true);

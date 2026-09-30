@@ -13,8 +13,8 @@
  * crypto providers, which wine.inf would register through child processes
  * this port does not run; they are written directly.
  */
-#ifndef IOSWINE_STEAM_INSTALL_H
-#define IOSWINE_STEAM_INSTALL_H
+#ifndef KITSUNE_STEAM_INSTALL_H
+#define KITSUNE_STEAM_INSTALL_H
 
 #import <Foundation/Foundation.h>
 #import <CommonCrypto/CommonDigest.h>
@@ -22,11 +22,11 @@
 #include "bottles.h"
 #include "steam_library.h"
 
-#define IOSWINE_STEAM_CLIENT_BASE @"https://client-update.akamai.steamstatic.com/"
-#define IOSWINE_STEAM_MANIFEST @"steam_client_win64"
+#define KITSUNE_STEAM_CLIENT_BASE @"https://client-update.akamai.steamstatic.com/"
+#define KITSUNE_STEAM_MANIFEST @"steam_client_win64"
 
 /* What a package of the client holds, in a few words. */
-static inline NSString *IOSWineSteamPackageTitle(NSString *name) {
+static inline NSString *KitsuneSteamPackageTitle(NSString *name) {
   NSDictionary<NSString *, NSString *> *titles = @{
     @"steam_win64": NSLocalizedString(@"Steam launcher", nil),
     @"bins_win64": NSLocalizedString(@"Steam client", nil),
@@ -58,8 +58,8 @@ static inline NSString *IOSWineSteamPackageTitle(NSString *name) {
  * order is the package's place in the manifest, which decides between two
  * packages holding the same path. nil when the manifest is not what the
  * bootstrapper ships. */
-static inline NSArray<NSDictionary *> *IOSWineSteamPackages(NSString *manifestText, NSString **version) {
-  NSDictionary *root = IOSWineParseKeyValues(manifestText);
+static inline NSArray<NSDictionary *> *KitsuneSteamPackages(NSString *manifestText, NSString **version) {
+  NSDictionary *root = KitsuneParseKeyValues(manifestText);
   NSDictionary *win64 = [root[@"win64"] isKindOfClass:NSDictionary.class] ? root[@"win64"] : nil;
   if (!win64 && [root[@"version"] isKindOfClass:NSString.class]) win64 = root;   /* already unwrapped */
   NSString *ver = win64[@"version"];
@@ -86,7 +86,7 @@ static inline NSArray<NSDictionary *> *IOSWineSteamPackages(NSString *manifestTe
         [size rangeOfCharacterFromSet:nonDigits].location != NSNotFound)
       return nil;
     NSUInteger order = [manifestText rangeOfString:[NSString stringWithFormat:@"\"%@\"", name]].location;
-    NSMutableDictionary *entry = [@{ @"name": name, @"title": IOSWineSteamPackageTitle(name), @"order": @(order),
+    NSMutableDictionary *entry = [@{ @"name": name, @"title": KitsuneSteamPackageTitle(name), @"order": @(order),
                                      @"file": file, @"sha2": sha,
                                      @"size": @(strtoull(size.UTF8String, NULL, 10)),
                                      @"download": file, @"downloadSha2": sha,
@@ -116,7 +116,7 @@ static inline NSArray<NSDictionary *> *IOSWineSteamPackages(NSString *manifestTe
 
 /* The manifest as Steam's updater saves it, package/steam_client_win64.manifest:
  * the file Valve's servers send, with Windows line endings. */
-static inline NSData *IOSWineSteamSavedManifest(NSData *manifest) {
+static inline NSData *KitsuneSteamSavedManifest(NSData *manifest) {
   NSMutableData *out = [NSMutableData dataWithCapacity:manifest.length + manifest.length / 16];
   const uint8_t *bytes = manifest.bytes;
   for (NSUInteger i = 0; i < manifest.length; i++) {
@@ -128,7 +128,7 @@ static inline NSData *IOSWineSteamSavedManifest(NSData *manifest) {
 
 /* The modification time Steam's extractor gives a file: the zip entry's
  * MS-DOS date and time read as UTC, plus eight hours. */
-static inline int64_t IOSWineSteamFileTime(uint16_t dosDate, uint16_t dosTime) {
+static inline int64_t KitsuneSteamFileTime(uint16_t dosDate, uint16_t dosTime) {
   struct tm t = {0};
   t.tm_year = 80 + (dosDate >> 9);
   t.tm_mon = ((dosDate >> 5) & 0xf) - 1;
@@ -141,7 +141,7 @@ static inline int64_t IOSWineSteamFileTime(uint16_t dosDate, uint16_t dosTime) {
 
 /* One line of Steam's install index: "path,size;mtime;crc32" with Windows
  * separators, and "folder\,-1;mtime;0" for a folder entry of a package. */
-static inline NSString *IOSWineSteamIndexLine(NSString *name, BOOL isDir, uint64_t size, int64_t mtime, uint32_t crc) {
+static inline NSString *KitsuneSteamIndexLine(NSString *name, BOOL isDir, uint64_t size, int64_t mtime, uint32_t crc) {
   NSString *path = [name stringByReplacingOccurrencesOfString:@"/" withString:@"\\"];
   if (isDir) return [NSString stringWithFormat:@"%@%@,-1;%lld;0", path, [path hasSuffix:@"\\"] ? @"" : @"\\", mtime];
   return [NSString stringWithFormat:@"%@,%llu;%lld;%u", path, size, mtime, crc];
@@ -151,7 +151,7 @@ static inline NSString *IOSWineSteamIndexLine(NSString *name, BOOL isDir, uint64
  * updater verifies the install against: one line per package entry, then
  * OSVER, VERSION, and the upper-case SHA-1 of everything above that line
  * taken with \n line ends. The file has Windows line ends. */
-static inline NSData *IOSWineSteamInstalledIndex(NSArray<NSString *> *lines) {
+static inline NSData *KitsuneSteamInstalledIndex(NSArray<NSString *> *lines) {
   NSMutableString *text = [NSMutableString string];
   for (NSString *line in lines) [text appendFormat:@"%@\n", line];
   [text appendString:@"OSVER=16\nVERSION=3\n"];
@@ -165,10 +165,10 @@ static inline NSData *IOSWineSteamInstalledIndex(NSArray<NSString *> *lines) {
   [text appendString:@"SHA1="];
   for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) [text appendFormat:@"%02X", digest[i]];
   [text appendString:@"\n"];
-  return IOSWineSteamSavedManifest([text dataUsingEncoding:NSUTF8StringEncoding]);
+  return KitsuneSteamSavedManifest([text dataUsingEncoding:NSUTF8StringEncoding]);
 }
 
-static NSString *const IOSWineRsaenhProviders =
+static NSString *const KitsuneRsaenhProviders =
   @"[Software\\\\Microsoft\\\\Cryptography\\\\Defaults\\\\Provider\\\\Microsoft Base Cryptographic Provider v1.0] 1790008685\n"
    "\"Image Path\"=\"C:\\\\windows\\\\system32\\\\rsaenh.dll\"\n\"Type\"=dword:00000001\n\n"
    "[Software\\\\Microsoft\\\\Cryptography\\\\Defaults\\\\Provider\\\\Microsoft Enhanced Cryptographic Provider v1.0] 1790008685\n"
@@ -188,9 +188,9 @@ static NSString *const IOSWineRsaenhProviders =
    "[Software\\\\Microsoft\\\\Cryptography\\\\Defaults\\\\Provider Types\\\\Type 024] 1790008685\n"
    "\"Name\"=\"Microsoft Enhanced RSA and AES Cryptographic Provider\"\n\"TypeName\"=\"RSA Full and AES\"\n";
 
-#define IOSWINE_COMCTL_ASSEMBLY @"arm64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef"
+#define KITSUNE_COMCTL_ASSEMBLY @"arm64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.2600.2982_none_deadbeef"
 
-static NSString *const IOSWineComctl32Manifest =
+static NSString *const KitsuneComctl32Manifest =
   @"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
    "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n"
    "  <assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" version=\"6.0.2600.2982\" processorArchitecture=\"arm64\" publicKeyToken=\"6595b64144ccf1df\"/>\n"
@@ -206,7 +206,7 @@ static NSString *const IOSWineComctl32Manifest =
    "    <windowClass>msctls_statusbar32</windowClass>\n    <windowClass>msctls_trackbar32</windowClass>\n    <windowClass>msctls_updown32</windowClass>\n"
    "    <windowClass>tooltips_class32</windowClass>\n  </file>\n</assembly>\n";
 
-static inline BOOL IOSWineAppendRegistry(NSString *file, NSString *marker, NSString *fragment, NSString **error) {
+static inline BOOL KitsuneAppendRegistry(NSString *file, NSString *marker, NSString *fragment, NSString **error) {
   NSString *current = [NSString stringWithContentsOfFile:file encoding:NSUTF8StringEncoding error:nil];
   if (!current) {
     if (error) *error = [NSString stringWithFormat:NSLocalizedString(@"%@ is missing", nil), file.lastPathComponent];
@@ -225,7 +225,7 @@ static inline BOOL IOSWineAppendRegistry(NSString *file, NSString *marker, NSStr
 
 /* Make a bottle able to run Steam. Idempotent. `treeRoot` supplies
  * comctl32_v6.dll and rsaenh.dll. */
-static inline BOOL IOSWinePrepareSteamBottle(NSString *bottle, NSString *treeRoot, NSString **error) {
+static inline BOOL KitsunePrepareSteamBottle(NSString *bottle, NSString *treeRoot, NSString **error) {
   NSFileManager *fm = NSFileManager.defaultManager;
   NSString *pe = [treeRoot stringByAppendingPathComponent:@"lib/wine/aarch64-windows"];
   NSString *windows = [bottle stringByAppendingPathComponent:@"drive_c/windows"];
@@ -238,13 +238,13 @@ static inline BOOL IOSWinePrepareSteamBottle(NSString *bottle, NSString *treeRoo
       if (error) *error = [NSString stringWithFormat:NSLocalizedString(@"The runtime tree has no %@.", nil), dll];
       return NO;
     }
-  if (!IOSWineAppendRegistry([bottle stringByAppendingPathComponent:@"system.reg"],
-                             @"Microsoft Enhanced RSA and AES Cryptographic Provider]", IOSWineRsaenhProviders, error))
+  if (!KitsuneAppendRegistry([bottle stringByAppendingPathComponent:@"system.reg"],
+                             @"Microsoft Enhanced RSA and AES Cryptographic Provider]", KitsuneRsaenhProviders, error))
     return NO;
-  if (!IOSWineAppendRegistry([bottle stringByAppendingPathComponent:@"user.reg"],
+  if (!KitsuneAppendRegistry([bottle stringByAppendingPathComponent:@"user.reg"],
                              @"\"Version\"=\"win10\"", @"[Software\\\\Wine] 1790008685\n\"Version\"=\"win10\"\n", error))
     return NO;
-  NSString *assembly = [[windows stringByAppendingPathComponent:@"winsxs"] stringByAppendingPathComponent:IOSWINE_COMCTL_ASSEMBLY];
+  NSString *assembly = [[windows stringByAppendingPathComponent:@"winsxs"] stringByAppendingPathComponent:KITSUNE_COMCTL_ASSEMBLY];
   NSString *manifests = [windows stringByAppendingPathComponent:@"winsxs/manifests"];
   NSString *system32 = [windows stringByAppendingPathComponent:@"system32"];
   NSError *err = nil;
@@ -253,9 +253,9 @@ static inline BOOL IOSWinePrepareSteamBottle(NSString *bottle, NSString *treeRoo
       if (error) *error = err.localizedDescription;
       return NO;
     }
-  NSString *manifest = [manifests stringByAppendingPathComponent:[IOSWINE_COMCTL_ASSEMBLY stringByAppendingString:@".manifest"]];
+  NSString *manifest = [manifests stringByAppendingPathComponent:[KITSUNE_COMCTL_ASSEMBLY stringByAppendingString:@".manifest"]];
   if (![fm fileExistsAtPath:manifest] &&
-      ![IOSWineComctl32Manifest writeToFile:manifest atomically:YES encoding:NSUTF8StringEncoding error:&err]) {
+      ![KitsuneComctl32Manifest writeToFile:manifest atomically:YES encoding:NSUTF8StringEncoding error:&err]) {
     if (error) *error = err.localizedDescription;
     return NO;
   }
@@ -288,7 +288,7 @@ typedef NS_ENUM(NSInteger, WineSteamStep) {
 @interface WineSteamInstaller : NSObject
 + (BOOL)isRunning;
 + (void)cancel;
-/* Valve's current client: its version and packages (see IOSWineSteamPackages). */
+/* Valve's current client: its version and packages (see KitsuneSteamPackages). */
 + (void)fetchClientInto:(NSString *)docs
              completion:(void (^)(NSString *version, NSArray<NSDictionary *> *packages, NSString *error))completion;
 /* Installs the client fetchClientInto: returned. package is the index of the
