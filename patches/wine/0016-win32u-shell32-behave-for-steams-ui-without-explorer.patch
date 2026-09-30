@@ -1,0 +1,45 @@
+win32u, shell32: Behave for Steam's UI without explorer.
+
+get_mouse_window hit-tests from the desktop, so Steam's hover menus
+close, and Shell_NotifyIconW succeeds without a tray (Steam -silent).
+---
+diff --git a/dlls/shell32/systray.c b/dlls/shell32/systray.c
+index c74d0178b10caabd045117722d774924cb5f2791..7b47c99813264cfb781eed6318ca702d66ca0932 100644
+--- a/dlls/shell32/systray.c
++++ b/dlls/shell32/systray.c
+@@ -207,8 +207,15 @@ BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW nid)
+     tray = FindWindowExW(0, NULL, L"Shell_TrayWnd", NULL);
+     if (!tray)
+     {
++#ifdef WINE_IOS_JIT_ARENA
++        /* There is no taskbar to show the icon in, but a program that cannot
++         * put its icon in the tray shows its window instead: Steam started
++         * with -silent for a game comes up in full over it. */
++        return TRUE;
++#else
+         SetLastError(E_FAIL);
+         return FALSE;
++#endif
+     }
+ 
+     cds.dwData = dwMessage;
+diff --git a/dlls/win32u/input.c b/dlls/win32u/input.c
+index 20a10178b23214ab67f4556493d373c4783f19ab..e72001c58b31973a7ca824776fdcd05a25bdac98 100644
+--- a/dlls/win32u/input.c
++++ b/dlls/win32u/input.c
+@@ -1797,7 +1797,15 @@ static HWND get_mouse_window( HWND hwnd, INT *hittest, POINT *ret_pos, struct mo
+     HWND ret;
+ 
+     NtUserGetCursorPos( &pos );
++#ifdef WINE_IOS_JIT_ARENA
++    /* From the desktop, as Windows does: a window on top of the tracked one,
++     * such as a popup menu, takes the cursor away from it. Searching only
++     * inside the tracked window finds it still there, and a page in it never
++     * sees the mouse leave (Steam's hover menus stay open). */
++    ret = window_from_point( 0, pos, hittest, FALSE );
++#else
+     ret = window_from_point( hwnd, pos, hittest, FALSE );
++#endif
+     if (ret && ret == tracking->last_mouse_message_hwnd)
+     {
+         *hittest = tracking->last_mouse_message_hittest;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shallow-clone the pinned upstreams at their exact SHAs and apply the Wine and
-# DXMT ports.
+# DXMT ports. The Wine port is the patch series in patches/wine (README there).
 source "$(dirname "$0")/common.sh"
 
 require_disk_gb 8
@@ -20,7 +20,7 @@ else
 fi
 pin_clone "$VKD3D_URL"     "$VKD3D_SHA"     "$THIRD_PARTY/vkd3d-proton"
 
-apply_patch "$THIRD_PARTY/wine" "$ROOT/patches/wine/kitsune-working.patch"
+apply_series "$THIRD_PARTY/wine" "$ROOT/patches/wine"
 bash "$ROOT/scripts/apply-dxmt-port.sh"
 
 log "fetched. disk free: $(df -g "$ROOT" | tail -1 | awk '{print $4}')GB"

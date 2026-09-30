@@ -51,8 +51,10 @@ scripts/04-freetype.sh           # FreeType for macOS and iOS
 scripts/05-gnutls-ios.sh         # GnuTLS for iOS (schannel TLS, crypt32 PFX)
 ```
 
-`02-fetch.sh` runs `scripts/apply-dxmt-port.sh`. That script creates the DXMT
-base commit (v0.80 plus patches 0001 and 0002) and applies the full patch; see
+`02-fetch.sh` applies the Wine port, the numbered series in `patches/wine`, as
+one commit per patch on the pin (`patches/wine/README`). It runs
+`scripts/apply-dxmt-port.sh`, which creates the DXMT base commit (v0.80 plus
+patches 0001 and 0002) and applies the full patch; see
 `patches/dxmt/ios-dxmt-full-vs-upstream.README`. The FEX patch stack in
 `patches/fex` is applied by FEX's build script.
 
@@ -133,8 +135,10 @@ edits to `build/source-backups/`. `--discard` resets that checkout too, and
 `git -C <checkout> apply -3 <saved patch>` then carries the edits onto the
 new patches. Record them with `save-patches.sh` only after that, because
 running it before the sync overwrites the pulled patch with your old one.
-`--check` only reports, and naming checkouts (`wine`, `fex`) limits it to
-them.
+A Wine checkout whose files already are the series, as one set up before the
+port was split into it, only gets the series' commits; no file is written, so
+nothing rebuilds. `--check` only reports, and naming checkouts (`wine`,
+`fex`) limits it to them.
 
 ## After you edit a component
 

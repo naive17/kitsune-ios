@@ -46,11 +46,13 @@ log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[fail]\033[0m %s\n' "$*" >&2; exit 1; }
 
-# Clone at an exact SHA without fetching full history.
+# Clone at an exact SHA without fetching full history. A checkout with a patch
+# series (apply_series) is at its pin when the series sits on it.
 pin_clone() {
   local url="$1" sha="$2" dir="$3"
   if [ -d "$dir/.git" ]; then
-    if [ "$(git -C "$dir" rev-parse HEAD)" = "$sha" ]; then
+    if [ "$(git -C "$dir" rev-parse HEAD)" = "$sha" ] ||
+       [ "$(git -C "$dir" rev-parse -q --verify refs/kitsune/base)" = "$sha" ]; then
       log "$(basename "$dir") already at $sha"; return 0
     fi
   else
@@ -60,6 +62,7 @@ pin_clone() {
   log "fetching $(basename "$dir") @ $sha"
   git -C "$dir" fetch -q --depth 1 origin "$sha"
   git -C "$dir" checkout -q --detach FETCH_HEAD
+  git -C "$dir" update-ref -d refs/kitsune/base 2>/dev/null || true
   git -C "$dir" submodule update -q --init --recursive --depth 1 2>/dev/null || true
   [ "$(git -C "$dir" rev-parse HEAD)" = "$sha" ] || die "$dir: SHA mismatch"
 }
@@ -76,6 +79,96 @@ apply_patch() {
     git -C "$repo" apply "$p"
   else
     die "patch does not apply to $repo: $p. After a pull that changed it, scripts/sync-sources.sh moves the checkout to the current patches"
+  fi
+}
+
+# A patch series is a directory of numbered patches (NNNN-name.patch), each
+# its description, a line "---", and the diff; git apply skips the
+# description. apply_series commits them in order on top of the checkout's
+# pin, so the checkout's history shows the port and git diff there shows only
+# unsaved edits. refs/kitsune/base marks the pin. The commits have a fixed
+# author and date, so the same series on the same pin gives the same commits.
+
+# series_patches <dir>: the series in order.
+series_patches() {
+  find "$1" -maxdepth 1 -name '[0-9][0-9][0-9][0-9]-*.patch' | sort
+}
+
+# series_base <checkout>: the commit its series sits on.
+series_base() {
+  git -C "$1" rev-parse -q --verify refs/kitsune/base || git -C "$1" rev-parse HEAD
+}
+
+# series_tree <checkout> <base> <dir>: the tree id of <base> with the series
+# applied, or nothing when a patch does not apply. Uses a scratch index.
+series_tree() {
+  local repo="$1" base="$2" dir="$3" idx p
+  idx="$(mktemp)"; rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$repo" read-tree "$base"
+  for p in $(series_patches "$dir"); do
+    GIT_INDEX_FILE="$idx" git -C "$repo" apply --cached --whitespace=nowarn "$p" 2>/dev/null \
+      || { rm -f "$idx"; return 0; }
+  done
+  GIT_INDEX_FILE="$idx" git -C "$repo" write-tree
+  rm -f "$idx"
+}
+
+# worktree_tree <checkout>: the tree id of its files as they are on disk,
+# tracked and untracked, not ignored. A scratch index started from a copy of
+# the checkout's own keeps its stat cache, so only changed files are hashed.
+# Meson leaves subprojects/.wraplock in DXVK's source tree while it builds.
+worktree_tree() {
+  local idx
+  idx="$(mktemp)"
+  cp "$(git -C "$1" rev-parse --absolute-git-dir)/index" "$idx" 2>/dev/null || rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$1" add -A -- . ':(exclude,glob)**/.wraplock' >/dev/null 2>&1 \
+    || { rm -f "$idx"; die "$1: git add failed"; }
+  GIT_INDEX_FILE="$idx" git -C "$1" write-tree
+  rm -f "$idx"
+}
+
+# apply_series <checkout> <dir>: idempotent. A checkout that already holds the
+# series is left as it is, unsaved edits included. One whose files are the
+# series without its commits (set up before the port was a series) gets the
+# commits and keeps its files, so nothing rebuilds.
+apply_series() {
+  local repo="$1" dir="$2" base want parent p msg idx adopt=0 n=0
+  [ -d "$dir" ] || die "missing patch series $dir"
+  base="$(series_base "$repo")"
+  want="$(series_tree "$repo" "$base" "$dir")"
+  [ -n "$want" ] || die "the patches in ${dir#"$ROOT"/} do not apply to $(basename "$repo")'s pin"
+  if [ "$(git -C "$repo" rev-parse 'HEAD^{tree}')" = "$want" ]; then
+    log "$(basename "$repo") already has the series in ${dir#"$ROOT"/}"; return 0
+  fi
+  [ "$(git -C "$repo" rev-parse HEAD)" = "$base" ] \
+    || die "$repo is neither its pin nor its pin plus ${dir#"$ROOT"/}; scripts/sync-sources.sh moves it to the current patches"
+  if [ "$(worktree_tree "$repo")" = "$want" ]; then
+    adopt=1
+  elif [ -n "$(git -C "$repo" status --porcelain)" ]; then
+    die "$repo has changes on its pin that are not ${dir#"$ROOT"/}; scripts/sync-sources.sh moves it to the current patches"
+  fi
+  git -C "$repo" update-ref refs/kitsune/base "$base"
+  msg="$(mktemp)" idx="$(mktemp)"
+  rm -f "$idx"
+  GIT_INDEX_FILE="$idx" git -C "$repo" read-tree "$base"
+  parent="$base"
+  for p in $(series_patches "$dir"); do
+    GIT_INDEX_FILE="$idx" git -C "$repo" apply --cached --whitespace=nowarn "$p" \
+      || die "$(basename "$p") does not apply to $repo"
+    awk '/^---$/ || /^diff --git / { exit } { print }' "$p" | git stripspace > "$msg"
+    [ -s "$msg" ] || basename "$p" .patch > "$msg"
+    parent="$(GIT_AUTHOR_NAME=Kitsune GIT_AUTHOR_EMAIL=kitsune@localhost GIT_AUTHOR_DATE='@0 +0000' \
+      GIT_COMMITTER_NAME=Kitsune GIT_COMMITTER_EMAIL=kitsune@localhost GIT_COMMITTER_DATE='@0 +0000' \
+      git -C "$repo" commit-tree "$(GIT_INDEX_FILE="$idx" git -C "$repo" write-tree)" -p "$parent" -F "$msg")"
+    n=$((n + 1))
+  done
+  rm -f "$msg" "$idx"
+  if [ "$adopt" = 1 ]; then
+    git -C "$repo" reset -q "$parent"
+    log "recorded the $n patches in ${dir#"$ROOT"/} as commits in $(basename "$repo"); its files are unchanged"
+  else
+    git -C "$repo" reset -q --hard "$parent"
+    log "applied $n patches from ${dir#"$ROOT"/} to $(basename "$repo")"
   fi
 }
 

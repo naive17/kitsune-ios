@@ -1,0 +1,493 @@
+ntdll: Take CPU features, gamepads and thread QoS from the host.
+
+system.c reads the arm64 ID registers through sysctl, answers the
+gamepad information class from the app's snapshot
+(kitsune_gamepad_snapshot_v1) and stubs the battery. sync.c sets guest
+threads' QoS class from the app's power mode with a yield backoff
+(ios_qos_poll), and NtCreateEvent retries when it gets a -1 or 0
+handle.
+---
+diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
+index fbf054e9d93b8267adf14b7e2f68f0150b135223..4f79e23a90114f943f6c7b4c86dba627dda3a726 100644
+--- a/dlls/ntdll/unix/sync.c
++++ b/dlls/ntdll/unix/sync.c
+@@ -74,7 +74,9 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(sync);
+ 
++#ifndef WINE_IOS_JIT_ARENA
+ HANDLE keyed_event = 0;
++#endif
+ int inproc_device_fd = -1;
+ 
+ static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
+@@ -1110,9 +1112,45 @@ NTSTATUS WINAPI NtCreateEvent( HANDLE *handle, ACCESS_MASK access, const OBJECT_
+         wine_server_add_data( req, objattr, len );
+         ret = wine_server_call( req );
+         *handle = wine_server_ptr_handle( reply->handle );
++#ifdef WINE_IOS_JIT_ARENA
++        if (!ret && (reply->handle == ~0u || !reply->handle))
++        {
++            ERR( "ios: create_event reply DEGENERATE handle %08x (status 0)\n", reply->handle );
++            ret = STATUS_KERNEL_APC;   /* sentinel: retry below, never returned */
++        }
++#endif
+     }
+     SERVER_END_REQ;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++    if (ret == STATUS_KERNEL_APC)
++    {
++        unsigned int tries;
++        for (tries = 0; tries < 3; tries++)
++        {
++            SERVER_START_REQ( create_event )
++            {
++                req->access = access;
++                req->manual_reset = (type == NotificationEvent);
++                req->initial_state = state;
++                wine_server_add_data( req, objattr, len );
++                ret = wine_server_call( req );
++                *handle = wine_server_ptr_handle( reply->handle );
++                if (!ret && (reply->handle == ~0u || !reply->handle)) ret = STATUS_KERNEL_APC;
++            }
++            SERVER_END_REQ;
++            if (ret != STATUS_KERNEL_APC) break;
++        }
++        if (ret == STATUS_KERNEL_APC)
++        {
++            ERR( "ios: create_event STILL degenerate after retries -- failing honestly\n" );
++            ret = STATUS_INSUFFICIENT_RESOURCES;
++            *handle = 0;
++        }
++        else ERR( "ios: create_event retry recovered (handle %p)\n", *handle );
++    }
++#endif
++
+     free( objattr );
+     return ret;
+ }
+@@ -2300,6 +2338,70 @@ NTSTATUS WINAPI NtQueryTimer( HANDLE handle, TIMER_INFORMATION_CLASS class,
+ /******************************************************************
+  *		NtWaitForMultipleObjects (NTDLL.@)
+  */
++
++#ifdef WINE_IOS_JIT_ARENA
++#include <dlfcn.h>
++#include <pthread.h>
++#include <pthread/qos.h>
++
++/* Guest thread QoS chosen by the host app's power mode. iOS lets a thread
++ * change only its own QoS, so each thread adopts a change at its next wait.
++ * The host publishes (generation << 8) | class; zero means never set. */
++static const volatile unsigned *ios_qos_state;
++static pthread_key_t ios_qos_key, ios_yield_key;
++static pthread_once_t ios_sync_once = PTHREAD_ONCE_INIT;
++
++static void ios_sync_init(void)
++{
++    ios_qos_state = dlsym( RTLD_DEFAULT, "kitsune_guest_qos_state" );
++    pthread_key_create( &ios_qos_key, NULL );
++    pthread_key_create( &ios_yield_key, NULL );
++}
++
++static void ios_qos_poll(void)
++{
++    unsigned state;
++
++    pthread_once( &ios_sync_once, ios_sync_init );
++    if (!ios_qos_state) return;
++    state = __atomic_load_n( ios_qos_state, __ATOMIC_ACQUIRE );
++    if (!state || state == (unsigned)(uintptr_t)pthread_getspecific( ios_qos_key )) return;
++    pthread_setspecific( ios_qos_key, (void *)(uintptr_t)state );
++    switch (state & 0xff)
++    {
++    case 1: pthread_set_qos_class_self_np( QOS_CLASS_USER_INTERACTIVE, 0 ); break;
++    case 2: pthread_set_qos_class_self_np( QOS_CLASS_USER_INITIATED, 0 ); break;
++    case 3: pthread_set_qos_class_self_np( QOS_CLASS_UTILITY, 0 ); break;
++    default: pthread_set_qos_class_self_np( QOS_CLASS_DEFAULT, 0 ); break;
++    }
++}
++
++/* A thread that yields back to back is spinning on another thread; after a
++ * long streak it sleeps briefly so the core can idle. A 2 ms gap between
++ * yields ends the streak. The key holds (time in 1.024 us units << 16) | count. */
++static void ios_yield_backoff(void)
++{
++    uint64_t now, v, last, count;
++
++    pthread_once( &ios_sync_once, ios_sync_init );
++    now = clock_gettime_nsec_np( CLOCK_UPTIME_RAW ) >> 10;
++    v = (uintptr_t)pthread_getspecific( ios_yield_key );
++    last = v >> 16;
++    count = v & 0xffff;
++    if (now - last > 2000) count = 0;
++    if (++count > 256)
++    {
++        usleep( 100 );
++        count = 0;
++        now = clock_gettime_nsec_np( CLOCK_UPTIME_RAW ) >> 10;
++    }
++    pthread_setspecific( ios_yield_key, (void *)(uintptr_t)((now << 16) | count) );
++}
++#else
++static inline void ios_qos_poll(void) {}
++static inline void ios_yield_backoff(void) {}
++#endif
++
+ NTSTATUS WINAPI NtWaitForMultipleObjects( DWORD count, const HANDLE *handles, WAIT_TYPE type,
+                                           BOOLEAN alertable, const LARGE_INTEGER *timeout )
+ {
+@@ -2309,6 +2411,7 @@ NTSTATUS WINAPI NtWaitForMultipleObjects( DWORD count, const HANDLE *handles, WA
+ 
+     if (!count || count > MAXIMUM_WAIT_OBJECTS) return STATUS_INVALID_PARAMETER_1;
+     if (type != WaitAll && type != WaitAny) FIXME( "Unsupported wait type %u\n", type );
++    ios_qos_poll();
+ 
+     if (TRACE_ON(sync))
+     {
+@@ -2348,6 +2451,7 @@ NTSTATUS WINAPI NtWaitForSingleObject( HANDLE handle, BOOLEAN alertable, const L
+     unsigned int ret;
+ 
+     TRACE( "handle %p, alertable %u, timeout %s\n", handle, alertable, debugstr_timeout(timeout) );
++    ios_qos_poll();
+ 
+     if ((ret = inproc_wait( 1, &handle, WaitAny, alertable, timeout )) != STATUS_NOT_IMPLEMENTED)
+     {
+@@ -2394,6 +2498,8 @@ NTSTATUS WINAPI NtSignalAndWaitForSingleObject( HANDLE signal, HANDLE wait,
+  */
+ NTSTATUS WINAPI NtYieldExecution(void)
+ {
++    ios_qos_poll();
++    ios_yield_backoff();
+ #ifdef HAVE_SCHED_YIELD
+ #ifdef RUSAGE_THREAD
+     struct rusage u1, u2;
+@@ -2420,6 +2526,8 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
+ {
+     unsigned int status = STATUS_SUCCESS;
+ 
++    ios_qos_poll();
++
+     /* if alertable, we need to query the server */
+     if (alertable)
+     {
+@@ -2680,7 +2788,7 @@ NTSTATUS WINAPI NtWaitForKeyedEvent( HANDLE handle, const void *key,
+ 
+     TRACE( "handle %p, key %p, alertable %u, timeout %s\n", handle, key, alertable, debugstr_timeout(timeout) );
+ 
+-    if (!handle) handle = keyed_event;
++    if (!handle) handle = process_keyed_event;
+     if ((ULONG_PTR)key & 1) return STATUS_INVALID_PARAMETER_1;
+     if (alertable) flags |= SELECT_ALERTABLE;
+     select_op.keyed_event.op     = SELECT_KEYED_EVENT_WAIT;
+@@ -2701,7 +2809,7 @@ NTSTATUS WINAPI NtReleaseKeyedEvent( HANDLE handle, const void *key,
+ 
+     TRACE( "handle %p, key %p, alertable %u, timeout %s\n", handle, key, alertable, debugstr_timeout(timeout) );
+ 
+-    if (!handle) handle = keyed_event;
++    if (!handle) handle = process_keyed_event;
+     if ((ULONG_PTR)key & 1) return STATUS_INVALID_PARAMETER_1;
+     if (alertable) flags |= SELECT_ALERTABLE;
+     select_op.keyed_event.op     = SELECT_KEYED_EVENT_RELEASE;
+diff --git a/dlls/ntdll/unix/system.c b/dlls/ntdll/unix/system.c
+index 2d6e3184ac9a56993902d026b59accf16e9bdcd7..a4f5580dd8fd3cc5001ab30c943b5a98affd91b5 100644
+--- a/dlls/ntdll/unix/system.c
++++ b/dlls/ntdll/unix/system.c
+@@ -37,6 +37,11 @@
+ #include <sys/time.h>
+ #include <time.h>
+ #include <dirent.h>
++#if defined(__APPLE__) && defined(WINE_IOS_JIT_ARENA)
++# include <dlfcn.h>
++# include <pthread.h>
++#endif
++#include "wine/ios_gamepad.h"
+ #ifdef HAVE_ASM_HWCAP_H
+ # include <asm/hwcap.h>
+ #endif
+@@ -62,10 +67,13 @@
+ # include <sys/auxv.h>
+ #endif
+ #ifdef __APPLE__
++# include <TargetConditionals.h>
+ # include <CoreFoundation/CoreFoundation.h>
+ # include <IOKit/IOKitLib.h>
+-# include <IOKit/ps/IOPSKeys.h>
+-# include <IOKit/ps/IOPowerSources.h>
++# if TARGET_OS_OSX
++#  include <IOKit/ps/IOPSKeys.h>
++#  include <IOKit/ps/IOPowerSources.h>
++# endif
+ # include <mach/mach.h>
+ # include <mach/machine.h>
+ # include <mach/mach_init.h>
+@@ -1348,7 +1356,7 @@ static NTSTATUS create_logical_proc_info(void)
+     size_t size;
+     unsigned int p, i, j, k;
+ 
+-    lcpu_no = peb->NumberOfProcessors;
++    lcpu_no = RtlGetCurrentPeb()->NumberOfProcessors;
+ 
+     size = sizeof(pkgs_no);
+     if (sysctlbyname("hw.packages", &pkgs_no, &size, NULL, 0))
+@@ -1728,9 +1736,9 @@ void init_cpu_info(void)
+     num = 1;
+     FIXME("Detecting the number of processors is not supported.\n");
+ #endif
+-    peb->NumberOfProcessors = num;
++    RtlGetCurrentPeb()->NumberOfProcessors = num;
+     init_cpu_model();
+-    get_random( &process_cookie, sizeof(process_cookie) );
++    get_random( &process_random_cookie, sizeof(process_random_cookie) );
+ }
+ 
+ static SYSTEM_CPU_INFORMATION get_cpuinfo(void)
+@@ -1739,7 +1747,7 @@ static SYSTEM_CPU_INFORMATION get_cpuinfo(void)
+     {
+         .ProcessorLevel        = cpu_level,
+         .ProcessorRevision     = cpu_revision,
+-        .MaximumProcessors     = peb->NumberOfProcessors,
++        .MaximumProcessors     = RtlGetCurrentPeb()->NumberOfProcessors,
+         .ProcessorFeatureBits  = get_cpu_features(),
+ #ifdef __arm__
+         .ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM,
+@@ -1768,7 +1776,7 @@ static NTSTATUS create_cpuset_info(SYSTEM_CPU_SET_INFORMATION *info)
+ 
+     if (!logical_proc_info_ex) return STATUS_NOT_IMPLEMENTED;
+ 
+-    count = peb->NumberOfProcessors;
++    count = RtlGetCurrentPeb()->NumberOfProcessors;
+ 
+     max_cache_level = 0;
+     proc_info = logical_proc_info_ex;
+@@ -2077,6 +2085,97 @@ static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs
+     return regidx;
+ }
+ 
++#elif defined(__APPLE__)
++
++static BOOL darwin_has_feature( const char *name )
++{
++    int val = 0;
++    size_t len = sizeof(val);
++    if (sysctlbyname( name, &val, &len, NULL, 0 )) return FALSE;
++    return val != 0;
++}
++
++static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs,
++                                     WORD logical_thread_id )
++{
++    UINT64 pfr0 = 0, isar0 = 0, isar1 = 0, mmfr0 = 0, ctr = 0;
++    DWORD regidx = 0;
++    int64_t v64 = 0;
++    size_t len;
++
++#define FEAT(n) darwin_has_feature( "hw.optional.arm." n )
++#define FIELD(shift, value) ((UINT64)(value) << (shift))
++
++    /* ID_AA64PFR0_EL1: FP and AdvSIMD use 0 = present, 1 = present with
++     * half-precision, 0xF = absent. Every Apple core has both. */
++    pfr0 |= FIELD( 0, 2 );                       /* EL0 AArch64+AArch32 */
++    pfr0 |= FIELD( 4, 2 );                       /* EL1 */
++    pfr0 |= FIELD( 16, FEAT("FEAT_FP16") ? 1 : 0 );   /* FP */
++    pfr0 |= FIELD( 20, FEAT("FEAT_FP16") ? 1 : 0 );   /* AdvSIMD */
++
++    /* ID_AA64ISAR0_EL1 */
++    if (FEAT("FEAT_AES"))    isar0 |= FIELD( 4, FEAT("FEAT_PMULL") ? 2 : 1 );
++    if (FEAT("FEAT_SHA1"))   isar0 |= FIELD( 8, 1 );
++    if (FEAT("FEAT_SHA256")) isar0 |= FIELD( 12, FEAT("FEAT_SHA512") ? 2 : 1 );
++    {   /* CRC32 lives outside the arm. subtree */
++        int val = 0; len = sizeof(val);
++        if (!sysctlbyname( "hw.optional.armv8_crc32", &val, &len, NULL, 0 ) && val)
++            isar0 |= FIELD( 16, 1 );
++    }
++    if (FEAT("FEAT_LSE"))     isar0 |= FIELD( 20, 2 );   /* Atomic */
++    if (FEAT("FEAT_RDM"))     isar0 |= FIELD( 28, 1 );
++    if (FEAT("FEAT_SHA3"))    isar0 |= FIELD( 32, 1 );
++    if (FEAT("FEAT_DotProd")) isar0 |= FIELD( 44, 1 );
++    if (FEAT("FEAT_FHM"))     isar0 |= FIELD( 48, 1 );
++    if (FEAT("FEAT_FlagM"))   isar0 |= FIELD( 52, FEAT("FEAT_FlagM2") ? 2 : 1 );
++
++    /* ID_AA64ISAR1_EL1 */
++    if (FEAT("FEAT_DPB"))     isar1 |= FIELD( 0, FEAT("FEAT_DPB2") ? 2 : 1 );
++    if (FEAT("FEAT_JSCVT"))   isar1 |= FIELD( 12, 1 );
++    if (FEAT("FEAT_FCMA"))    isar1 |= FIELD( 16, 1 );
++    if (FEAT("FEAT_LRCPC"))   isar1 |= FIELD( 20, FEAT("FEAT_LRCPC2") ? 2 : 1 );
++    if (FEAT("FEAT_FRINTTS")) isar1 |= FIELD( 32, 1 );
++    if (FEAT("FEAT_SB"))      isar1 |= FIELD( 36, 1 );
++    if (FEAT("FEAT_SPECRES")) isar1 |= FIELD( 40, 1 );
++    if (FEAT("FEAT_BF16"))    isar1 |= FIELD( 44, 1 );
++    if (FEAT("FEAT_I8MM"))    isar1 |= FIELD( 52, 1 );
++
++    /* ID_AA64MMFR0_EL1: 4 KB granule supported, 16 KB supported (Apple's
++     * native page size), 64 KB not. PARange 40-bit is a safe floor. */
++    mmfr0 |= FIELD( 0, 2 );      /* PARange = 40 bits */
++    mmfr0 |= FIELD( 20, 1 );     /* TGran16 = supported */
++    mmfr0 |= FIELD( 28, 0 );     /* TGran4  = supported */
++
++    /* CTR_EL0 from the real cache geometry. IminLine/DminLine are log2 of the
++     * line size in WORDS, not bytes. */
++    len = sizeof(v64);
++    if (sysctlbyname( "hw.cachelinesize", &v64, &len, NULL, 0 ) || v64 <= 0) v64 = 64;
++    {
++        UINT64 words = (UINT64)v64 / 4, l2 = 0;
++        while ((1ull << l2) < words) l2++;
++        ctr  = FIELD( 31, 1 );          /* RES1 */
++        ctr |= FIELD( 0, l2 );          /* IminLine */
++        ctr |= FIELD( 16, l2 );         /* DminLine */
++        ctr |= FIELD( 24, l2 );         /* CWG */
++        ctr |= FIELD( 20, l2 );         /* ERG */
++        ctr |= FIELD( 14, 3 );          /* L1Ip = PIPT */
++    }
++
++    regs[regidx++] = (struct smbios_wine_id_reg_value_arm64){ 0x4020, pfr0 };
++    regs[regidx++] = (struct smbios_wine_id_reg_value_arm64){ 0x4030, isar0 };
++    regs[regidx++] = (struct smbios_wine_id_reg_value_arm64){ 0x4031, isar1 };
++    regs[regidx++] = (struct smbios_wine_id_reg_value_arm64){ 0x4038, mmfr0 };
++    regs[regidx++] = (struct smbios_wine_id_reg_value_arm64){ 0x5801, ctr };
++
++    TRACE( "cpu%u synthesised from sysctl: pfr0=%llx isar0=%llx isar1=%llx ctr=%llx\n",
++           logical_thread_id, (unsigned long long)pfr0, (unsigned long long)isar0,
++           (unsigned long long)isar1, (unsigned long long)ctr );
++
++#undef FIELD
++#undef FEAT
++    return regidx;
++}
++
+ #else
+ 
+ static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs,
+@@ -2704,14 +2803,14 @@ static void get_cpu_idle_cycle_times( ULONG64 *times )
+     unsigned long long idle;
+     FILE *f;
+ 
+-    memset( times, 0, peb->NumberOfProcessors * sizeof(*times) );
++    memset( times, 0, RtlGetCurrentPeb()->NumberOfProcessors * sizeof(*times) );
+     if (!(f = fopen( "/proc/stat", "r" ))) return;
+ 
+     /* skip combined cpu statistics line. */
+     fgets( line, sizeof(line), f );
+ 
+     index = 0;
+-    while (fgets( line, sizeof(line), f ) && index < peb->NumberOfProcessors)
++    while (fgets( line, sizeof(line), f ) && index < RtlGetCurrentPeb()->NumberOfProcessors)
+     {
+         count = sscanf(line, "%s %*u %*u %*u %llu", name, &idle);
+ 
+@@ -2731,7 +2830,7 @@ static void get_cpu_idle_cycle_times( ULONG64 *times )
+     static int once;
+ 
+     if (!once++) FIXME( "SystemProcessorIdleCycleTimeInformation stub.\n" );
+-    memset( times, 0, peb->NumberOfProcessors * sizeof(*times) );
++    memset( times, 0, RtlGetCurrentPeb()->NumberOfProcessors * sizeof(*times) );
+ }
+ 
+ #endif
+@@ -3322,6 +3421,32 @@ C_ASSERT( sizeof(struct process_info) <= sizeof(SYSTEM_PROCESS_INFORMATION) );
+     return ret;
+ }
+ 
++/* Private pointer-free snapshot, not a callback into PE from a UIKit thread.
++ * This keeps every threaded Wine child on its normal syscall/TEB path. */
++#if defined(__APPLE__) && defined(WINE_IOS_JIT_ARENA)
++static pthread_once_t ios_gamepad_once = PTHREAD_ONCE_INIT;
++static void (*ios_gamepad_snapshot)(struct ios_gamepad_info *);
++static void ios_resolve_gamepad(void)
++{
++    ios_gamepad_snapshot = dlsym(RTLD_DEFAULT, "kitsune_gamepad_snapshot_v1");
++}
++#endif
++
++static NTSTATUS ios_query_gamepads(void *info, ULONG size, ULONG *ret_size)
++{
++    if (ret_size) *ret_size = sizeof(struct ios_gamepad_info);
++    if (size != sizeof(struct ios_gamepad_info)) return STATUS_INFO_LENGTH_MISMATCH;
++    if (!info) return STATUS_ACCESS_VIOLATION;
++#if defined(__APPLE__) && defined(WINE_IOS_JIT_ARENA)
++    pthread_once(&ios_gamepad_once, ios_resolve_gamepad);
++    if (!ios_gamepad_snapshot) return STATUS_NOT_SUPPORTED;
++    ios_gamepad_snapshot(info);
++    return STATUS_SUCCESS;
++#else
++    return STATUS_NOT_SUPPORTED;
++#endif
++}
++
+ /******************************************************************************
+  *              NtQuerySystemInformation  (NTDLL.@)
+  */
+@@ -3333,6 +3458,9 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
+ 
+     TRACE( "(0x%08x,%p,0x%08x,%p)\n", class, info, size, ret_size );
+ 
++    if ((unsigned int)class == KITSUNE_GAMEPAD_INFO_CLASS)
++        return ios_query_gamepads(info, size, ret_size);
++
+     switch (class)
+     {
+     case SystemNativeBasicInformation:  /* 114 */
+@@ -3515,7 +3643,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
+         {
+             static int i = 1;
+             unsigned int n;
+-            cpus = min(peb->NumberOfProcessors, out_cpus);
++            cpus = min(RtlGetCurrentPeb()->NumberOfProcessors, out_cpus);
+             FIXME("stub info_class SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION\n");
+             /* many programs expect these values to change so fake change */
+             for (n = 0; n < cpus; n++)
+@@ -3641,7 +3769,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
+ 
+     case SystemInterruptInformation: /* 23 */
+     {
+-        len = peb->NumberOfProcessors * sizeof(SYSTEM_INTERRUPT_INFORMATION);
++        len = RtlGetCurrentPeb()->NumberOfProcessors * sizeof(SYSTEM_INTERRUPT_INFORMATION);
+         if (size >= len)
+         {
+             if (!info) ret = STATUS_ACCESS_VIOLATION;
+@@ -4092,7 +4220,7 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
+     switch (class)
+     {
+     case SystemProcessorIdleCycleTimeInformation:
+-        len = peb->NumberOfProcessors * sizeof(ULONG64);
++        len = RtlGetCurrentPeb()->NumberOfProcessors * sizeof(ULONG64);
+         if (!query || query_len < sizeof(USHORT) || *(USHORT *)query) return STATUS_INVALID_PARAMETER;
+         if (size < len)
+         {
+@@ -4138,7 +4266,7 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
+ 
+     case SystemCpuSetInformation:
+     {
+-        unsigned int cpu_count = peb->NumberOfProcessors;
++        unsigned int cpu_count = RtlGetCurrentPeb()->NumberOfProcessors;
+         PROCESS_BASIC_INFORMATION pbi;
+         HANDLE process;
+ 
+@@ -4407,6 +4535,9 @@ static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
+ 
+ static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
+ {
++#if !defined(TARGET_OS_OSX) || !TARGET_OS_OSX
++    return STATUS_NOT_SUPPORTED;
++#else
+     CFTypeRef blob = IOPSCopyPowerSourcesInfo();
+     CFArrayRef sources = IOPSCopyPowerSourcesList( blob );
+     CFIndex count, i;
+@@ -4508,6 +4639,7 @@ static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
+ 
+     CFRelease( sources );
+     return STATUS_SUCCESS;
++#endif  /* TARGET_OS_OSX */
+ }
+ 
+ #elif defined(__FreeBSD__)
+@@ -4638,7 +4770,7 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input,
+         int i, out_cpus;
+ 
+         if ((output == NULL) || (out_size == 0)) return STATUS_INVALID_PARAMETER;
+-        out_cpus = peb->NumberOfProcessors;
++        out_cpus = RtlGetCurrentPeb()->NumberOfProcessors;
+         if ((out_size / sizeof(PROCESSOR_POWER_INFORMATION)) < out_cpus) return STATUS_BUFFER_TOO_SMALL;
+ #if defined(linux)
+         {

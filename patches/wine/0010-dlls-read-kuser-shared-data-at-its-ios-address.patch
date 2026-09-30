@@ -1,0 +1,113 @@
+dlls: Read KUSER_SHARED_DATA at its iOS address.
+
+The Win32 side reads KUSER_SHARED_DATA at WINE_USER_SHARED_DATA_ADDR
+(ios_shared_data.h, 0002).
+---
+diff --git a/dlls/kernel32/process.c b/dlls/kernel32/process.c
+index 98313f4634c7b0750714fbb400be11e07c202e77..96060d48578eff9af8b49f491c86b2a1c4e68df9 100644
+--- a/dlls/kernel32/process.c
++++ b/dlls/kernel32/process.c
+@@ -36,10 +36,11 @@
+ #include "ddk/wdm.h"
+ #include "wine/asm.h"
+ #include "wine/debug.h"
++#include "wine/ios_shared_data.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(process);
+ 
+-static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
++static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)(ULONG_PTR)WINE_USER_SHARED_DATA_ADDR;
+ 
+ typedef struct
+ {
+diff --git a/dlls/kernel32/sync.c b/dlls/kernel32/sync.c
+index 5b2a8489a010f751519c723afddd483af2e1289d..16a85bf896052936afc66d2f29e6e1cb355e4a01 100644
+--- a/dlls/kernel32/sync.c
++++ b/dlls/kernel32/sync.c
+@@ -39,10 +39,11 @@
+ #include "kernel_private.h"
+ 
+ #include "wine/debug.h"
++#include "wine/ios_shared_data.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(sync);
+ 
+-static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
++static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)(ULONG_PTR)WINE_USER_SHARED_DATA_ADDR;
+ 
+ 
+ static void get_create_object_attributes( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nameW,
+diff --git a/dlls/kernelbase/sync.c b/dlls/kernelbase/sync.c
+index 94036acfad4b71decf00c5872f3240c9fc7dd690..934a912f3015b8579137d8d64fe63214a33d1b86 100644
+--- a/dlls/kernelbase/sync.c
++++ b/dlls/kernelbase/sync.c
+@@ -36,10 +36,11 @@
+ #include "wine/asm.h"
+ #include "wine/exception.h"
+ #include "wine/debug.h"
++#include "wine/ios_shared_data.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(sync);
+ 
+-static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
++static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)(ULONG_PTR)WINE_USER_SHARED_DATA_ADDR;
+ 
+ /* check if current version is NT or Win95 */
+ static inline BOOL is_version_nt(void)
+diff --git a/dlls/ntdll/thread.c b/dlls/ntdll/thread.c
+index fe083befbcabe9dcdb59acb222bf1d04f93b8c64..6fb79d48f40a925a4ecafcf1a21b034bdf159f3f 100644
+--- a/dlls/ntdll/thread.c
++++ b/dlls/ntdll/thread.c
+@@ -35,7 +35,8 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
+ WINE_DECLARE_DEBUG_CHANNEL(pid);
+ WINE_DECLARE_DEBUG_CHANNEL(timestamp);
+ 
+-struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
++#include "wine/ios_shared_data.h"
++struct _KUSER_SHARED_DATA *user_shared_data = (void *)WINE_USER_SHARED_DATA_ADDR;
+ 
+ struct debug_info
+ {
+diff --git a/dlls/ntoskrnl.exe/instr.c b/dlls/ntoskrnl.exe/instr.c
+index 31e1e6e28a499232329b86da209d6fd9f8a8e739..342c347448ed3854c559fadf2ce1cc92a6ace96c 100644
+--- a/dlls/ntoskrnl.exe/instr.c
++++ b/dlls/ntoskrnl.exe/instr.c
+@@ -29,6 +29,7 @@
+ #include "ddk/wdm.h"
+ #include "excpt.h"
+ #include "wine/debug.h"
++#include "wine/ios_shared_data.h"
+ 
+ #define KSHARED_USER_DATA_PAGE_SIZE 0x1000
+ 
+@@ -490,7 +491,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(int);
+ #define SIB_BASE( sib, rex )    (((sib) & 7) | (((rex) & REX_B) ? 8 : 0))
+ 
+ /* keep in sync with dlls/ntdll/thread.c:thread_init */
+-static const BYTE *wine_user_shared_data = (BYTE *)0x7ffe0000;
++static const BYTE *wine_user_shared_data = (BYTE *)(ULONG_PTR)WINE_USER_SHARED_DATA_ADDR;
+ static const BYTE *user_shared_data      = (BYTE *)0xfffff78000000000;
+ 
+ static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
+diff --git a/dlls/win32u/message.c b/dlls/win32u/message.c
+index 8c9a2aaef7c441397a8a04ce525b0f75be722dc2..6cfcefd0c437c39d5d7630de6ec0825d5b3c9e66 100644
+--- a/dlls/win32u/message.c
++++ b/dlls/win32u/message.c
+@@ -36,6 +36,7 @@
+ #include "dde.h"
+ #include "immdev.h"
+ #include "wine/debug.h"
++#include "wine/ios_shared_data.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(msg);
+ WINE_DECLARE_DEBUG_CHANNEL(key);
+@@ -45,7 +46,8 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
+ #define QS_HARDWARE     0x40000000
+ #define QS_INTERNAL     (QS_DRIVER | QS_HARDWARE)
+ 
+-static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
++static const struct _KUSER_SHARED_DATA *user_shared_data =
++    (struct _KUSER_SHARED_DATA *)(ULONG_PTR)WINE_USER_SHARED_DATA_ADDR;
+ 
+ static const struct ratio no_dpi;
+ 

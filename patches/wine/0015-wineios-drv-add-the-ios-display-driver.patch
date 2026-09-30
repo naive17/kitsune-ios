@@ -1,0 +1,1806 @@
+wineios.drv: Add the iOS display driver.
+
+win32u loads the driver named by WINE_DISPLAY_DRIVER. Each window
+surface is a CAMetalLayer in the app's view hierarchy (surface.c,
+metal.m); the display is the screen (KITSUNE_SCREEN_MAX caps it) plus
+landscape modes that fit 800x600. dxmt_bridge.c stands in for
+winemac.drv's interface, where DXMT looks up a window's view. A PE thread drains the app's queue (dllmain.c, input.c):
+touch and key events, the task manager, window centring, screen
+changes, and the programs the session host starts. WINEIOS_CAPTURE
+saves presented frames.
+---
+diff --git a/dlls/win32u/driver.c b/dlls/win32u/driver.c
+index 6270d9bbe10f3b112fb63500cdecb216b0a589f9..9e2e602a09a68704229dac1b03687c1f4b19ff88 100644
+--- a/dlls/win32u/driver.c
++++ b/dlls/win32u/driver.c
+@@ -25,6 +25,7 @@
+ 
+ #include <assert.h>
+ #include <pthread.h>
++#include <stdlib.h>
+ 
+ #include "ntstatus.h"
+ #include "ntgdi_private.h"
+@@ -1034,11 +1035,43 @@ static BOOL load_desktop_driver( HWND hwnd )
+  * Each entry point simply loads the real driver and chains to it.
+  */
+ 
++static BOOL load_driver_from_env(void)
++{
++    static const char driver_prefix[] = "wine";
++    static const char driver_suffix[] = ".drv";
++    const char *name = getenv( "WINE_DISPLAY_DRIVER" );
++    WCHAR buffer[64];
++    void *ret_ptr;
++    ULONG ret_len, len;
++
++    if (!name || !name[0]) return FALSE;
++    if (strlen( name ) >= ARRAY_SIZE(buffer) - ARRAY_SIZE(driver_prefix) - ARRAY_SIZE(driver_suffix))
++        return FALSE;
++
++    if (strchr( name, '.' ))
++    {
++        len = asciiz_to_unicode( buffer, name );
++    }
++    else
++    {
++        char dll_name[64];
++
++        snprintf( dll_name, sizeof(dll_name), "%s%s%s", driver_prefix, name, driver_suffix );
++        len = asciiz_to_unicode( buffer, dll_name );
++    }
++    TRACE( "loading driver %s (%s) from WINE_DISPLAY_DRIVER\n",
++           debugstr_a(name), debugstr_w(buffer) );
++    if (KeUserModeCallback( NtUserLoadDriver, buffer, len, &ret_ptr, &ret_len )) return FALSE;
++    return user_driver != &lazy_load_driver;
++}
++
+ static void load_display_driver(void)
+ {
+     USEROBJECTFLAGS flags;
+     HWINSTA winstation;
+ 
++    if (!is_service_process() && load_driver_from_env()) return;
++
+     if (is_service_process() || !load_desktop_driver( get_desktop_window() ) || user_driver == &lazy_load_driver)
+     {
+         winstation = NtUserGetProcessWindowStation();
+diff --git a/dlls/wineios.drv/Makefile.in b/dlls/wineios.drv/Makefile.in
+new file mode 100644
+index 0000000000000000000000000000000000000000..bdb178a79aac80a97a71379cc721fa743166cc91
+--- /dev/null
++++ b/dlls/wineios.drv/Makefile.in
+@@ -0,0 +1,33 @@
++MODULE    = wineios.drv
++UNIXLIB   = wineios.so
++IMPORTS   = user32 gdi32 win32u kernel32
++
++# Deliberately NO UIKit and NO AppKit.
++#
++# The driver has to build for two platforms out of one Makefile.in: iOS (UIKit)
++# and the macOS host harness (AppKit). Telling them apart would mean a second
++# framework substitution in configure, and that split is precisely the part
++# that cannot be tested without a device.
++#
++# So everything Wine-facing plus all of Metal lives here -- Metal, QuartzCore,
++# CoreGraphics and Foundation exist on BOTH platforms with the same API -- and
++# the one genuinely divergent step, putting a CAMetalLayer into a live view
++# hierarchy, is delegated to the host process via dlsym(RTLD_DEFAULT,
++# "wine_surface_host_*"). See metal.m and src/ios/wine_surface.h.
++UNIX_LIBS = \
++	-lwin32u \
++	-framework CoreGraphics \
++	-framework Foundation \
++	-framework Metal \
++	-framework QuartzCore \
++
++VER_FILEDESCRIPTION_STR = "Wine iOS driver"
++
++SOURCES = \
++	display.c \
++	dllmain.c \
++	dxmt_bridge.c \
++	input.c \
++	metal.m \
++	surface.c \
++	wineios_main.c
+diff --git a/dlls/wineios.drv/display.c b/dlls/wineios.drv/display.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..aa753f14430767878c174d8b88f4990b72ee8287
+--- /dev/null
++++ b/dlls/wineios.drv/display.c
+@@ -0,0 +1,64 @@
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include "config.h"
++#include "wineios.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(wineios);
++
++UINT wineios_UpdateDisplayDevices( const struct gdi_device_manager *manager, void *param )
++{
++    struct pci_id pci_id = {0};
++    struct gdi_monitor monitor = {0};
++    DEVMODEW mode = {.dmSize = sizeof(mode)};
++    UINT dpi = NtUserGetSystemDpiForProcess( NULL );
++    int width = 0, height = 0;
++
++    wineios_metal_screen_size( &width, &height );
++
++    manager->add_gpu( "Apple GPU", &pci_id, NULL, param );
++    manager->add_source( "Default", DISPLAY_DEVICE_ATTACHED_TO_DESKTOP | DISPLAY_DEVICE_PRIMARY_DEVICE,
++                         dpi, param );
++
++    SetRect( &monitor.rc_monitor, 0, 0, width, height );
++    monitor.rc_work = monitor.rc_monitor;
++    manager->add_monitor( &monitor, param );
++
++    mode.dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
++                    DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION;
++    mode.dmDisplayOrientation = DMDO_DEFAULT;
++    mode.dmBitsPerPel = 32;
++    mode.dmPelsWidth = width;
++    mode.dmPelsHeight = height;
++    mode.dmDisplayFrequency = 60;
++    if (width >= 800 && height >= 600)
++    {
++        manager->add_modes( &mode, 1, &mode, param );
++    }
++    else
++    {
++        static const struct { int w, h; } std_modes[] =
++        {
++            { 800, 600 }, { 1024, 768 }, { 1280, 720 }, { 1280, 800 },
++            { 1366, 768 }, { 1600, 900 }, { 1920, 1080 },
++        };
++        DEVMODEW modes[ARRAY_SIZE(std_modes) + 1];
++        UINT i, count = 0;
++
++        modes[count++] = mode;
++        for (i = 0; i < ARRAY_SIZE(std_modes); i++)
++        {
++            if (std_modes[i].w == width && std_modes[i].h == height) continue;
++            modes[count] = mode;
++            modes[count].dmPelsWidth = std_modes[i].w;
++            modes[count].dmPelsHeight = std_modes[i].h;
++            count++;
++        }
++        manager->add_modes( &mode, count, modes, param );
++    }
++
++    TRACE( "reported a %dx%d display (+ standard landscape modes) at %u dpi\n", width, height, dpi );
++    return STATUS_SUCCESS;
++}
+diff --git a/dlls/wineios.drv/dllmain.c b/dlls/wineios.drv/dllmain.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..500de629a88dea102e3dd70f2e1ffc417bd99053
+--- /dev/null
++++ b/dlls/wineios.drv/dllmain.c
+@@ -0,0 +1,84 @@
++
++#include <stdarg.h>
++
++#include "ntstatus.h"
++#define WIN32_NO_STATUS
++#include "windef.h"
++#include "winbase.h"
++#include "winuser.h"
++#include "unixlib.h"
++#include "wine/debug.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(wineios);
++
++static BOOL is_session_host(void)
++{
++    WCHAR path[MAX_PATH];
++    DWORD len = GetModuleFileNameW( NULL, path, ARRAY_SIZE(path) ), start = len;
++
++    if (!len || len >= ARRAY_SIZE(path)) return FALSE;
++    while (start && path[start - 1] != '\\' && path[start - 1] != '/') start--;
++    return !lstrcmpiW( path + start, WINEIOS_SESSION_HOST );
++}
++
++static void start_program( WCHAR *cmdline, const WCHAR *cwd )
++{
++    STARTUPINFOW si = { sizeof(si) };
++    PROCESS_INFORMATION pi;
++
++    if (!CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, cwd[0] ? cwd : NULL, &si, &pi ))
++    {
++        ERR( "ios: could not start %s: error %lu\n", debugstr_w(cmdline), GetLastError() );
++        return;
++    }
++    CloseHandle( pi.hThread );
++    CloseHandle( pi.hProcess );
++}
++
++static DWORD WINAPI wineios_drain_thread( void *arg )
++{
++    static struct wineios_drain_params params;
++    MSG msg;
++    unsigned n = 0;
++
++    params.session_host = is_session_host();
++    PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE );
++    TRACE( "drain thread has a message queue\n" );
++
++    for (;;)
++    {
++        params.launch = FALSE;
++        WINEIOS_CALL( drain, &params );
++        if (params.launch) start_program( params.cmdline, params.cwd );
++        /* Once a second, so a hang shows up as a stalled counter rather than
++         * as silence that could equally mean "no input arrived". */
++        if (++n % 250 == 0) TRACE( "drain alive, %u ticks\n", n );
++        Sleep( 4 );
++    }
++    return 0;
++}
++
++BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
++{
++    if (reason != DLL_PROCESS_ATTACH) return TRUE;
++
++    DisableThreadLibraryCalls(instance);
++
++    if (__wine_init_unix_call())
++    {
++        ERR("failed to load the unix library\n");
++        return FALSE;
++    }
++    if (WINEIOS_CALL(init, NULL))
++    {
++        ERR("unix init failed\n");
++        return FALSE;
++    }
++
++    {
++        HANDLE h = CreateThread( NULL, 0, wineios_drain_thread, NULL, 0, NULL );
++        if (!h) ERR("no input thread; input cannot reach the guest\n");
++        else CloseHandle( h );
++    }
++    return TRUE;
++}
+diff --git a/dlls/wineios.drv/dxmt_bridge.c b/dlls/wineios.drv/dxmt_bridge.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..54ef04041ac0d1489a1311178e22b5df253c04da
+--- /dev/null
++++ b/dlls/wineios.drv/dxmt_bridge.c
+@@ -0,0 +1,109 @@
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include <stdlib.h>
++
++#include "wineios.h"
++#include "wineios_metal.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(wineios);
++
++typedef struct macdrv_opaque_metal_device *macdrv_metal_device;
++typedef struct macdrv_opaque_metal_view   *macdrv_metal_view;
++typedef struct macdrv_opaque_metal_layer  *macdrv_metal_layer;
++typedef struct macdrv_opaque_view         *macdrv_view;
++typedef struct macdrv_opaque_window       *macdrv_window;
++
++/* Layout must match DXMT's declaration in winemetal_unix.c; it reads
++ * client_cocoa_view out of this. The leading HWND matches winemac.drv's own
++ * struct, whose first member is the window handle. */
++struct macdrv_win_data
++{
++    HWND          hwnd;
++    macdrv_window cocoa_window;
++    macdrv_view   cocoa_view;
++    macdrv_view   client_cocoa_view;
++};
++
++struct macdrv_functions_t
++{
++    void (*macdrv_init_display_devices)( BOOL );
++    struct macdrv_win_data *(*get_win_data)( HWND hwnd );
++    void (*release_win_data)( struct macdrv_win_data *data );
++    macdrv_window (*macdrv_get_cocoa_window)( HWND hwnd, BOOL require_on_screen );
++    macdrv_metal_device (*macdrv_create_metal_device)( void );
++    void (*macdrv_release_metal_device)( macdrv_metal_device d );
++    macdrv_metal_view (*macdrv_view_create_metal_view)( macdrv_view v, macdrv_metal_device d );
++    macdrv_metal_layer (*macdrv_view_get_metal_layer)( macdrv_metal_view v );
++    void (*macdrv_view_release_metal_view)( macdrv_metal_view v );
++    void (*on_main_thread)( void *block );
++};
++
++static struct macdrv_win_data *bridge_get_win_data( HWND hwnd )
++{
++    struct macdrv_win_data *data;
++    struct wineios_layer *layer;
++
++    layer = wineios_layer_for_hwnd( hwnd );
++    TRACE( "DXMT asked for hwnd %p -> layer %p\n", hwnd, layer );
++
++    if (!(data = calloc( 1, sizeof(*data) ))) return NULL;
++    data->hwnd = hwnd;
++    data->cocoa_window = (macdrv_window)layer;
++    data->cocoa_view = (macdrv_view)layer;
++    data->client_cocoa_view = (macdrv_view)layer;
++    return data;
++}
++
++static void bridge_release_win_data( struct macdrv_win_data *data )
++{
++    free( data );
++}
++
++static macdrv_metal_view bridge_view_create_metal_view( macdrv_view v, macdrv_metal_device d )
++{
++    struct wineios_layer *window = (struct wineios_layer *)v;
++    struct wineios_layer *overlay;
++    void *hwnd;
++    int width, height;
++
++    if (!window) return NULL;
++    hwnd = wineios_layer_hwnd( window );
++    wineios_layer_size( window, &width, &height );
++    if (width <= 0 || height <= 0) return NULL;
++
++    overlay = wineios_layer_create( hwnd, width, height, WINEIOS_LAYER_OVERLAY );
++    TRACE( "DXMT overlay layer %p for hwnd %p (%dx%d)\n", overlay, hwnd, width, height );
++    return (macdrv_metal_view)(overlay ? overlay : window);
++}
++
++static macdrv_metal_layer bridge_view_get_metal_layer( macdrv_metal_view v )
++{
++    void *l = wineios_layer_metal_layer( (struct wineios_layer *)v );
++
++    TRACE( "DXMT took CAMetalLayer %p\n", l );
++    return (macdrv_metal_layer)l;
++}
++
++static void bridge_view_release_metal_view( macdrv_metal_view v )
++{
++    TRACE( "DXMT released overlay %p\n", v );
++    wineios_layer_destroy( (struct wineios_layer *)v );
++}
++
++__attribute__((visibility("default")))
++struct macdrv_functions_t macdrv_functions =
++{
++    NULL,   /* macdrv_init_display_devices: DXMT reads only the other five */
++    bridge_get_win_data,
++    bridge_release_win_data,
++    NULL,   /* macdrv_get_cocoa_window */
++    NULL,   /* macdrv_create_metal_device: DXMT uses its own device */
++    NULL,   /* macdrv_release_metal_device */
++    bridge_view_create_metal_view,
++    bridge_view_get_metal_layer,
++    bridge_view_release_metal_view,
++    NULL,   /* on_main_thread: see the struct */
++};
+diff --git a/dlls/wineios.drv/input.c b/dlls/wineios.drv/input.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..aecf876f2201b18a378458230296987e32c78c19
+--- /dev/null
++++ b/dlls/wineios.drv/input.c
+@@ -0,0 +1,438 @@
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++
++#include <dlfcn.h>
++
++#include "wineios.h"
++#include "wineios_metal.h"
++#include "ntuser.h"
++#include "winternl.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(wineios);
++
++/* The input status the heartbeat prints. The driver hands its address to the
++ * app (wineios_input_register_with_host); visibility("default") lets the
++ * harness read it with dlsym. */
++__attribute__((visibility("default")))
++char wineios_input_status[400] = "no mouse events yet";
++
++/* The class of the window under the cursor, ASCII, for the status line. A
++ * handle says nothing to a human reading a beacon; "Button" versus "#32770"
++ * versus "Notepad" is the whole answer to "did the click reach the control". */
++static void hit_class( HWND hwnd, char *buf, size_t len )
++{
++    WCHAR nameW[64];
++    UNICODE_STRING str = { 0, sizeof(nameW), nameW };
++    size_t i;
++    int n;
++
++    buf[0] = 0;
++    if (!hwnd) return;
++    if ((n = NtUserGetClassName( hwnd, FALSE, &str )) <= 0) return;
++    for (i = 0; i < (size_t)n && i + 1 < len; i++)
++        buf[i] = (nameW[i] >= 32 && nameW[i] < 127) ? (char)nameW[i] : '?';
++    buf[i] = 0;
++}
++
++static void update_status( int x, int y, int force, const char *what )
++{
++    static DWORD last_tick;
++    DWORD now = NtGetTickCount();
++    POINT pos = {0};
++    RECT clip = {0};
++    GUITHREADINFO gti = { sizeof(gti) };
++    char cls[48] = "";
++    HWND hit, fg;
++
++    if (!force && last_tick && now - last_tick < 250) return;
++    last_tick = now;
++
++    NtUserGetCursorPos( &pos );
++    NtUserGetClipCursor( &clip );
++    hit = NtUserWindowFromPoint( pos.x, pos.y );
++    hit_class( hit, cls, sizeof(cls) );
++    /* Foreground, not focus: focus is per-thread and this thread has none.
++     * The compositor stacks windows by creation order and Wine by its own
++     * z-order, and nothing has yet checked that the two agree on device. */
++    fg = NtUserGetForegroundWindow();
++
++    if (fg) NtUserGetGUIThreadInfo( NtUserGetWindowThread( fg, NULL ), &gti );
++
++    snprintf( wineios_input_status, sizeof(wineios_input_status),
++              "%s=%d,%d pos=%d,%d hit=%p<%s> fg=%p cap=%p focus=%p menu=%p clip=%d,%d-%d,%d",
++              what, x, y, (int)pos.x, (int)pos.y, hit, cls, fg,
++              gti.hwndCapture, gti.hwndFocus, gti.hwndMenuOwner,
++              (int)clip.left, (int)clip.top, (int)clip.right, (int)clip.bottom );
++}
++
++static void send_mouse( UINT flags, int x, int y, DWORD data )
++{
++    INPUT input = {0};
++
++    input.type = INPUT_MOUSE;
++    input.mi.dx = x;
++    input.mi.dy = y;
++    input.mi.mouseData = data;
++    input.mi.dwFlags = flags | MOUSEEVENTF_MOVE_NOCOALESCE;
++
++    NtUserSendHardwareInput( 0, 0, &input, 0 );
++    update_status( x, y, !(flags & MOUSEEVENTF_MOVE) || (flags & ~(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)),
++                   (flags & ~(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)) ? "btn" : "move" );
++}
++
++enum ios_ev_kind { EV_MOVE_ABS, EV_MOVE_REL, EV_BUTTON, EV_WHEEL, EV_KEY, EV_UNICODE };
++
++struct ios_ev { int kind, a, b, c; };
++
++#define IOS_EV_MAX 256
++static struct ios_ev ev_ring[IOS_EV_MAX];
++static unsigned ev_head, ev_tail;
++
++/* Producer. Runs on the UIKit thread: touches no Wine state whatsoever. */
++static void ev_post( int kind, int a, int b, int c )
++{
++    unsigned head = __atomic_load_n( &ev_head, __ATOMIC_RELAXED );
++    unsigned next = (head + 1) % IOS_EV_MAX;
++
++    if (next == __atomic_load_n( &ev_tail, __ATOMIC_ACQUIRE )) return;  /* full */
++    ev_ring[head].kind = kind;
++    ev_ring[head].a = a;
++    ev_ring[head].b = b;
++    ev_ring[head].c = c;
++    __atomic_store_n( &ev_head, next, __ATOMIC_RELEASE );
++}
++
++/* Consumer. WINE THREADS ONLY -- this is where the Nt calls actually happen. */
++static void ev_drain(void)
++{
++    for (;;)
++    {
++        unsigned tail = __atomic_load_n( &ev_tail, __ATOMIC_RELAXED );
++        struct ios_ev e;
++        int was_button;
++
++        if (tail == __atomic_load_n( &ev_head, __ATOMIC_ACQUIRE )) return;
++        e = ev_ring[tail];
++        __atomic_store_n( &ev_tail, (tail + 1) % IOS_EV_MAX, __ATOMIC_RELEASE );
++        was_button = (e.kind == EV_BUTTON);
++        switch (e.kind)
++        {
++        case EV_MOVE_ABS:
++            send_mouse( MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, e.a, e.b, 0 );
++            break;
++        case EV_MOVE_REL:
++            send_mouse( MOUSEEVENTF_MOVE, e.a, e.b, 0 );
++            break;
++        case EV_BUTTON:
++            send_mouse( (UINT)e.a, 0, 0, 0 );
++            break;
++        case EV_WHEEL:
++            send_mouse( e.a ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, 0, 0, (DWORD)e.b );
++            break;
++        case EV_KEY:
++        {
++            INPUT input = {0};
++            input.type = INPUT_KEYBOARD;
++            input.ki.wVk = (WORD)e.a;
++            input.ki.wScan = e.b ? (WORD)e.b
++                                 : (WORD)NtUserMapVirtualKeyEx( e.a, MAPVK_VK_TO_VSC, 0 );
++            input.ki.dwFlags = e.c ? 0 : KEYEVENTF_KEYUP;
++            NtUserSendHardwareInput( 0, 0, &input, 0 );
++            break;
++        }
++        case EV_UNICODE:
++        {
++            INPUT input = {0};
++            input.type = INPUT_KEYBOARD;
++            input.ki.wScan = (WORD)e.a;
++            input.ki.dwFlags = KEYEVENTF_UNICODE | (e.b ? 0 : KEYEVENTF_KEYUP);
++            NtUserSendHardwareInput( 0, 0, &input, 0 );
++            break;
++        }
++        }
++        if (was_button) return;   /* see the note above: one per tick */
++    }
++}
++
++/* Entry point for the PE-side drain thread. Runs on a Wine thread, so the
++ * Nt calls inside ev_drain() have a TEB to read. */
++struct wineios_task;
++static void (*host_tasks_report)( const struct wineios_task *, unsigned );
++static int (*host_take_launch)( char *cmdline, size_t cmdline_size, char *cwd, size_t cwd_size );
++void wineios_tasks_request( void );
++void wineios_tasks_close( void *hwnd );
++void wineios_tasks_kill( unsigned pid );
++
++void wineios_input_register_with_host(void)
++{
++    /* Declared here because the registrar sits above their definitions; the
++     * order matters only for readability, the entry points below are the
++     * definitions. */
++    void wineios_input_mouse_move( int, int );
++    void wineios_input_mouse_move_rel( int, int );
++    void wineios_input_mouse_button( int, int );
++    void wineios_input_mouse_wheel( int, int );
++    void wineios_input_key( int, int, int );
++    void wineios_input_unicode( int, int );
++
++    void (*reg)( void *, void *, void *, void *, void *, void * ) =
++        dlsym( RTLD_DEFAULT, "wine_surface_host_register_input" );
++
++    host_take_launch = dlsym( RTLD_DEFAULT, "wine_surface_host_take_launch" );
++    if (!reg)
++    {
++        ERR( "host has no input registrar; input cannot reach the guest\n" );
++        return;
++    }
++    reg( wineios_input_mouse_move, wineios_input_mouse_move_rel,
++         wineios_input_mouse_button, wineios_input_mouse_wheel,
++         wineios_input_key, wineios_input_unicode );
++    ERR( "ios-input: registered six entry points with the host\n" );
++
++    /* Separate call, and optional: an app built before this existed still gets
++     * working input, it just prints no server-side state. */
++    {
++        void (*reg_status)( const char * ) =
++            dlsym( RTLD_DEFAULT, "wine_surface_host_register_input_status" );
++
++        if (reg_status) reg_status( wineios_input_status );
++    }
++
++    {
++        void (*reg_tasks)( void *, void *, void * ) =
++            dlsym( RTLD_DEFAULT, "wine_surface_host_register_tasks" );
++
++        host_tasks_report = dlsym( RTLD_DEFAULT, "wine_surface_host_tasks_report" );
++        if (reg_tasks) reg_tasks( wineios_tasks_request, wineios_tasks_close, wineios_tasks_kill );
++    }
++}
++
++/* The next program the app queued, as a command line and working directory. */
++static void take_launch( struct wineios_drain_params *params )
++{
++    char cmdline[ARRAY_SIZE(params->cmdline) * 3], cwd[ARRAY_SIZE(params->cwd) * 3];
++    DWORD len;
++
++    if (!host_take_launch || host_take_launch( cmdline, sizeof(cmdline), cwd, sizeof(cwd) ) <= 0) return;
++    len = ntdll_umbstowcs( cmdline, strlen( cmdline ), params->cmdline, ARRAY_SIZE(params->cmdline) - 1 );
++    params->cmdline[len] = 0;
++    len = ntdll_umbstowcs( cwd, strlen( cwd ), params->cwd, ARRAY_SIZE(params->cwd) - 1 );
++    params->cwd[len] = 0;
++    params->launch = params->cmdline[0] != 0;
++}
++
++static void *pending_center;
++
++void wineios_request_center( HWND hwnd )
++{
++    __atomic_store_n( &pending_center, hwnd, __ATOMIC_RELEASE );
++}
++
++static void do_pending_center(void)
++{
++    HWND hwnd = __atomic_exchange_n( &pending_center, NULL, __ATOMIC_ACQ_REL );
++    RECT vscreen, rect;
++    int w, h, sw, sh, x, y;
++
++    if (!hwnd) return;
++    if (!NtUserGetWindowRect( hwnd, &rect, NtUserGetDpiForWindow( hwnd ) )) return;
++
++    vscreen = NtUserGetVirtualScreenRect( MDT_RAW_DPI );
++    w = rect.right - rect.left;
++    h = rect.bottom - rect.top;
++    sw = vscreen.right - vscreen.left;
++    sh = vscreen.bottom - vscreen.top;
++    if (w <= 0 || h <= 0 || sw <= 0 || sh <= 0) return;
++    if (w >= sw && h >= sh) return;              /* already fills the screen */
++
++    x = vscreen.left + (sw - w) / 2;
++    y = vscreen.top + (sh - h) / 2;
++    if (x < vscreen.left) x = vscreen.left;
++    if (y < vscreen.top) y = vscreen.top;
++    if (x == rect.left && y == rect.top) return;
++
++    ERR( "ios: centring %p (%dx%d) at %d,%d in %dx%d\n", hwnd, w, h, x, y, sw, sh );
++    NtUserSetWindowPos( hwnd, 0, x, y, 0, 0,
++                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
++}
++
++struct wineios_task
++{
++    void *hwnd;
++    unsigned pid, tid;
++    int visible;
++    char title[96];
++};
++
++static int tasks_requested;
++static void *task_close_hwnd;
++static unsigned task_kill_pid;
++
++__attribute__((visibility("default")))
++void wineios_tasks_request( void )
++{
++    __atomic_store_n( &tasks_requested, 1, __ATOMIC_RELEASE );
++}
++
++__attribute__((visibility("default")))
++void wineios_tasks_close( void *hwnd )
++{
++    __atomic_store_n( &task_close_hwnd, hwnd, __ATOMIC_RELEASE );
++}
++
++__attribute__((visibility("default")))
++void wineios_tasks_kill( unsigned pid )
++{
++    __atomic_store_n( &task_kill_pid, pid, __ATOMIC_RELEASE );
++}
++
++static unsigned utf16_to_utf8( const WCHAR *src, unsigned len, char *dst, unsigned cap )
++{
++    unsigned i, n = 0;
++
++    for (i = 0; i < len; i++)
++    {
++        unsigned c = src[i];
++
++        if (c >= 0xd800 && c < 0xdc00 && i + 1 < len && src[i + 1] >= 0xdc00 && src[i + 1] < 0xe000)
++            c = 0x10000 + ((c - 0xd800) << 10) + (src[++i] - 0xdc00);
++        if (c < 0x80) { if (n + 1 >= cap) break; dst[n++] = (char)c; }
++        else if (c < 0x800) { if (n + 2 >= cap) break; dst[n++] = (char)(0xc0 | (c >> 6)); dst[n++] = (char)(0x80 | (c & 0x3f)); }
++        else if (c < 0x10000) { if (n + 3 >= cap) break; dst[n++] = (char)(0xe0 | (c >> 12)); dst[n++] = (char)(0x80 | ((c >> 6) & 0x3f)); dst[n++] = (char)(0x80 | (c & 0x3f)); }
++        else { if (n + 4 >= cap) break; dst[n++] = (char)(0xf0 | (c >> 18)); dst[n++] = (char)(0x80 | ((c >> 12) & 0x3f)); dst[n++] = (char)(0x80 | ((c >> 6) & 0x3f)); dst[n++] = (char)(0x80 | (c & 0x3f)); }
++    }
++    dst[n] = 0;
++    return n;
++}
++
++static void tasks_drain( void )
++{
++    void *close = __atomic_exchange_n( &task_close_hwnd, NULL, __ATOMIC_ACQ_REL );
++    unsigned kill = __atomic_exchange_n( &task_kill_pid, 0, __ATOMIC_ACQ_REL );
++
++    if (close) NtUserPostMessage( (HWND)close, WM_CLOSE, 0, 0 );
++    if (kill)
++    {
++        OBJECT_ATTRIBUTES attr = { sizeof(attr) };
++        CLIENT_ID cid = { ULongToHandle( kill ), 0 };
++        HANDLE process;
++
++        if (!NtOpenProcess( &process, PROCESS_TERMINATE, &attr, &cid ))
++        {
++            NtTerminateProcess( process, 1 );
++            NtClose( process );
++        }
++    }
++    if (__atomic_exchange_n( &tasks_requested, 0, __ATOMIC_ACQ_REL ) && host_tasks_report)
++    {
++        HWND list[256];
++        struct wineios_task out[64];
++        ULONG count = ARRAY_SIZE(list), i;
++        unsigned n = 0;
++
++        if (NtUserBuildHwndList( 0, 0, 0, 0, 0, ARRAY_SIZE(list), list, &count )) count = 0;
++        for (i = 0; i < count && n < ARRAY_SIZE(out); i++)
++        {
++            HWND hwnd = list[i];
++            WCHAR text[96];
++            DWORD pid = 0;
++            LONG style;
++            INT len;
++
++            if (!hwnd || NtUserGetWindowRelative( hwnd, GW_OWNER )) continue;
++            style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
++            if (!(style & WS_VISIBLE) || (style & WS_CHILD)) continue;
++            len = NtUserInternalGetWindowText( hwnd, text, ARRAY_SIZE(text) );
++            if (len <= 0) continue;
++            out[n].hwnd = hwnd;
++            out[n].tid = NtUserGetWindowThread( hwnd, &pid );
++            out[n].pid = pid;
++            out[n].visible = 1;
++            utf16_to_utf8( text, (unsigned)len, out[n].title, sizeof(out[n].title) );
++            n++;
++        }
++        host_tasks_report( out, n );
++    }
++}
++
++static int screen_changed;
++
++__attribute__((visibility("default")))
++void wineios_metal_screen_changed( void )
++{
++    __atomic_store_n( &screen_changed, 1, __ATOMIC_RELEASE );
++}
++
++NTSTATUS wineios_unix_drain( void *arg )
++{
++    struct wineios_drain_params *params = arg;
++
++    if (__atomic_exchange_n( &screen_changed, 0, __ATOMIC_ACQ_REL ))
++    {
++        int w = 0, h = 0;
++        wineios_metal_screen_size( &w, &h );
++        ERR( "ios: screen changed to %dx%d, updating the display\n", w, h );
++        NtUserCallNoParam( NtUserCallNoParam_DisplayModeChanged );
++    }
++    do_pending_center();
++    { static int n; if (!n) { n++; ERR( "ios-input: drain thread alive\n" ); } }
++    tasks_drain();
++    ev_drain();
++    if (params && params->session_host) take_launch( params );
++    return STATUS_SUCCESS;
++}
++
++/* Absolute move: touch and the on-screen cursor both know where they are. */
++__attribute__((visibility("default")))
++void wineios_input_mouse_move( int x, int y )
++{
++    ev_post( EV_MOVE_ABS, x, y, 0 );
++}
++
++/* Relative move, for trackpad mode: the finger moves the cursor by a delta
++ * rather than jumping it under the fingertip. */
++__attribute__((visibility("default")))
++void wineios_input_mouse_move_rel( int dx, int dy )
++{
++    ev_post( EV_MOVE_REL, dx, dy, 0 );
++}
++
++/* button: 0 left, 1 right, 2 middle. down: 1 press, 0 release. */
++__attribute__((visibility("default")))
++void wineios_input_mouse_button( int button, int down )
++{
++    static const UINT press[3]   = { MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_MIDDLEDOWN };
++    static const UINT release[3] = { MOUSEEVENTF_LEFTUP,   MOUSEEVENTF_RIGHTUP,   MOUSEEVENTF_MIDDLEUP };
++
++    if (button < 0 || button > 2) return;
++    ev_post( EV_BUTTON, down ? (int)press[button] : (int)release[button], 0, 0 );
++}
++
++/* One wheel notch is WHEEL_DELTA; the app scales its scroll gesture. */
++__attribute__((visibility("default")))
++void wineios_input_mouse_wheel( int delta, int horizontal )
++{
++    ev_post( EV_WHEEL, horizontal, delta, 0 );
++}
++
++__attribute__((visibility("default")))
++void wineios_input_key( int vkey, int scan, int down )
++{
++    if (vkey <= 0 || vkey > 0xfe) return;
++    ev_post( EV_KEY, vkey, scan, down );
++}
++
++/* A character with no sensible virtual key (anything the iOS keyboard can
++ * produce: accents, emoji, a non-Latin layout). KEYEVENTF_UNICODE bypasses
++ * the layout entirely. */
++__attribute__((visibility("default")))
++void wineios_input_unicode( int codepoint, int down )
++{
++    if (codepoint <= 0 || codepoint > 0xffff) return;   /* BMP only */
++    ev_post( EV_UNICODE, codepoint, down, 0 );
++}
+diff --git a/dlls/wineios.drv/metal.m b/dlls/wineios.drv/metal.m
+new file mode 100644
+index 0000000000000000000000000000000000000000..913fc02acd605b3526be119c1ef8dade1d039ed1
+--- /dev/null
++++ b/dlls/wineios.drv/metal.m
+@@ -0,0 +1,533 @@
++
++#include "config.h"
++
++#import <Foundation/Foundation.h>
++#import <Metal/Metal.h>
++#import <QuartzCore/QuartzCore.h>
++
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <pthread.h>
++#include <string.h>
++
++#include "wineios_metal.h"
++
++static int metal_debug;
++#define MLOG(...) do { if (metal_debug) { fprintf( stderr, "wineios:metal: " __VA_ARGS__ ); } } while (0)
++
++static id<MTLDevice> metal_device;
++static id<MTLCommandQueue> metal_queue;
++
++/* Host hooks, resolved once. Absent on the harness. create_layer_ex makes the
++ * CAMetalLayer a host view's BACKING layer (a bare sublayer composites but
++ * never presents on device) and tells the host which window and which role,
++ * which is what lets it put a window's D3D overlay above that window's GDI
++ * surface no matter which of the two was created last. */
++static void *(*host_create_layer_ex)( void *hwnd, int role, int width, int height,
++                                      void **layer_out );
++static void  (*host_move)( void *token, int x, int y, int width, int height );
++static void  (*host_detach)( void *token );
++static void  (*host_set_hidden)( void *token, int hidden );
++static int   (*host_screen)( int *width, int *height );
++
++struct wineios_layer
++{
++    void           *hwnd;         /* owner; DXMT looks a layer up by this */
++    int             role;         /* enum wineios_layer_role */
++    CAMetalLayer   *layer;
++    id<MTLTexture>  staging;      /* CPU-written, blit source */
++    void           *host_token;   /* whatever host_create_layer_ex returned */
++    int             host_backed;  /* the layer is a host VIEW's backing layer */
++    int             width, height;
++    int             x, y;
++    int             hidden;
++    unsigned        frames;
++};
++
++static struct wineios_layer **layer_registry;
++static unsigned layer_registry_count, layer_registry_capacity;
++static pthread_mutex_t layer_registry_lock = PTHREAD_MUTEX_INITIALIZER;
++
++static void layer_registry_add( struct wineios_layer *ctx )
++{
++    pthread_mutex_lock( &layer_registry_lock );
++    if (layer_registry_count == layer_registry_capacity)
++    {
++        unsigned cap = layer_registry_capacity ? layer_registry_capacity * 2 : 8;
++        struct wineios_layer **grown = realloc( layer_registry, cap * sizeof(*grown) );
++        if (!grown) { pthread_mutex_unlock( &layer_registry_lock ); return; }
++        layer_registry = grown;
++        layer_registry_capacity = cap;
++    }
++    layer_registry[layer_registry_count++] = ctx;
++    pthread_mutex_unlock( &layer_registry_lock );
++}
++
++static int layer_registry_remove( struct wineios_layer *ctx )
++{
++    unsigned i;
++    int found = 0;
++
++    pthread_mutex_lock( &layer_registry_lock );
++    for (i = 0; i < layer_registry_count; i++)
++        if (layer_registry[i] == ctx)
++        {
++            layer_registry[i] = layer_registry[--layer_registry_count];
++            found = 1;
++            break;
++        }
++    pthread_mutex_unlock( &layer_registry_lock );
++    return found;
++}
++
++void wineios_layer_size( struct wineios_layer *ctx, int *width, int *height )
++{
++    *width  = ctx ? ctx->width : 0;
++    *height = ctx ? ctx->height : 0;
++}
++
++void *wineios_layer_hwnd( struct wineios_layer *ctx )
++{
++    return ctx ? ctx->hwnd : NULL;
++}
++
++struct wineios_layer *wineios_layer_find( void *hwnd, int role )
++{
++    struct wineios_layer *found = NULL;
++    unsigned i;
++
++    pthread_mutex_lock( &layer_registry_lock );
++    for (i = 0; i < layer_registry_count; i++)
++        if (layer_registry[i]->hwnd == hwnd && layer_registry[i]->role == role)
++        {
++            found = layer_registry[i];
++            break;
++        }
++    pthread_mutex_unlock( &layer_registry_lock );
++    return found;
++}
++
++struct wineios_layer *wineios_layer_for_hwnd( void *hwnd )
++{
++    return wineios_layer_find( hwnd, WINEIOS_LAYER_GDI );
++}
++
++/* The CAMetalLayer itself, for a client that renders into it directly rather
++ * than handing over a CPU bitmap. */
++void *wineios_layer_metal_layer( struct wineios_layer *ctx )
++{
++    return ctx ? (void *)ctx->layer : NULL;
++}
++
++int wineios_metal_init(void)
++{
++    static int done;
++
++    if (done) return metal_device != nil;
++    done = 1;
++
++    metal_debug = getenv( "WINEIOS_METAL_DEBUG" ) != NULL;
++
++    metal_device = MTLCreateSystemDefaultDevice();
++    if (!metal_device)
++    {
++        fprintf( stderr, "wineios:metal: MTLCreateSystemDefaultDevice returned nil\n" );
++        return 0;
++    }
++    metal_queue = [metal_device newCommandQueue];
++
++    host_create_layer_ex = dlsym( RTLD_DEFAULT, "wine_surface_host_create_layer_ex" );
++    host_move   = dlsym( RTLD_DEFAULT, "wine_surface_host_move" );
++    host_detach = dlsym( RTLD_DEFAULT, "wine_surface_host_detach" );
++    host_set_hidden = dlsym( RTLD_DEFAULT, "wine_surface_host_set_hidden" );
++    host_screen = dlsym( RTLD_DEFAULT, "wine_surface_host_screen" );
++
++    MLOG( "device %s, host hooks: create_ex %s\n", [[metal_device name] UTF8String],
++          host_create_layer_ex ? "yes" : "no (headless)" );
++    return 1;
++}
++
++void wineios_metal_screen_size( int *width, int *height )
++{
++    *width = 0;
++    *height = 0;
++
++    /* The host app is the only thing that can see UIScreen. */
++    if (host_screen && host_screen( width, height ) && *width > 0 && *height > 0)
++    {
++        const char *cap = getenv( "KITSUNE_SCREEN_MAX" );
++        int cw = 0, ch = 0;
++
++        if (cap && sscanf( cap, "%dx%d", &cw, &ch ) == 2 && cw > 0 && ch > 0 &&
++            (*width > cw || *height > ch))
++        {
++            double s = (double)cw / *width;
++            double sh = (double)ch / *height;
++
++            if (sh < s) s = sh;
++            *width  = ((int)(*width  * s)) & ~1;
++            *height = ((int)(*height * s)) & ~1;
++        }
++        return;
++    }
++
++    /* Last resort. 1280x720 rather than a phone resolution on purpose: if this
++     * value ever shows up on a device it is a bug, and it should look like one. */
++    *width = 1280;
++    *height = 720;
++}
++
++static void layer_set_size( struct wineios_layer *ctx, int width, int height )
++{
++    if (width == ctx->width && height == ctx->height) return;
++
++    ctx->width = width;
++    ctx->height = height;
++    [ctx->staging release];
++    ctx->staging = nil;   /* reallocated on the next present */
++
++    [CATransaction begin];
++    [CATransaction setDisableActions:YES];
++    ctx->layer.drawableSize = CGSizeMake( width, height );
++    if (!ctx->host_backed) ctx->layer.bounds = CGRectMake( 0, 0, width, height );
++    [CATransaction commit];
++}
++
++struct wineios_layer *wineios_layer_create( void *hwnd, int width, int height, int role )
++{
++    struct wineios_layer *ctx, *old;
++
++    if (!wineios_metal_init()) return NULL;
++    if (width <= 0 || height <= 0) return NULL;
++
++    if (!(ctx = calloc( 1, sizeof(*ctx) ))) return NULL;
++
++    old = wineios_layer_find( hwnd, role );
++
++    ctx->hwnd = hwnd;
++    ctx->role = role;
++    layer_registry_add( ctx );
++
++    if (host_create_layer_ex)
++    {
++        void *l = NULL;
++
++        ctx->host_token = host_create_layer_ex( hwnd, role, width, height, &l );
++        ctx->layer = (CAMetalLayer *)l;
++        [ctx->layer retain];
++        if (ctx->layer) ctx->host_backed = 1;
++    }
++    if (!ctx->layer)
++    {
++        ctx->layer = [CAMetalLayer layer];
++        [ctx->layer retain];             /* no ARC in Wine's build */
++    }
++    ctx->layer.device = metal_device;
++    ctx->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
++    ctx->layer.framebufferOnly = NO;
++    ctx->layer.opaque = YES;
++
++    ctx->layer.presentsWithTransaction = (role != WINEIOS_LAYER_OVERLAY);
++    if (!ctx->host_backed) ctx->layer.anchorPoint = CGPointMake( 0, 0 );
++    ctx->layer.contentsGravity = role == WINEIOS_LAYER_OVERLAY ? kCAGravityResizeAspect
++                                                               : kCAGravityTopLeft;
++
++    ctx->width = ctx->height = 0;
++    layer_set_size( ctx, width, height );
++
++    if (role == WINEIOS_LAYER_OVERLAY)
++    {
++        struct wineios_layer *gdi = wineios_layer_find( hwnd, WINEIOS_LAYER_GDI );
++
++        if (gdi)
++        {
++            ctx->x = gdi->x;
++            ctx->y = gdi->y;
++            if (host_move && ctx->host_token)
++                host_move( ctx->host_token, ctx->x, ctx->y, width, height );
++        }
++    }
++
++    if (old)
++    {
++        MLOG( "replacing %s layer %p for hwnd %p\n",
++              role == WINEIOS_LAYER_OVERLAY ? "overlay" : "gdi", old, hwnd );
++        wineios_layer_destroy( old );
++    }
++
++    MLOG( "layer %p for hwnd %p, %dx%d, role %s, host token %p (%s), presentsWithTransaction=%d\n",
++          ctx, hwnd, width, height, role == WINEIOS_LAYER_OVERLAY ? "overlay" : "gdi",
++          ctx->host_token, ctx->host_backed ? "view-backed" : "bare layer",
++          (int)ctx->layer.presentsWithTransaction );
++    return ctx;
++}
++
++/* Windows programs hide a window and show it again later (Steam's menus), so
++ * hiding keeps the layer and only takes it off the screen. */
++void wineios_layer_set_hidden( struct wineios_layer *ctx, int hidden )
++{
++    struct wineios_layer *overlay;
++
++    if (!ctx) return;
++    hidden = !!hidden;
++    if (ctx->hidden != hidden)
++    {
++        ctx->hidden = hidden;
++        if (host_set_hidden && ctx->host_token) host_set_hidden( ctx->host_token, hidden );
++        else if (!ctx->host_backed)
++        {
++            [CATransaction begin];
++            [CATransaction setDisableActions:YES];
++            ctx->layer.hidden = hidden ? YES : NO;
++            [CATransaction commit];
++        }
++    }
++    if (ctx->role == WINEIOS_LAYER_GDI &&
++        (overlay = wineios_layer_find( ctx->hwnd, WINEIOS_LAYER_OVERLAY )))
++        wineios_layer_set_hidden( overlay, hidden );
++}
++
++void wineios_layer_set_geometry( struct wineios_layer *ctx, int x, int y, int width, int height )
++{
++    struct wineios_layer *overlay;
++
++    if (!ctx) return;
++    if (width <= 0 || height <= 0) return;
++
++    layer_set_size( ctx, width, height );
++
++    if (x != ctx->x || y != ctx->y)
++    {
++        ctx->x = x;
++        ctx->y = y;
++        /* position is in POINTS and x/y are PIXELS; on a view-backed layer the
++         * host_move below is what places it, correctly and in one place. Same
++         * reason as the bounds write in layer_set_size. */
++        if (!ctx->host_backed)
++        {
++            [CATransaction begin];
++            [CATransaction setDisableActions:YES];
++            ctx->layer.position = CGPointMake( x, y );
++            [CATransaction commit];
++        }
++    }
++
++    if (host_move && ctx->host_token) host_move( ctx->host_token, x, y, width, height );
++
++    if (ctx->role == WINEIOS_LAYER_GDI &&
++        (overlay = wineios_layer_find( ctx->hwnd, WINEIOS_LAYER_OVERLAY )))
++    {
++        overlay->x = x;
++        overlay->y = y;
++        if (host_move && overlay->host_token)
++            host_move( overlay->host_token, x, y, width, height );
++    }
++}
++
++void wineios_layer_destroy( struct wineios_layer *ctx )
++{
++    if (!ctx) return;
++
++    if (!layer_registry_remove( ctx )) return;
++
++    /* Paired with the "layer ... for hwnd" line in wineios_layer_create: with
++     * WINEIOS_METAL_DEBUG=1 the two together show a layer's whole life, which
++     * is the only way to catch one outliving its window. */
++    MLOG( "destroy layer %p for hwnd %p, host token %p\n", ctx, ctx->hwnd, ctx->host_token );
++
++    if (host_detach && ctx->host_token) host_detach( ctx->host_token );
++
++    [ctx->staging release];
++    ctx->staging = nil;
++    [ctx->layer release];
++    ctx->layer = nil;
++    free( ctx );
++}
++
++static void capture_drawable( struct wineios_layer *ctx, id<MTLTexture> tex )
++{
++    static unsigned capture_seq;
++
++    const char *prefix = getenv( "WINEIOS_CAPTURE" );
++    unsigned w = (unsigned)tex.width, h = (unsigned)tex.height;
++    unsigned char *bgra, *rgb;
++    char path[1024];
++    unsigned i;
++    FILE *f;
++
++    if (!prefix) return;
++    if (!(bgra = malloc( (size_t)w * h * 4 ))) return;
++
++    [tex getBytes:bgra bytesPerRow:w * 4 fromRegion:MTLRegionMake2D( 0, 0, w, h ) mipmapLevel:0];
++
++    if ((rgb = malloc( (size_t)w * h * 3 )))
++    {
++        for (i = 0; i < w * h; i++)
++        {
++            rgb[i * 3 + 0] = bgra[i * 4 + 2];
++            rgb[i * 3 + 1] = bgra[i * 4 + 1];
++            rgb[i * 3 + 2] = bgra[i * 4 + 0];
++        }
++        snprintf( path, sizeof(path), "%s-%u.ppm", prefix, capture_seq );
++        if ((f = fopen( path, "wb" )))
++        {
++            fprintf( f, "P6\n%u %u\n255\n", w, h );
++            fwrite( rgb, 1, (size_t)w * h * 3, f );
++            fclose( f );
++            fprintf( stderr, "wineios:metal: wrote %s (%ux%u)\n", path, w, h );
++        }
++        free( rgb );
++    }
++
++    fprintf( stderr, "wineios:metal: frame %u (layer frame %u) %ux%u  px(0,0)=%02x%02x%02x  "
++             "px(w/2,h/2)=%02x%02x%02x\n", capture_seq, ctx->frames, w, h,
++             bgra[2], bgra[1], bgra[0],
++             bgra[((h / 2) * w + w / 2) * 4 + 2],
++             bgra[((h / 2) * w + w / 2) * 4 + 1],
++             bgra[((h / 2) * w + w / 2) * 4 + 0] );
++    capture_seq++;
++    free( bgra );
++}
++
++__attribute__((visibility("default")))
++void wineios_layer_repaint_all( void )
++{
++    unsigned i;
++
++    if (!metal_device || !metal_queue) return;
++
++    pthread_mutex_lock( &layer_registry_lock );
++    for (i = 0; i < layer_registry_count; i++)
++    {
++        struct wineios_layer *ctx = layer_registry[i];
++        id<CAMetalDrawable> drawable;
++        id<MTLCommandBuffer> cmd;
++        id<MTLBlitCommandEncoder> blit;
++
++        if (!ctx->staging || !ctx->layer) continue;
++
++        @autoreleasepool
++        {
++            if (!(drawable = [ctx->layer nextDrawable])) continue;
++
++            cmd = [metal_queue commandBuffer];
++            blit = [cmd blitCommandEncoder];
++            [blit copyFromTexture:ctx->staging
++                      sourceSlice:0
++                      sourceLevel:0
++                     sourceOrigin:MTLOriginMake( 0, 0, 0 )
++                       sourceSize:MTLSizeMake( ctx->staging.width, ctx->staging.height, 1 )
++                        toTexture:drawable.texture
++                 destinationSlice:0
++                 destinationLevel:0
++                destinationOrigin:MTLOriginMake( 0, 0, 0 )];
++            [blit endEncoding];
++            [cmd commit];
++            [cmd waitUntilScheduled];
++            /* Already on the main thread: this is only ever called from the
++             * host's attach and become-active paths. */
++            [CATransaction begin];
++            [drawable present];
++            [CATransaction commit];
++        }
++    }
++    pthread_mutex_unlock( &layer_registry_lock );
++}
++
++int wineios_layer_present( struct wineios_layer *ctx, const void *bits,
++                           int width, int height, int stride )
++{
++    id<CAMetalDrawable> drawable;
++    id<MTLCommandBuffer> cmd;
++    id<MTLBlitCommandEncoder> blit;
++    int capture;
++
++    if (!ctx || !bits) return 0;
++    if (width <= 0 || height <= 0) return 0;
++    if (width != ctx->width || height != ctx->height) layer_set_size( ctx, width, height );
++
++    @autoreleasepool
++    {
++        if (!ctx->staging)
++        {
++            MTLTextureDescriptor *desc =
++                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
++                                                                   width:width
++                                                                  height:height
++                                                               mipmapped:NO];
++            desc.usage = MTLTextureUsageShaderRead;
++            /* Shared, not Managed: unified memory on every device this will run
++             * on, and Managed does not exist on iOS. */
++            desc.storageMode = MTLStorageModeShared;
++            /* newTextureWithDescriptor: returns +1 -- no retain, and the
++             * matching release is in layer_set_size/destroy. Wine builds
++             * Objective-C without ARC. */
++            ctx->staging = [metal_device newTextureWithDescriptor:desc];
++            if (!ctx->staging) return 0;
++        }
++
++        [ctx->staging replaceRegion:MTLRegionMake2D( 0, 0, width, height )
++                        mipmapLevel:0
++                          withBytes:bits
++                        bytesPerRow:stride];
++
++        if (!(drawable = [ctx->layer nextDrawable]))
++        {
++            /* Not fatal and not rare: the layer has a bounded pool and a
++             * present that has not been consumed yet blocks the next one. */
++            MLOG( "nextDrawable returned nil, dropping frame %u\n", ctx->frames );
++            return 0;
++        }
++
++        cmd = [metal_queue commandBuffer];
++        blit = [cmd blitCommandEncoder];
++        [blit copyFromTexture:ctx->staging
++                  sourceSlice:0
++                  sourceLevel:0
++                 sourceOrigin:MTLOriginMake( 0, 0, 0 )
++                   sourceSize:MTLSizeMake( width, height, 1 )
++                    toTexture:drawable.texture
++             destinationSlice:0
++             destinationLevel:0
++            destinationOrigin:MTLOriginMake( 0, 0, 0 )];
++        [blit endEncoding];
++
++        capture = getenv( "WINEIOS_CAPTURE" ) != NULL;
++
++        [cmd commit];
++        if (!capture)
++        {
++            id<CAMetalDrawable> presented = [drawable retain];
++
++            [cmd waitUntilScheduled];
++            dispatch_async( dispatch_get_main_queue(), ^{
++                [CATransaction begin];
++                [presented present];
++                [CATransaction commit];
++                [presented release];
++            });
++        }
++
++        if (capture)
++        {
++            /* Read the drawable BEFORE presenting it -- once presented the
++             * texture belongs to the compositor -- then present from a second
++             * command buffer so the on-screen path is still exercised. */
++            id<MTLCommandBuffer> present_cmd;
++
++            [cmd waitUntilCompleted];
++            capture_drawable( ctx, drawable.texture );
++            present_cmd = [metal_queue commandBuffer];
++            [present_cmd commit];
++            [present_cmd waitUntilScheduled];
++            [CATransaction begin];
++            [drawable present];
++            [CATransaction commit];
++            (void)present_cmd;
++        }
++
++        ctx->frames++;
++    }
++    return 1;
++}
+diff --git a/dlls/wineios.drv/surface.c b/dlls/wineios.drv/surface.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..79e5daa150182c51893580bcf4626adf4c8cf171
+--- /dev/null
++++ b/dlls/wineios.drv/surface.c
+@@ -0,0 +1,231 @@
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include "config.h"
++#include "wineios.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(wineios);
++
++static pthread_mutex_t surface_mutex = PTHREAD_MUTEX_INITIALIZER;
++
++static const struct window_surface_funcs wineios_surface_funcs;
++
++struct wineios_window_surface *wineios_surface_cast( struct window_surface *surface )
++{
++    if (!surface || surface->funcs != &wineios_surface_funcs) return NULL;
++    return (struct wineios_window_surface *)surface;
++}
++
++static void wineios_surface_set_clip( struct window_surface *surface, const RECT *rects, UINT count )
++{
++    /* Nothing to do. Overlap between top-level windows is CoreAnimation's
++     * problem (layer z-order), not ours, and win32u has already excluded child
++     * windows -- they paint into their parent's surface. */
++}
++
++static BOOL wineios_surface_flush( struct window_surface *base, const RECT *rect, const RECT *dirty,
++                                   const BITMAPINFO *color_info, const void *color_bits,
++                                   BOOL shape_changed, const BITMAPINFO *shape_info,
++                                   const void *shape_bits )
++{
++    struct wineios_window_surface *surface = wineios_surface_cast( base );
++    int surf_width = color_info->bmiHeader.biWidth;
++    int surf_height = abs( color_info->bmiHeader.biHeight );
++    int stride = surf_width * 4;
++    struct wineios_layer *layer;
++    int x, y, width, height, frame_width, frame_height;
++    RECT visible;
++
++    if (!surface) return TRUE;
++    if (surf_width <= 0 || surf_height <= 0) return TRUE;
++
++    pthread_mutex_lock( &surface_mutex );
++    visible = surface->visible;
++    pthread_mutex_unlock( &surface_mutex );
++
++    x = visible.left;
++    y = visible.top;
++    width = min( surf_width, max( visible.right - visible.left, 0 ) );
++    height = min( surf_height, max( visible.bottom - visible.top, 0 ) );
++    if (!width || !height) { width = surf_width; height = surf_height; }
++
++    frame_width = visible.right - visible.left;
++    frame_height = visible.bottom - visible.top;
++    if (frame_width <= 0 || frame_height <= 0)
++    {
++        frame_width = width;
++        frame_height = height;
++    }
++
++    pthread_mutex_lock( &surface_mutex );
++    if (!(layer = surface->layer))
++    {
++        /* Created on the first flush, not in pCreateWindowSurface: win32u makes
++         * a surface for message-only and IME windows too, and those never
++         * paint. Deferring means they never cost a drawable. */
++        layer = surface->layer = wineios_layer_create( base->hwnd, width, height, WINEIOS_LAYER_GDI );
++        if (!layer)
++        {
++            pthread_mutex_unlock( &surface_mutex );
++            WARN( "hwnd %p: no layer, dropping %ux%u frame\n", base->hwnd, width, height );
++            return TRUE;   /* TRUE = bounds consumed; retrying would just spin */
++        }
++        TRACE( "hwnd %p: created layer %p %ux%u at %d,%d\n", base->hwnd, layer, width, height, x, y );
++        wineios_layer_set_hidden( layer, surface->hidden );
++    }
++    wineios_layer_set_geometry( layer, x, y, frame_width, frame_height );
++    pthread_mutex_unlock( &surface_mutex );
++
++    TRACE( "hwnd %p surface %s dirty %s -> layer %p %dx%d at %d,%d\n", base->hwnd,
++           wine_dbgstr_rect( rect ), wine_dbgstr_rect( dirty ), layer, width, height, x, y );
++
++    wineios_layer_present( layer, color_bits, width, height, stride );
++    return TRUE;
++}
++
++static void wineios_surface_destroy( struct window_surface *base )
++{
++    struct wineios_window_surface *surface = wineios_surface_cast( base );
++    struct wineios_layer *layer;
++
++    if (!surface) return;
++
++    pthread_mutex_lock( &surface_mutex );
++    layer = surface->layer;
++    surface->layer = NULL;
++    pthread_mutex_unlock( &surface_mutex );
++
++    TRACE( "hwnd %p surface %p layer %p\n", base->hwnd, surface, layer );
++    if (layer && wineios_layer_for_hwnd( base->hwnd ) == layer) wineios_layer_destroy( layer );
++}
++
++static const struct window_surface_funcs wineios_surface_funcs =
++{
++    wineios_surface_set_clip,
++    wineios_surface_flush,
++    wineios_surface_destroy,
++};
++
++/***********************************************************************
++ *           CreateWindowSurface   (WINEIOS.@)
++ */
++BOOL wineios_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_rect,
++                                  struct window_surface **surface )
++{
++    char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
++    BITMAPINFO *info = (BITMAPINFO *)buffer;
++    struct window_surface *previous;
++    int width = surface_rect->right - surface_rect->left;
++    int height = surface_rect->bottom - surface_rect->top;
++
++    TRACE( "hwnd %p, layered %u, surface_rect %s, surface %p\n", hwnd, layered,
++           wine_dbgstr_rect( surface_rect ), surface );
++
++    if ((previous = *surface) && wineios_surface_cast( previous )) return TRUE;
++    if (width <= 0 || height <= 0) return TRUE;
++    if (previous) window_surface_release( previous );
++
++    memset( info, 0, sizeof(*info) );
++    info->bmiHeader.biSize        = sizeof(info->bmiHeader);
++    info->bmiHeader.biWidth       = width;
++    info->bmiHeader.biHeight      = -height;   /* top-down: matches Metal's texture origin */
++    info->bmiHeader.biPlanes      = 1;
++    info->bmiHeader.biBitCount    = 32;        /* B,G,R,X -- MTLPixelFormatBGRA8Unorm byte order */
++    info->bmiHeader.biSizeImage   = width * height * 4;
++    info->bmiHeader.biCompression = BI_RGB;
++
++    *surface = window_surface_create( sizeof(struct wineios_window_surface), &wineios_surface_funcs,
++                                      hwnd, surface_rect, info, 0 );
++    if (!*surface) ERR( "hwnd %p: failed to create a %dx%d surface\n", hwnd, width, height );
++
++    return TRUE;
++}
++
++void wineios_DestroyWindow( HWND hwnd )
++{
++    struct wineios_layer *gdi = wineios_layer_for_hwnd( hwnd );
++    /* Both roles: a D3D window has an overlay above its GDI surface, and a
++     * swapchain's layer left behind keeps showing the last rendered frame for
++     * a window that no longer exists. */
++    struct wineios_layer *overlay = wineios_layer_find( hwnd, WINEIOS_LAYER_OVERLAY );
++
++    TRACE( "hwnd %p gdi %p overlay %p\n", hwnd, gdi, overlay );
++    if (overlay) wineios_layer_destroy( overlay );
++    if (gdi) wineios_layer_destroy( gdi );
++}
++
++/***********************************************************************
++ *           WindowPosChanged   (WINEIOS.@)
++ */
++void wineios_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UINT swp_flags,
++                               const struct window_rects *new_rects, struct window_surface *base )
++{
++    struct wineios_window_surface *surface = wineios_surface_cast( base );
++    struct wineios_layer *layer;
++    DWORD style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
++    BOOL expose, hidden = !(style & WS_VISIBLE);
++    RECT visible;
++
++    TRACE( "hwnd %p new_rects %s after %p flags %08x surface %p\n", hwnd,
++           debugstr_window_rects( new_rects ), insert_after, swp_flags, base );
++
++    if (!surface)
++    {
++        /* A hidden window can be left without a surface; its layer is not. */
++        if (hidden) wineios_layer_set_hidden( wineios_layer_for_hwnd( hwnd ), TRUE );
++        return;
++    }
++
++    if (!surface->centred && !(swp_flags & SWP_HIDEWINDOW))
++    {
++        DWORD style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
++        int vw = new_rects->visible.right - new_rects->visible.left;
++        int vh = new_rects->visible.bottom - new_rects->visible.top;
++
++        if (vw >= 120 && vh >= 80 && (style & WS_VISIBLE) &&
++            (style & WS_CAPTION) == WS_CAPTION && !(style & WS_CHILD) &&
++            !NtUserGetWindowRelative( hwnd, GW_OWNER ))
++        {
++            surface->centred = TRUE;
++            wineios_request_center( hwnd );
++        }
++    }
++
++    visible = new_rects->visible;
++
++    /* A large top-level window moving: Dark Souls' fullscreen window ends up
++     * about 100 px in, and these say which move put it there. */
++    if (surface->exposed && !(style & WS_CHILD) &&
++        visible.right - visible.left >= 640 && visible.bottom - visible.top >= 360 &&
++        (visible.left != surface->visible.left || visible.top != surface->visible.top))
++    {
++        static unsigned logged;
++        if (logged++ < 40)
++            ERR( "ios-winpos: %p %s -> %s flags %#x style %#x after %p\n", hwnd,
++                 wine_dbgstr_rect( &surface->visible ), wine_dbgstr_rect( &visible ),
++                 swp_flags, (unsigned)style, insert_after );
++    }
++
++    pthread_mutex_lock( &surface_mutex );
++    expose = !surface->exposed || !EqualRect( &surface->visible, &visible );
++    surface->visible = visible;
++    surface->exposed = TRUE;
++    surface->hidden = hidden;
++    layer = surface->layer;
++    if (layer)
++    {
++        wineios_layer_set_geometry( layer, visible.left, visible.top,
++                                    visible.right - visible.left,
++                                    visible.bottom - visible.top );
++        wineios_layer_set_hidden( layer, hidden );
++    }
++    pthread_mutex_unlock( &surface_mutex );
++
++    if (expose)
++    {
++        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN );
++        NtUserExposeWindowSurface( hwnd, 0, NULL );
++    }
++}
+diff --git a/dlls/wineios.drv/unixlib.h b/dlls/wineios.drv/unixlib.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..3642be7346179d181fe5ab03191a2bef93bbe21c
+--- /dev/null
++++ b/dlls/wineios.drv/unixlib.h
+@@ -0,0 +1,29 @@
++
++#ifndef __WINE_WINEIOS_UNIXLIB_H
++#define __WINE_WINEIOS_UNIXLIB_H
++
++#include "ntuser.h"
++#include "wine/unixlib.h"
++
++enum wineios_funcs
++{
++    unix_init,
++    unix_drain,
++    unix_funcs_count
++};
++
++/* The drain thread of the session host, the process the app boots Wine with,
++ * also starts the programs the app queues. */
++struct wineios_drain_params
++{
++    BOOL  session_host;    /* in: the caller is the session host */
++    BOOL  launch;          /* out: cmdline and cwd name a program to start */
++    WCHAR cmdline[4096];
++    WCHAR cwd[1024];
++};
++
++#define WINEIOS_SESSION_HOST L"kitsune-session.exe"
++
++#define WINEIOS_CALL(func, params) WINE_UNIX_CALL(unix_ ## func, params)
++
++#endif /* __WINE_WINEIOS_UNIXLIB_H */
+diff --git a/dlls/wineios.drv/wineios.h b/dlls/wineios.drv/wineios.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..911c1a650e72f720dbff64ceaa31595fb3ec2512
+--- /dev/null
++++ b/dlls/wineios.drv/wineios.h
+@@ -0,0 +1,45 @@
++
++#ifndef __WINE_WINEIOS_H
++#define __WINE_WINEIOS_H
++
++#include <stdarg.h>
++#include <stdlib.h>
++#include <string.h>
++#include <pthread.h>
++
++#include "ntstatus.h"
++#define WIN32_NO_STATUS
++#include "windef.h"
++#include "winbase.h"
++#include "wingdi.h"
++#include "winuser.h"
++#include "ntgdi.h"
++#include "wine/gdi_driver.h"
++#include "wine/debug.h"
++
++#include "unixlib.h"
++#include "wineios_metal.h"
++
++struct wineios_window_surface
++{
++    struct window_surface  header;
++    struct wineios_layer  *layer;   /* NULL until the first flush */
++    RECT                   visible; /* last known screen rect, raw pixels */
++    BOOL                   exposed; /* has the initial full repaint been asked for */
++    BOOL                   centred; /* placed once, when it first had a real size */
++    BOOL                   hidden;  /* not WS_VISIBLE: its layer stays but is not shown */
++};
++
++extern struct wineios_window_surface *wineios_surface_cast( struct window_surface *surface );
++
++/* driver entry points */
++extern BOOL wineios_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_rect,
++                                         struct window_surface **surface );
++extern void wineios_DestroyWindow( HWND hwnd );
++extern void wineios_request_center( HWND hwnd );
++extern void wineios_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UINT swp_flags,
++                                      const struct window_rects *new_rects,
++                                      struct window_surface *surface );
++extern UINT wineios_UpdateDisplayDevices( const struct gdi_device_manager *manager, void *param );
++
++#endif /* __WINE_WINEIOS_H */
+diff --git a/dlls/wineios.drv/wineios_main.c b/dlls/wineios.drv/wineios_main.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..ffcf46c136bc3fa07ee439198ec59b9a2c6db01c
+--- /dev/null
++++ b/dlls/wineios.drv/wineios_main.c
+@@ -0,0 +1,56 @@
++
++#if 0
++#pragma makedep unix
++#endif
++
++#include "config.h"
++#include "wineios.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(wineios);
++
++static const struct user_driver_funcs wineios_drv_funcs =
++{
++    .pCreateWindowSurface = wineios_CreateWindowSurface,
++    .pDestroyWindow = wineios_DestroyWindow,
++    .pWindowPosChanged = wineios_WindowPosChanged,
++    .pUpdateDisplayDevices = wineios_UpdateDisplayDevices,
++};
++
++static NTSTATUS wineios_unix_init( void *arg )
++{
++    if (!wineios_metal_init())
++        ERR( "no Metal device; windows will be created but nothing will be presented\n" );
++
++    __wine_set_user_driver( &wineios_drv_funcs, WINE_GDI_DRIVER_VERSION );
++
++    /* Hand the input entry points to the host. See input.c. */
++    {
++        extern void wineios_input_register_with_host(void);
++        wineios_input_register_with_host();
++    }
++
++    TRACE( "wineios.drv installed\n" );
++    return STATUS_SUCCESS;
++}
++
++extern NTSTATUS wineios_unix_drain( void *arg );
++
++const unixlib_entry_t __wine_unix_call_funcs[] =
++{
++    wineios_unix_init,
++    wineios_unix_drain,
++};
++
++C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
++
++#ifdef _WIN64
++
++const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
++{
++    wineios_unix_init,
++    wineios_unix_drain,
++};
++
++C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
++
++#endif /* _WIN64 */
+diff --git a/dlls/wineios.drv/wineios_metal.h b/dlls/wineios.drv/wineios_metal.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a9cb58934f20665f84882067637399ac57b844e
+--- /dev/null
++++ b/dlls/wineios.drv/wineios_metal.h
+@@ -0,0 +1,51 @@
++
++#ifndef __WINE_WINEIOS_METAL_H
++#define __WINE_WINEIOS_METAL_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct wineios_layer;
++
++/* Returns 1 if a Metal device was found. Safe to call more than once. */
++int wineios_metal_init(void);
++
++void wineios_metal_screen_size(int *width, int *height);
++
++enum wineios_layer_role
++{
++    WINEIOS_LAYER_GDI = 0,
++    WINEIOS_LAYER_OVERLAY = 1,
++};
++
++/* One CAMetalLayer per (top-level Windows window, role). x/y are in screen
++ * pixels with the origin top-left, i.e. Windows coordinates, NOT Core
++ * Animation's. */
++struct wineios_layer *wineios_layer_create(void *hwnd, int width, int height, int role);
++void wineios_layer_destroy(struct wineios_layer *layer);
++/* Hide or show a layer; a GDI layer takes its window's overlay along. */
++void wineios_layer_set_hidden(struct wineios_layer *layer, int hidden);
++void wineios_layer_set_geometry(struct wineios_layer *layer, int x, int y,
++                                int width, int height);
++
++/* Upload a top-down 32bpp BGRA image and present it. Returns 1 on success.
++ * Called from the Wine thread that owns the window, never from the host's
++ * main thread. */
++int wineios_layer_present(struct wineios_layer *layer, const void *bits,
++                          int width, int height, int stride);
++
++/* The window's GDI layer: what every caller outside this file means by "the
++ * layer for this window". */
++struct wineios_layer *wineios_layer_for_hwnd(void *hwnd);
++/* Any role, by name. */
++struct wineios_layer *wineios_layer_find(void *hwnd, int role);
++void *wineios_layer_hwnd(struct wineios_layer *layer);
++void wineios_layer_size(struct wineios_layer *layer, int *width, int *height);
++void *wineios_layer_metal_layer(struct wineios_layer *layer);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __WINE_WINEIOS_METAL_H */

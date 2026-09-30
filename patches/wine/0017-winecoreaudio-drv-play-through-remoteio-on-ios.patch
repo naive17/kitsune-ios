@@ -1,0 +1,471 @@
+winecoreaudio.drv: Play through RemoteIO on iOS.
+
+An AVAudioSession is set up first (coreaudio_ios.m), endpoints are
+RemoteIO, the render period is 25 ms and the timer loop waits at most
+10 ms. MIDI is stubbed out. avrt runs audio threads at TIME_CRITICAL.
+---
+diff --git a/dlls/avrt/main.c b/dlls/avrt/main.c
+index 68af35c891a38160b9d875f81722bb9935129b04..3bbff87ea9d56d782c091d8efa6e36348e97bafd 100644
+--- a/dlls/avrt/main.c
++++ b/dlls/avrt/main.c
+@@ -56,7 +56,9 @@ HANDLE WINAPI AvSetMmThreadCharacteristicsA(const char *name, DWORD *index)
+ 
+ HANDLE WINAPI AvSetMmThreadCharacteristicsW(const WCHAR *name, DWORD *index)
+ {
++#ifndef WINE_IOS_JIT_ARENA
+     FIXME("(%s,%p): stub\n", debugstr_w(name), index);
++#endif
+ 
+     if (!name)
+     {
+@@ -70,6 +72,11 @@ HANDLE WINAPI AvSetMmThreadCharacteristicsW(const WCHAR *name, DWORD *index)
+         return NULL;
+     }
+ 
++#ifdef WINE_IOS_JIT_ARENA
++    if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL))
++        WARN("iOS audio-thread promotion failed, error %lu\n", GetLastError());
++#endif
++
+     return (HANDLE)0x12345678;
+ }
+ 
+diff --git a/dlls/winecoreaudio.drv/Makefile.in b/dlls/winecoreaudio.drv/Makefile.in
+index e8ee5ed433a19d1f455ad62d3695a1f7afba2409..a3b21aa87ccc8c2d04d46013e8c5861cf3699bfb 100644
+--- a/dlls/winecoreaudio.drv/Makefile.in
++++ b/dlls/winecoreaudio.drv/Makefile.in
+@@ -1,6 +1,7 @@
+ UNIXLIB   = winecoreaudio.so
+-UNIX_LIBS = $(COREAUDIO_LIBS)
++UNIX_LIBS = $(COREAUDIO_LIBS) -framework AVFoundation -framework Foundation
+ 
+ SOURCES = \
+ 	coreaudio.c \
++	coreaudio_ios.m \
+ 	coremidi.c
+diff --git a/dlls/winecoreaudio.drv/coreaudio.c b/dlls/winecoreaudio.drv/coreaudio.c
+index c7e0dc240485c4f1b6517f3ff607dbf2990d597e..7cad197fb69a52b09454ecd55aa0f7628a1c59c3 100644
+--- a/dlls/winecoreaudio.drv/coreaudio.c
++++ b/dlls/winecoreaudio.drv/coreaudio.c
+@@ -43,7 +43,14 @@
+ #include <fenv.h>
+ #include <unistd.h>
+ 
++#include <TargetConditionals.h>
++#if TARGET_OS_IPHONE
++/* iOS has no <CoreAudio/CoreAudio.h> umbrella and no HAL (AudioHardware.h);
++ * only the shared types are available.  RemoteIO comes from AudioUnit. */
++#include <CoreAudio/CoreAudioTypes.h>
++#else
+ #include <CoreAudio/CoreAudio.h>
++#endif
+ #include <AudioToolbox/AudioFormat.h>
+ #include <AudioToolbox/AudioConverter.h>
+ #include <AudioUnit/AudioUnit.h>
+@@ -69,9 +76,19 @@
+ 
+ #include "unixlib.h"
+ 
++#if !TARGET_OS_IPHONE
+ #if !defined(MAC_OS_VERSION_12_0) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_VERSION_12_0
+ #define kAudioObjectPropertyElementMain kAudioObjectPropertyElementMaster
+ #endif
++#endif
++
++#if TARGET_OS_IPHONE
++typedef UInt32 AudioDeviceID;
++#ifndef kAudioObjectUnknown
++#define kAudioObjectUnknown 0
++#endif
++OSStatus coreaudio_ios_prepare_audio_session(void);
++#endif
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(coreaudio);
+ 
+@@ -102,7 +119,11 @@ struct coreaudio_stream
+     BYTE *local_buffer, *cap_buffer, *wrap_buffer, *resamp_buffer, *tmp_buffer;
+ };
+ 
++#if TARGET_OS_IPHONE
++static const REFERENCE_TIME def_period = 250000;
++#else
+ static const REFERENCE_TIME def_period = 100000;
++#endif
+ static const REFERENCE_TIME min_period = 50000;
+ 
+ static ULONG_PTR zero_bits = 0;
+@@ -117,10 +138,14 @@ static HRESULT osstatus_to_hresult(OSStatus sc)
+     switch(sc){
+     case kAudioFormatUnsupportedDataFormatError:
+     case kAudioFormatUnknownFormatError:
++#if !TARGET_OS_IPHONE
+     case kAudioDeviceUnsupportedFormatError:
++#endif
+         return AUDCLNT_E_UNSUPPORTED_FORMAT;
++#if !TARGET_OS_IPHONE
+     case kAudioHardwareBadDeviceError:
+         return AUDCLNT_E_DEVICE_INVALIDATED;
++#endif
+     }
+     return E_FAIL;
+ }
+@@ -154,6 +179,7 @@ static int muldiv( int a, int b, int c )
+     return ret;
+ }
+ 
++#if !TARGET_OS_IPHONE
+ static AudioObjectPropertyScope get_scope(EDataFlow flow)
+ {
+     return (flow == eRender) ? kAudioDevicePropertyScopeOutput : kAudioDevicePropertyScopeInput;
+@@ -334,6 +360,51 @@ static NTSTATUS unix_get_endpoint_ids(void *args)
+     return STATUS_SUCCESS;
+ }
+ 
++#else  /* TARGET_OS_IPHONE */
++
++static NTSTATUS unix_get_endpoint_ids(void *args)
++{
++    struct get_endpoint_ids_params *params = args;
++    static const WCHAR ios_name[] = {'i','O','S',' ','A','u','d','i','o',0};
++    static const char ios_uid[] = "ios-default-out";
++    struct endpoint *endpoint = params->endpoints;
++    unsigned int needed, offset;
++    const SIZE_T name_size = sizeof(ios_name);           /* WCHARs incl. NUL */
++    const SIZE_T uid_size = (sizeof(ios_uid) + 1) & ~1;  /* UTF8, padded even */
++
++    params->num = 0;
++    params->default_idx = 0;
++
++    if(params->flow != eRender && params->flow != eCapture){
++        params->result = E_INVALIDARG;
++        return STATUS_SUCCESS;
++    }
++
++    /* iOS exposes exactly one hardcoded default endpoint (RemoteIO). */
++    params->num = 1;
++    offset = sizeof(*endpoint);
++    needed = offset + name_size + uid_size;
++
++    if(needed <= params->size){
++        endpoint->name = offset;
++        memcpy((char *)params->endpoints + offset, ios_name, name_size);
++        offset += name_size;
++
++        endpoint->device = offset;
++        memcpy((char *)params->endpoints + offset, ios_uid, sizeof(ios_uid));
++        offset += uid_size;
++
++        params->result = S_OK;
++    }else{
++        params->size = needed;
++        params->result = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
++    }
++
++    return STATUS_SUCCESS;
++}
++
++#endif  /* TARGET_OS_IPHONE */
++
+ static WAVEFORMATEX *clone_format(const WAVEFORMATEX *fmt)
+ {
+     WAVEFORMATEX *ret;
+@@ -486,7 +557,11 @@ static AudioComponentInstance get_audiounit(EDataFlow dataflow, AudioDeviceID ad
+ 
+     memset(&desc, 0, sizeof(desc));
+     desc.componentType = kAudioUnitType_Output;
++#if TARGET_OS_IPHONE
++    desc.componentSubType = kAudioUnitSubType_RemoteIO;
++#else
+     desc.componentSubType = kAudioUnitSubType_HALOutput;
++#endif
+     desc.componentManufacturer = kAudioUnitManufacturer_Apple;
+ 
+     if(!(comp = AudioComponentFindNext(NULL, &desc))){
+@@ -522,6 +597,10 @@ static AudioComponentInstance get_audiounit(EDataFlow dataflow, AudioDeviceID ad
+         }
+     }
+ 
++#if TARGET_OS_IPHONE
++    /* RemoteIO has no selectable device; routing is via AVAudioSession. */
++    (void)adevid;
++#else
+     sc = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+             kAudioUnitScope_Global, 0, &adevid, sizeof(adevid));
+     if(sc != noErr){
+@@ -529,6 +608,7 @@ static AudioComponentInstance get_audiounit(EDataFlow dataflow, AudioDeviceID ad
+         AudioComponentInstanceDispose(unit);
+         return NULL;
+     }
++#endif
+ 
+     return unit;
+ }
+@@ -669,6 +749,14 @@ static HRESULT ca_setup_audiounit(EDataFlow dataflow, AudioComponentInstance uni
+     return S_OK;
+ }
+ 
++#if TARGET_OS_IPHONE
++static AudioDeviceID dev_id_from_device(const char *device)
++{
++    /* iOS has no HAL device IDs; the RemoteIO unit is the only endpoint. */
++    (void)device;
++    return kAudioObjectUnknown;
++}
++#else
+ static AudioDeviceID dev_id_from_device(const char *device)
+ {
+     AudioDeviceID id;
+@@ -697,6 +785,7 @@ static AudioDeviceID dev_id_from_device(const char *device)
+ 
+     return id;
+ }
++#endif  /* TARGET_OS_IPHONE */
+ 
+ static NTSTATUS unix_create_stream(void *args)
+ {
+@@ -737,6 +826,11 @@ static NTSTATUS unix_create_stream(void *args)
+     if(params->share == AUDCLNT_SHAREMODE_EXCLUSIVE)
+         stream->bufsize_frames -= stream->bufsize_frames % stream->period_frames;
+ 
++#if TARGET_OS_IPHONE
++    /* RemoteIO stays silent until an AVAudioSession is configured+active. */
++    coreaudio_ios_prepare_audio_session();
++#endif
++
+     if(!(stream->unit = get_audiounit(stream->flow, stream->dev_id))){
+         params->result = AUDCLNT_E_DEVICE_INVALIDATED;
+         goto end;
+@@ -842,6 +936,7 @@ static NTSTATUS unix_release_stream( void *args )
+     return STATUS_SUCCESS;
+ }
+ 
++#if !TARGET_OS_IPHONE
+ static UINT ca_channel_layout_to_channel_mask(const AudioChannelLayout *layout)
+ {
+     int i;
+@@ -1089,6 +1184,32 @@ static NTSTATUS unix_get_mix_format(void *args)
+     return STATUS_SUCCESS;
+ }
+ 
++#else  /* TARGET_OS_IPHONE */
++
++static NTSTATUS unix_get_mix_format(void *args)
++{
++    struct get_mix_format_params *params = args;
++
++    /* No HAL to query on iOS.  Report a stereo 48 kHz float mix format;
++     * RemoteIO resamples/mixes to the actual hardware rate transparently. */
++    params->fmt->Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
++    params->fmt->Format.nChannels = 2;
++    params->fmt->dwChannelMask = KSAUDIO_SPEAKER_STEREO;
++    params->fmt->Format.nSamplesPerSec = 48000;
++    params->fmt->Format.wBitsPerSample = 32;
++    params->fmt->SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
++    params->fmt->Format.nBlockAlign = (params->fmt->Format.wBitsPerSample *
++                                       params->fmt->Format.nChannels) / 8;
++    params->fmt->Format.nAvgBytesPerSec = params->fmt->Format.nSamplesPerSec *
++        params->fmt->Format.nBlockAlign;
++    params->fmt->Samples.wValidBitsPerSample = params->fmt->Format.wBitsPerSample;
++    params->fmt->Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
++    params->result = S_OK;
++    return STATUS_SUCCESS;
++}
++
++#endif  /* TARGET_OS_IPHONE */
++
+ static NTSTATUS unix_is_format_supported(void *args)
+ {
+     struct is_format_supported_params *params = args;
+@@ -1233,6 +1354,7 @@ static NTSTATUS unix_get_buffer_size(void *args)
+     return STATUS_SUCCESS;
+ }
+ 
++#if !TARGET_OS_IPHONE
+ static HRESULT ca_get_max_stream_latency(struct coreaudio_stream *stream, UInt32 *max)
+ {
+     AudioObjectPropertyAddress addr;
+@@ -1324,6 +1446,24 @@ static NTSTATUS unix_get_latency(void *args)
+     return STATUS_SUCCESS;
+ }
+ 
++#else  /* TARGET_OS_IPHONE */
++
++static NTSTATUS unix_get_latency(void *args)
++{
++    struct get_latency_params *params = args;
++    struct coreaudio_stream *stream = handle_get_stream(params->stream);
++
++    os_unfair_lock_lock(&stream->lock);
++    /* No HAL device/stream latency on iOS; approximate with one period. */
++    *params->latency = stream->period;
++    os_unfair_lock_unlock(&stream->lock);
++
++    params->result = S_OK;
++    return STATUS_SUCCESS;
++}
++
++#endif  /* TARGET_OS_IPHONE */
++
+ static UINT32 get_current_padding_nolock(struct coreaudio_stream *stream)
+ {
+     if(stream->flow == eCapture) capture_resample(stream);
+@@ -1346,11 +1486,15 @@ static void unix_timer_loop(void *args)
+ {
+     struct coreaudio_stream *stream = args;
+     LARGE_INTEGER delay, next, last;
++    REFERENCE_TIME interval = stream->period;
+     int adjust;
+ 
+-    delay.QuadPart = -stream->period;
++#if TARGET_OS_IPHONE
++    if (stream->flow == eRender && interval > 100000) interval = 100000;
++#endif
++    delay.QuadPart = -interval;
+     NtQueryPerformanceCounter(&last, NULL);
+-    next.QuadPart = last.QuadPart + stream->period;
++    next.QuadPart = last.QuadPart + interval;
+ 
+     while(!stream->please_quit){
+         NtSetEvent(stream->event, NULL);
+@@ -1358,13 +1502,13 @@ static void unix_timer_loop(void *args)
+         NtQueryPerformanceCounter(&last, NULL);
+ 
+         adjust = next.QuadPart - last.QuadPart;
+-        if(adjust > stream->period / 2)
+-            adjust = stream->period / 2;
+-        else if(adjust < -stream->period / 2)
+-            adjust = -stream->period / 2;
++        if(adjust > interval / 2)
++            adjust = interval / 2;
++        else if(adjust < -interval / 2)
++            adjust = -interval / 2;
+ 
+-        delay.QuadPart = -(stream->period + adjust);
+-        next.QuadPart += stream->period;
++        delay.QuadPart = -(interval + adjust);
++        next.QuadPart += interval;
+     }
+ }
+ 
+@@ -1709,6 +1853,14 @@ static NTSTATUS unix_get_prop_value(void *args)
+     return STATUS_SUCCESS;
+ }
+ 
++#if TARGET_OS_IPHONE
++static NTSTATUS unix_set_volumes(void *args)
++{
++    /* iOS RemoteIO exposes no per-device/channel volume (system volume is user
++     * controlled); mmdevapi applies session volume in software, so no-op. */
++    return STATUS_SUCCESS;
++}
++#else
+ static NTSTATUS unix_set_volumes(void *args)
+ {
+     struct set_volumes_params *params = args;
+@@ -1741,6 +1893,7 @@ static NTSTATUS unix_set_volumes(void *args)
+ 
+     return STATUS_SUCCESS;
+ }
++#endif  /* TARGET_OS_IPHONE */
+ 
+ static NTSTATUS unix_set_event_handle(void *args)
+ {
+diff --git a/dlls/winecoreaudio.drv/coreaudio_ios.m b/dlls/winecoreaudio.drv/coreaudio_ios.m
+new file mode 100644
+index 0000000000000000000000000000000000000000..18b8bb7442673bb3b357bde5bf5963956adb81da
+--- /dev/null
++++ b/dlls/winecoreaudio.drv/coreaudio_ios.m
+@@ -0,0 +1,49 @@
++#if 0
++#pragma makedep unix
++#endif
++
++#include "config.h"
++
++#include <TargetConditionals.h>
++
++#if TARGET_OS_IPHONE
++
++#import <AVFoundation/AVFoundation.h>
++#import <AudioToolbox/AudioToolbox.h>
++
++/* Configure and activate the process-wide audio session so the RemoteIO audio
++ * unit actually produces sound.  Idempotent: safe to call once per stream. */
++OSStatus coreaudio_ios_prepare_audio_session(void)
++{
++    @autoreleasepool {
++        NSError *err = nil;
++        AVAudioSession *session = [AVAudioSession sharedInstance];
++        double slice = 0.010;
++
++        /* fprintf(stderr), not NSLog: NSLog goes to the system console, while
++         * wine-stderr.log is what a silent-audio report comes with. */
++        BOOL ok = [session setCategory:AVAudioSessionCategoryPlayback
++                           withOptions:AVAudioSessionCategoryOptionMixWithOthers
++                                 error:&err];
++        fprintf(stderr, "[winecoreaudio] setCategory(Playback) ok=%d err=%s\n",
++                (int)ok, err ? [[err localizedDescription] UTF8String] : "none");
++        err = nil;
++
++        ok = [session setPreferredIOBufferDuration:slice error:&err];
++        fprintf(stderr, "[winecoreaudio] setPreferredIOBufferDuration(%gms) ok=%d err=%s\n",
++                slice * 1000, (int)ok, err ? [[err localizedDescription] UTF8String] : "none");
++        err = nil;
++
++        ok = [session setActive:YES error:&err];
++        fprintf(stderr, "[winecoreaudio] setActive(YES) ok=%d err=%s  sampleRate=%g "
++                "ioBuffer=%.3fms outputLatency=%.3fms outputChannels=%ld\n",
++                (int)ok, err ? [[err localizedDescription] UTF8String] : "none",
++                [session sampleRate], [session IOBufferDuration] * 1000.0,
++                [session outputLatency] * 1000.0,
++                (long)[session outputNumberOfChannels]);
++        if (!ok) return -1;
++    }
++    return noErr;
++}
++
++#endif /* TARGET_OS_IPHONE */
+diff --git a/dlls/winecoreaudio.drv/coremidi.c b/dlls/winecoreaudio.drv/coremidi.c
+index 98d1ace845891e8f4f3c77810c16e80af8bc9cba..62bb16d624871faaa75793d3cb28c665dc1342e9 100644
+--- a/dlls/winecoreaudio.drv/coremidi.c
++++ b/dlls/winecoreaudio.drv/coremidi.c
+@@ -27,6 +27,9 @@
+ 
+ #include "config.h"
+ 
++#include <TargetConditionals.h>
++#if !TARGET_OS_IPHONE
++
+ #define ULONG __carbon_ULONG
+ #define E_INVALIDARG __carbon_E_INVALIDARG
+ #define E_OUTOFMEMORY __carbon_E_OUTOFMEMORY
+@@ -1629,3 +1632,29 @@ NTSTATUS unix_wow64_midi_notify_wait(void *args)
+ }
+ 
+ #endif /* _WIN64 */
++
++#else /* TARGET_OS_IPHONE */
++
++#include <stdarg.h>
++#include "ntstatus.h"
++#define WIN32_NO_STATUS
++#include "windef.h"
++#include "winbase.h"
++#include "winternl.h"
++#include "wine/unixlib.h"
++#include "unixlib.h"
++
++NTSTATUS unix_midi_init(void *args) { return STATUS_SUCCESS; }
++NTSTATUS unix_midi_release(void *args) { return STATUS_SUCCESS; }
++NTSTATUS unix_midi_out_message(void *args) { return STATUS_SUCCESS; }
++NTSTATUS unix_midi_in_message(void *args) { return STATUS_SUCCESS; }
++NTSTATUS unix_midi_notify_wait(void *args) { return STATUS_SUCCESS; }
++
++#ifdef _WIN64
++NTSTATUS unix_wow64_midi_init(void *args) { return STATUS_SUCCESS; }
++NTSTATUS unix_wow64_midi_out_message(void *args) { return STATUS_SUCCESS; }
++NTSTATUS unix_wow64_midi_in_message(void *args) { return STATUS_SUCCESS; }
++NTSTATUS unix_wow64_midi_notify_wait(void *args) { return STATUS_SUCCESS; }
++#endif
++
++#endif /* TARGET_OS_IPHONE */

@@ -1,0 +1,455 @@
+server: Run wineserver as a thread of the app.
+
+The app links libwineserver.a and starts it through wineserver_inproc_main
+(ios_inproc.c); it stays up when its last client disconnects. mach.c
+works on the app's own task. A process killed in-process is reported
+through process_died, and the first process gets a full administrator
+token that its children inherit. wineserver_inproc_user_processes tells
+the app how many programs run. The server directory lives in the prefix
+and NLS files come from WINEDATADIR. request.c counts requests at
+KITSUNE_DIAG_LEVEL, named by trace.c.
+---
+diff --git a/server/Makefile.in b/server/Makefile.in
+index 0dd53951c4f64fe790a553d3684d9e5cdbaf8f6c..bf71486a3c14081eb6bf924a1e0bde10ac7ce3fc 100644
+--- a/server/Makefile.in
++++ b/server/Makefile.in
+@@ -19,6 +19,7 @@ SOURCES = \
+ 	handle.c \
+ 	hook.c \
+ 	inproc_sync.c \
++	ios_inproc.c \
+ 	mach.c \
+ 	mailslot.c \
+ 	main.c \
+diff --git a/server/ios_inproc.c b/server/ios_inproc.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..92ca8f1277ce566f804cae2c861c0506637666b6
+--- /dev/null
++++ b/server/ios_inproc.c
+@@ -0,0 +1,74 @@
++
++#include "config.h"
++
++#include <signal.h>
++#include <stdio.h>
++
++#include "object.h"
++#include "file.h"
++#include "thread.h"
++#include "request.h"
++
++#if defined(WINE_IOS_JIT_ARENA)
++/* The single-process flavour: wineserver is a thread here, not a process.
++ * Keyed on WINE_IOS_JIT_ARENA rather than !TARGET_OS_OSX so the macOS test
++ * harness (scripts/16-host-harness.sh) builds the same code the device runs. */
++# define WINE_IOS_INPROC_SERVER
++#endif
++
++#ifdef WINE_IOS_INPROC_SERVER
++
++extern const char *server_argv0;
++extern void init_limits(void);
++extern struct fd *load_intl_file(void);
++
++/* The wineserver_inproc_* symbols are explicitly exported: ntdll and the app
++ * find them with dlsym(RTLD_DEFAULT), and the host build compiles with hidden
++ * visibility, which left them local and made start_server() fall back to
++ * spawning a process that cannot exist. */
++__attribute__((visibility("default")))
++int wineserver_inproc_ready = 0;
++
++__attribute__((visibility("default")))
++void wineserver_inproc_flush( void )
++{
++    if (__atomic_load_n( &wineserver_inproc_ready, __ATOMIC_ACQUIRE )) flush_registry();
++}
++
++/* Same supported settings as wineserver -f -p: this server belongs to the
++ * iOS app session, not the last Windows client. Closing a correctly owned
++ * guest socket must not arm the stock three-second exit(0) of the host. */
++static void configure_inproc_lifetime(void)
++{
++    foreground = 1;
++    master_socket_timeout = TIMEOUT_INFINITE;
++}
++
++__attribute__((visibility("default")))
++void *wineserver_inproc_main( void *arg )
++{
++    (void)arg;
++    setvbuf( stderr, NULL, _IOLBF, 0 );
++    server_argv0 = "wineserver";
++
++    signal( SIGPIPE, SIG_IGN );   /* the one handler we do need: writes to dead clients */
++    init_limits();
++
++    configure_inproc_lifetime();
++
++    sock_init();
++    open_master_socket();
++
++    /* Publish only after the socket exists, never before. */
++    __atomic_store_n( &wineserver_inproc_ready, 1, __ATOMIC_RELEASE );
++
++    set_current_time();
++    init_memory();
++    init_directories( load_intl_file() );
++    init_threading();
++    init_registry();
++    main_loop();
++    return NULL;
++}
++
++#endif /* WINE_IOS_INPROC_SERVER */
+diff --git a/server/mach.c b/server/mach.c
+index ec73dc6e390537ea4fd77894a924a567abc3786e..a69f7e8b7699ca9bd9c341963e42a71a628117eb 100644
+--- a/server/mach.c
++++ b/server/mach.c
+@@ -45,10 +45,27 @@
+ #include <mach/mach.h>
+ #include <mach/mach_error.h>
+ #include <mach/thread_act.h>
+-#include <mach/mach_vm.h>
+-#include <servers/bootstrap.h>
++#ifdef __APPLE__
++# include <TargetConditionals.h>
++#endif
++#ifdef WINE_IOS_JIT_ARENA
++/* bootstrap is only used to PUBLISH the wineserver port so other PROCESSES can
++ * find it -- meaningless when wineserver is a thread in this same process. */
++# define WINE_IOS_INPROC_SERVER
++#endif
+ 
+-static mach_port_t server_mach_port;
++#if !defined(TARGET_OS_OSX) || TARGET_OS_OSX
++# include <mach/mach_vm.h>
++# ifndef WINE_IOS_INPROC_SERVER
++#  include <servers/bootstrap.h>
++# endif
++#else
++# include "../dlls/ntdll/unix/ios_mach_vm.h"
++#endif
++
++#ifndef WINE_IOS_INPROC_SERVER
++static mach_port_t server_mach_port;   /* only used to accept client task ports */
++#endif
+ 
+ void sigchld_callback(void)
+ {
+@@ -70,7 +87,12 @@ static void mach_set_error(kern_return_t mach_error)
+ 
+ static mach_port_t get_process_port( struct process *process )
+ {
++#ifdef WINE_IOS_INPROC_SERVER
++    (void)process;
++    return mach_task_self();
++#else
+     return process->trace_data;
++#endif
+ }
+ 
+ static int is_rosetta( void )
+@@ -92,11 +114,16 @@ static int is_rosetta( void )
+     return rosetta_status;
+ }
+ 
++#ifndef WINE_IOS_INPROC_SERVER
+ extern kern_return_t bootstrap_register2( mach_port_t bp, name_t service_name, mach_port_t sp, uint64_t flags );
++#endif
+ 
+ /* initialize the process control mechanism */
+ void init_tracing_mechanism(void)
+ {
++#ifdef WINE_IOS_INPROC_SERVER
++    return;
++#else
+     mach_port_t bp;
+ 
+     if (task_get_bootstrap_port( mach_task_self(), &bp ) != KERN_SUCCESS)
+@@ -111,11 +138,17 @@ void init_tracing_mechanism(void)
+     if (bootstrap_register2( bp, server_dir, server_mach_port, 0 ) != KERN_SUCCESS)
+         fatal_error( "Can't check in server_mach_port\n" );
+     mach_port_deallocate( mach_task_self(), bp );
++#endif /* WINE_IOS_INPROC_SERVER */
+ }
+ 
+ /* initialize the per-process tracing mechanism */
+ void init_process_tracing( struct process *process )
+ {
++#ifdef WINE_IOS_INPROC_SERVER
++    process->trace_data = mach_task_self();
++    set_process_base_priority( process, process->base_priority );
++    return;
++#else
+     int pid, ret;
+     struct
+     {
+@@ -157,11 +190,18 @@ void init_process_tracing( struct process *process )
+     /* On Mach thread priorities depend on having the process port available, so
+      * reapply all thread priorities here after process tracing is initialized */
+     set_process_base_priority( process, process->base_priority );
++#endif /* WINE_IOS_INPROC_SERVER */
+ }
+ 
+ /* terminate the per-process tracing mechanism */
+ void finish_process_tracing( struct process *process )
+ {
++#ifdef WINE_IOS_INPROC_SERVER
++    /* trace_data is mach_task_self(), a task-self port name we must not
++     * deallocate -- it is not a right we own a reference to. */
++    process->trace_data = 0;
++    return;
++#endif
+     if (process->trace_data)
+     {
+         mach_port_deallocate( mach_task_self(), process->trace_data );
+diff --git a/server/main.c b/server/main.c
+index 46419a09cb44cc3dcd7fa620f1e99a8b9a853da4..7bcde98e3b98a34c84cb518636b8e406e1fdeeea 100644
+--- a/server/main.c
++++ b/server/main.c
+@@ -36,6 +36,13 @@
+ #endif
+ 
+ #include "object.h"
++#if defined(WINE_IOS_JIT_ARENA)
++/* The single-process flavour: wineserver is a thread here, not a process.
++ * Keyed on WINE_IOS_JIT_ARENA rather than !TARGET_OS_OSX so the macOS test
++ * harness (scripts/16-host-harness.sh) builds the same code the device runs. */
++# define WINE_IOS_INPROC_SERVER
++#endif
++
+ #include "file.h"
+ #include "thread.h"
+ #include "request.h"
+@@ -218,7 +225,14 @@ static void sigterm_handler( int signum )
+     exit(1);  /* make sure atexit functions get called */
+ }
+ 
+-static void init_limits(void)
++#ifdef WINE_IOS_INPROC_SERVER
++/* Needed by ios_inproc.c: the thread entry performs the same setup as main(),
++ * and duplicating this would drift from it. */
++void init_limits(void);
++#else
++static
++#endif
++void init_limits(void)
+ {
+ #ifdef RLIMIT_NOFILE
+     struct rlimit rlimit;
+@@ -241,6 +255,7 @@ static void init_limits(void)
+ #endif
+ }
+ 
++#ifndef WINE_IOS_INPROC_SERVER
+ int main( int argc, char *argv[] )
+ {
+     setvbuf( stderr, NULL, _IOLBF, 0 );
+@@ -269,3 +284,4 @@ int main( int argc, char *argv[] )
+     main_loop();
+     return 0;
+ }
++#endif /* WINE_IOS_INPROC_SERVER */
+diff --git a/server/process.c b/server/process.c
+index 94adb19c1c0d681d53fc4fce1bdd4a922433ec8c..a900795581b723199bcedd3e5edc782f70cadd96 100644
+--- a/server/process.c
++++ b/server/process.c
+@@ -68,6 +68,15 @@
+ 
+ static struct list process_list = LIST_INIT(process_list);
+ static int running_processes, user_processes;
++
++#ifdef WINE_IOS_JIT_ARENA
++/* For the app hosting this server: programs running, not counting Wine's own
++ * system processes. */
++__attribute__((visibility("default"))) int wineserver_inproc_user_processes( void )
++{
++    return __atomic_load_n( &user_processes, __ATOMIC_RELAXED );
++}
++#endif
+ static struct event *shutdown_event;           /* signaled when shutdown starts */
+ static struct timeout_user *shutdown_timeout;  /* timeout for server shutdown */
+ static int shutdown_stage;  /* current stage in the shutdown process */
+@@ -564,6 +573,15 @@ static void process_sigkill( void *private )
+     struct process *process = private;
+     int signal = 0;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++    if (process->unix_pid == getpid())
++    {
++        process->sigkill_timeout = NULL;
++        process_died( process );
++        return;
++    }
++#endif
++
+     process->sigkill_delay *= 2;
+     if (process->sigkill_delay >= TICKS_PER_SEC / 2)
+         signal = SIGKILL;
+@@ -582,6 +600,13 @@ static void process_sigkill( void *private )
+ static void start_sigkill_timer( struct process *process )
+ {
+     grab_object( process );
++#ifdef WINE_IOS_JIT_ARENA
++    if (process->unix_pid == getpid())
++    {
++        process_died( process );
++        return;
++    }
++#endif
+     if (process->unix_pid != -1)
+         process->sigkill_timeout = add_timeout_user( -process->sigkill_delay, process_sigkill, process );
+     else
+@@ -669,7 +694,15 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
+     if (!parent)
+     {
+         process->handles = alloc_handle_table( process, 0 );
++#ifdef WINE_IOS_JIT_ARENA
++        /* An app has one user and no UAC prompt to elevate through, so programs
++         * start elevated, as from "Run as administrator". Steam needs this: a
++         * Steam without admin rights depends on its service, whose installer
++         * is 32-bit, and preallocates game files by writing zeros. */
++        process->token = token_create_admin( TRUE, -1, TokenElevationTypeFull, default_session_id );
++#else
+         process->token = token_create_admin( TRUE, -1, TokenElevationTypeLimited, default_session_id );
++#endif
+         process->affinity = ~0;
+     }
+     else
+diff --git a/server/request.c b/server/request.c
+index 5135ed50cfd899ed5ea7a14134858544d7eda00d..ddf7b96cb32301d27d608e2be40fb1fc4a83cd67 100644
+--- a/server/request.c
++++ b/server/request.c
+@@ -267,6 +267,56 @@ static void send_reply( union generic_reply *reply )
+         fatal_protocol_error( current, "reply write: %s\n", strerror( errno ));
+ }
+ 
++
++#ifdef WINE_IOS_JIT_ARENA
++/* Request mix, printed every 10 s at the Full diagnostics level: whether
++ * synchronization requests dominate decides whether an in-process sync
++ * backend is worth it. */
++extern const char *ios_request_name( enum request req );
++static unsigned int ios_census_counts[REQ_NB_REQUESTS];
++static unsigned int ios_census_total;
++static int ios_census_on = -1;
++static timeout_t ios_census_since;
++
++static void ios_census_tick( enum request req )
++{
++    unsigned int i, j, top[8] = {0}, n;
++    double secs;
++    char line[512];
++    int len;
++
++    if (ios_census_on < 0)
++    {
++        const char *level = getenv( "KITSUNE_DIAG_LEVEL" );
++        ios_census_on = level && atoi( level ) >= 2;
++        ios_census_since = monotonic_time;
++    }
++    if (!ios_census_on || req >= REQ_NB_REQUESTS) return;
++    ios_census_counts[req]++;
++    if (++ios_census_total & 1023) return;
++    if (monotonic_time - ios_census_since < 10 * (timeout_t)TICKS_PER_SEC) return;
++
++    for (i = 0; i < REQ_NB_REQUESTS; i++)
++        for (j = 0; j < 8; j++)
++            if (ios_census_counts[i] > ios_census_counts[top[j]])
++            {
++                memmove( top + j + 1, top + j, (7 - j) * sizeof(top[0]) );
++                top[j] = i;
++                break;
++            }
++    for (i = n = 0; i < REQ_NB_REQUESTS; i++) n += ios_census_counts[i];
++    secs = (double)(monotonic_time - ios_census_since) / TICKS_PER_SEC;
++    len = snprintf( line, sizeof(line), "[server-census] %.0f req/s over %.0f s:", n / secs, secs );
++    for (j = 0; j < 8 && len < (int)sizeof(line) - 48 && n; j++)
++        if (ios_census_counts[top[j]])
++            len += snprintf( line + len, sizeof(line) - len, " %s %u%%", ios_request_name( top[j] ),
++                             (unsigned int)(100ull * ios_census_counts[top[j]] / n) );
++    fprintf( stderr, "%s\n", line );
++    memset( ios_census_counts, 0, sizeof(ios_census_counts) );
++    ios_census_since = monotonic_time;
++}
++#endif
++
+ /* call a request handler */
+ static void call_req_handler( struct thread *thread )
+ {
+@@ -279,6 +329,9 @@ static void call_req_handler( struct thread *thread )
+     memset( &reply, 0, sizeof(reply) );
+ 
+     if (debug_level) trace_request();
++#ifdef WINE_IOS_JIT_ARENA
++    ios_census_tick( req );
++#endif
+ 
+     if (req < REQ_NB_REQUESTS)
+         req_handlers[req]( &current->req, &reply );
+@@ -620,7 +673,16 @@ static char *create_server_dir( int force )
+ 
+     /* create the base directory if needed */
+ 
+-#ifdef __ANDROID__  /* there's no /tmp dir on Android */
++#if defined(__APPLE__)
++# include <TargetConditionals.h>
++#endif
++/* Build flavour, not target: the macOS harness must take the same path as the
++ * device. See scripts/16-host-harness.sh. */
++#if defined(__ANDROID__) || defined(WINE_IOS_JIT_ARENA)
++# define WINE_SERVER_DIR_IN_PREFIX
++#endif
++
++#ifdef WINE_SERVER_DIR_IN_PREFIX
+     if (asprintf( &base_dir, "%s/.wineserver", config_dir ) == -1)
+         fatal_error( "out of memory\n" );
+ #else
+diff --git a/server/trace.c b/server/trace.c
+index 0731063f8e3e27bbee5d171708fffdc34779972d..33bbd6ba581d21759e2c35e1b894445a5ca2f0e2 100644
+--- a/server/trace.c
++++ b/server/trace.c
+@@ -1710,3 +1710,8 @@ void trace_reply( enum request req, const union generic_reply *reply )
+     else fprintf( stderr, "%04x: %d() = %s\n",
+                   current->id, req, get_status_name(current->error) );
+ }
++
++const char *ios_request_name( enum request req )
++{
++    return req < REQ_NB_REQUESTS ? req_names[req] : "?";
++}
+diff --git a/server/unicode.c b/server/unicode.c
+index bb39b55e50c3180867463b0edff548c6a1a9d793..c01f1061e71a73bafd6e679cab60074982664778 100644
+--- a/server/unicode.c
++++ b/server/unicode.c
+@@ -324,10 +324,21 @@ static char *get_nls_dir(void)
+     return ret;
+ }
+ 
++static const char *get_env_nls_dir(void)
++{
++    static char *cached;
++    const char *base;
++
++    if (cached) return cached;
++    if (!(base = getenv( "WINEDATADIR" ))) return NULL;
++    if (asprintf( &cached, "%s/nls", base ) == -1) return NULL;
++    return cached;
++}
++
+ /* load the case mapping table */
+ struct fd *load_intl_file(void)
+ {
+-    static const char *nls_dirs[] = { NULL, DATADIR "/wine/nls", "/usr/local/share/wine/nls", "/usr/share/wine/nls" };
++    static const char *nls_dirs[] = { NULL, NULL, DATADIR "/wine/nls", "/usr/local/share/wine/nls", "/usr/share/wine/nls" };
+     static const WCHAR nt_pathW[] = {'C',':','\\','w','i','n','d','o','w','s','\\',
+         's','y','s','t','e','m','3','2','\\','l','_','i','n','t','l','.','n','l','s',0};
+     static const struct unicode_str nt_name = { nt_pathW, sizeof(nt_pathW) };
+@@ -339,6 +350,7 @@ struct fd *load_intl_file(void)
+     mode_t mode = 0600;
+ 
+     nls_dirs[0] = get_nls_dir();
++    nls_dirs[1] = get_env_nls_dir();
+     for (i = 0; i < ARRAY_SIZE( nls_dirs ); i++)
+     {
+         if (!nls_dirs[i]) continue;

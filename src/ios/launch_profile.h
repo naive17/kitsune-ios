@@ -88,9 +88,9 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
     @"KITSUNE_SWAP": @"1",
     @"KITSUNE_SWAP_MASK": @"3",
   }];
-  /* A game runs without Steam's web helper, its UI and biggest process: the
-   * port ends it when the game starts and lets it back when the game exits. */
-  if (appID.length) env[@"KITSUNE_STEAM_LEAN"] = @"1";
+  /* No KITSUNE_STEAM_LEAN: -silent already keeps Steam's UI hidden, and ending
+   * its web helper while refusing the restarts Steam keeps asking for left
+   * games running worse than beside a hidden helper. A launch request can still set it. */
   /* Large sampled RGBA8 textures stored as ETC2 (winemetal): Unity games ship
    * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit). */
   env[@"KITSUNE_RGBA_ETC2"] = @"1";

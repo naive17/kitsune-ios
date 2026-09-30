@@ -1,0 +1,47 @@
+Wine port
+=========
+
+Base: WINE_SHA in pins.env. scripts/02-fetch.sh applies the patches here in
+order, each as a commit on the pin (apply_series in scripts/common.sh), so
+third_party/wine's history is the port: git log there lists these patches,
+git diff shows only what is not recorded yet, and git checkout of a file
+restores the port's version. Each file is its commit's message, a line "---",
+and the diff.
+
+To change the port, edit third_party/wine and run scripts/save-patches.sh. It
+folds each edit into the patch that changes that file (for a new file, the one
+patch that changes its directory) and writes the series out again. When no
+single patch owns a file, it says which commit to make by hand. A new commit
+in third_party/wine becomes a new patch in its place and wants a line here.
+
+Each file belongs to one patch. 0005, 0006 and 0008 only link together on iOS.
+
+0001  build against the iOS SDK: configure, SDK shims, the container path's case
+0002  interfaces shared with the app and FEX: the relocated shared data, the
+      gamepad snapshot, the arena write alias query
+0003  wineserver as a thread of the app; the full administrator token; the
+      running-program count
+0004  the server's desktop window stands in for explorer's
+0005  per-process state behind accessors on ntdll's unix side
+0006  Windows child processes as threads: process context, private ntdll,
+      fd cache, reaper
+0007  win32u's classes, GDI bindings and display keys per process
+0008  memory (virtual.c): the JIT arena, PE images through its write alias,
+      the ARM64EC map, bigpool, stack pool, swap file, CEF soft pools,
+      mid-size bands, Win32 error codes, child exit reclaim, diagnostics
+0009  the TEB in x28; stores replayed through the arena's write alias; fault
+      reports
+0010  KUSER_SHARED_DATA at its iOS address on the Win32 side
+0011  CPU features, gamepads and thread QoS from the host
+0012  starting from a prebuilt prefix
+0013  Steam workarounds in process creation: lean mode, web helper flags
+0014  FreeType linked statically
+0015  wineios.drv, the display driver
+0016  Steam's UI without explorer: hover menus, the tray
+0017  audio through RemoteIO
+0018  controllers from the app: XInput, device notifications
+0019  nsi and nsiproxy without routing sockets
+0020  trust roots from the app's CA bundle
+
+The unix side is built with -ffixed-x28 -DWINE_TEB_IN_X28 -DWINE_IOS_JIT_ARENA
+(scripts/11-wine-ios.sh).

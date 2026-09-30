@@ -1,0 +1,136 @@
+win32u, dwrite: Link FreeType statically.
+
+An iOS app cannot load a system FreeType, so win32u and dwrite link the
+static library. win32u also links CoreFoundation.
+---
+diff --git a/dlls/dwrite/Makefile.in b/dlls/dwrite/Makefile.in
+index cb5844d5b90026b00a62708821dd95a560a8bca6..8d815975771202853453460ec4c27757b7885245 100644
+--- a/dlls/dwrite/Makefile.in
++++ b/dlls/dwrite/Makefile.in
+@@ -3,6 +3,9 @@ IMPORTLIB = dwrite
+ UNIXLIB   = dwrite.so
+ IMPORTS   = user32 gdi32 advapi32
+ UNIX_CFLAGS = $(FREETYPE_CFLAGS)
++# iOS resolves FreeType by address, just like win32u. A dynamically configured
++# build normally leaves FREETYPE_LIBS empty; static builds need the archive.
++UNIX_LIBS = $(FREETYPE_LIBS)
+ 
+ SOURCES = \
+ 	analyzer.c \
+diff --git a/dlls/dwrite/freetype.c b/dlls/dwrite/freetype.c
+index 13d9a079d067b0c7fd4ad468550db93bc9962712..b4f6b6bdf163b20634a66c0ecbed6c13a25d7e93 100644
+--- a/dlls/dwrite/freetype.c
++++ b/dlls/dwrite/freetype.c
+@@ -115,6 +115,11 @@ static NTSTATUS process_attach(void *args)
+ {
+     FT_Version_t FT_Version;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++    /* Match win32u's existing iOS backend: FreeType is linked into this
++     * signed Unix module, not supplied as a runtime dylib. */
++#define LOAD_FUNCPTR(f) p##f = &f;
++#else
+     ft_handle = dlopen(SONAME_LIBFREETYPE, RTLD_NOW);
+     if (!ft_handle)
+     {
+@@ -123,6 +128,7 @@ static NTSTATUS process_attach(void *args)
+     }
+ 
+ #define LOAD_FUNCPTR(f) if((p##f = dlsym(ft_handle, #f)) == NULL){WARN("Can't find symbol %s\n", #f); goto sym_not_found;}
++#endif
+     LOAD_FUNCPTR(FT_Activate_Size)
+     LOAD_FUNCPTR(FT_Done_Face)
+     LOAD_FUNCPTR(FT_Done_FreeType)
+@@ -156,7 +162,7 @@ static NTSTATUS process_attach(void *args)
+     if (pFT_Init_FreeType(&library) != 0)
+     {
+         ERR("Can't init FreeType library\n");
+-        dlclose(ft_handle);
++        if (ft_handle) dlclose(ft_handle);
+         ft_handle = NULL;
+         return STATUS_UNSUCCESSFUL;
+     }
+@@ -165,11 +171,13 @@ static NTSTATUS process_attach(void *args)
+     TRACE("FreeType version is %d.%d.%d\n", FT_Version.major, FT_Version.minor, FT_Version.patch);
+     return STATUS_SUCCESS;
+ 
++#ifndef WINE_IOS_JIT_ARENA
+ sym_not_found:
+     WINE_MESSAGE("Wine cannot find certain functions that it needs from FreeType library.\n");
+     dlclose(ft_handle);
+     ft_handle = NULL;
+     return STATUS_UNSUCCESSFUL;
++#endif
+ }
+ 
+ static NTSTATUS process_detach(void *args)
+diff --git a/dlls/win32u/Makefile.in b/dlls/win32u/Makefile.in
+index 454fb2555bc8afa89431184eb8f877159dade48b..64711251a9c713ca896e8095027aa8818c1c8445 100644
+--- a/dlls/win32u/Makefile.in
++++ b/dlls/win32u/Makefile.in
+@@ -4,7 +4,17 @@ UNIXLIB   = win32u.so
+ IMPORTLIB = win32u
+ IMPORTS   = ntdll
+ UNIX_CFLAGS  = $(FREETYPE_CFLAGS) $(FONTCONFIG_CFLAGS)
+-UNIX_LIBS    = $(CORETEXT_LIBS) $(APPKIT_LIBS) $(PTHREAD_LIBS) -lm
++# FREETYPE_LIBS is normally absent here because Wine dlopens libfreetype at
++# runtime. iOS cannot: there is no system copy and a dylib delivered after
++# install will not load. The static archive is linked in instead and
++# init_freetype() binds the pointers directly -- see freetype.c.
++# -framework CoreFoundation is explicit because load_mac_fonts() uses CF
++# directly (kCFTypeSetCallBacks, CFRelease...). On macOS AppKit dragged it in
++# transitively; on iOS there is no AppKit, so the iOS link failed with
++# "_kCFTypeSetCallBacks, referenced from: _load_mac_fonts in freetype.o".
++# This fork targets Darwin only, so naming the framework unconditionally is safe.
++UNIX_LIBS    = $(CORETEXT_LIBS) $(APPKIT_LIBS) -framework CoreFoundation \
++               $(PTHREAD_LIBS) $(FREETYPE_LIBS) -lm
+ 
+ EXTRADLLFLAGS = -nodefaultlibs
+ 
+diff --git a/dlls/win32u/freetype.c b/dlls/win32u/freetype.c
+index 832043abaa340dc69ac2a0d306c16bc941f06c58..dd73920519b0ae0206acfeadf2043cc85f98fb00 100644
+--- a/dlls/win32u/freetype.c
++++ b/dlls/win32u/freetype.c
+@@ -1454,6 +1454,9 @@ static void load_mac_fonts(void)
+ 
+ static BOOL init_freetype(void)
+ {
++#ifdef WINE_IOS_JIT_ARENA
++#define LOAD_FUNCPTR(f) p##f = &f;
++#else
+     ft_handle = dlopen(SONAME_LIBFREETYPE, RTLD_NOW);
+     if(!ft_handle) {
+         WINE_MESSAGE(
+@@ -1465,6 +1468,7 @@ static BOOL init_freetype(void)
+     }
+ 
+ #define LOAD_FUNCPTR(f) if((p##f = dlsym(ft_handle, #f)) == NULL){WARN("Can't find symbol %s\n", #f); goto sym_not_found;}
++#endif
+ 
+     LOAD_FUNCPTR(FT_Done_Face)
+     LOAD_FUNCPTR(FT_Get_Char_Index)
+@@ -1503,7 +1507,7 @@ static BOOL init_freetype(void)
+ 
+     if(pFT_Init_FreeType(&library) != 0) {
+         ERR("Can't init FreeType library\n");
+-	dlclose(ft_handle);
++	if (ft_handle) dlclose(ft_handle);
+         ft_handle = NULL;
+ 	return FALSE;
+     }
+@@ -1525,6 +1529,7 @@ static BOOL init_freetype(void)
+ 
+     return TRUE;
+ 
++#ifndef WINE_IOS_JIT_ARENA
+ sym_not_found:
+     WINE_MESSAGE(
+       "Wine cannot find certain functions that it needs inside the FreeType\n"
+@@ -1534,6 +1539,7 @@ sym_not_found:
+     dlclose(ft_handle);
+     ft_handle = NULL;
+     return FALSE;
++#endif
+ }
+ 
+ /*************************************************************

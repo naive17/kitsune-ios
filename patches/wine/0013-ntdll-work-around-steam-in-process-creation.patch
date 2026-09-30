@@ -1,0 +1,448 @@
+ntdll: Work around Steam in process creation.
+
+KITSUNE_STEAM_LEAN ends Steam's web helper while a game runs and refuses
+new ones until it exits. The web helper gets its flags (software
+rendering with KITSUNE_FORCE_SWRAST), some helpers are skipped, and
+steamservice runs through cmd.exe. spawn_process is also where a child
+becomes threaded (0006), and ios_process_exit_state reports its exit.
+Fixes a leak in build_argv.
+---
+diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
+index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c2f41421e 100644
+--- a/dlls/ntdll/unix/process.c
++++ b/dlls/ntdll/unix/process.c
+@@ -75,20 +75,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(process);
+ 
+ static ULONG execute_flags = MEM_EXECUTE_OPTION_DISABLE;
+ 
++#ifndef WINE_IOS_JIT_ARENA
+ static UINT process_error_mode;
+ ULONG process_cookie = 0xdeadbeef;
++#endif
+ 
+ static char **build_argv( const UNICODE_STRING *cmdline, int reserved )
+ {
+-    char **argv, *arg, *src, *dst;
++    char **argv, *arg, *src, *dst, *source;
+     int argc, in_quotes = 0, bcount = 0, len = cmdline->Length / sizeof(WCHAR);
+ 
+-    if (!(src = malloc( len * 3 + 1 ))) return NULL;
++    if (!(source = src = malloc( len * 3 + 1 ))) return NULL;
+     len = ntdll_wcstoumbs( cmdline->Buffer, len, src, len * 3, FALSE );
+     src[len++] = 0;
+ 
+     argc = reserved + 2 + len / 2;
+-    argv = malloc( argc * sizeof(*argv) + len );
++    if (!(argv = malloc( argc * sizeof(*argv) + len ))) { free( source ); return NULL; }
+     arg = dst = (char *)(argv + argc);
+     argc = reserved;
+     while (*src)
+@@ -141,6 +143,7 @@ static char **build_argv( const UNICODE_STRING *cmdline, int reserved )
+     *dst = 0;
+     argv[argc++] = arg;
+     argv[argc] = NULL;
++    free( source );
+     return argv;
+ }
+ 
+@@ -275,7 +278,7 @@ static unsigned int get_pe_file_info( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *n
+     }
+     if (status)
+     {
+-        if (is_prefix_bootstrap && is_system_dir_path( attr->ObjectName, &info->machine ))
++        if (process_bootstrap && is_system_dir_path( attr->ObjectName, &info->machine ))
+         {
+             TRACE( "assuming %04x builtin for %s\n", info->machine, debugstr_us(attr->ObjectName));
+             return STATUS_SUCCESS;
+@@ -408,6 +411,23 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
+     pid_t pid;
+     char **argv;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++    if (getenv( "KITSUNE_THREADED_PROCESS" ) && !strcmp( getenv( "KITSUNE_THREADED_PROCESS" ), "1" ))
++    {
++        USHORT machine = pe_info->machine;
++        /* Same selection NtCreateUserProcess made for the server's new_process. */
++        if (is_arm64ec() && pe_info->is_hybrid && machine == IMAGE_FILE_MACHINE_ARM64)
++            machine = process_image_info.Machine;
++        if (machine != IMAGE_FILE_MACHINE_ARM64 && machine != IMAGE_FILE_MACHINE_AMD64)
++            return STATUS_NOT_SUPPORTED;
++        if (!(argv = build_argv( &params->CommandLine, 1 ))) return STATUS_NO_MEMORY;
++        argv[0] = (char *)"wine-child";
++        status = ios_spawn_threaded_child( socketfd, argv, machine );
++        if (status) free( argv ); /* success transfers the independent argv allocation */
++        return status;
++    }
++#endif
++
+     if (wine_server_handle_to_fd( params->hStdInput, FILE_READ_DATA, &stdin_fd, NULL ) &&
+         isatty(0) && is_unix_console_handle( params->hStdInput ))
+         stdin_fd = 0;
+@@ -420,7 +440,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
+     {
+         if (!(pid = fork()))  /* grandchild */
+         {
+-            if ((peb->ProcessParameters && params->ProcessGroupId != peb->ProcessParameters->ProcessGroupId) ||
++            if ((RtlGetCurrentPeb()->ProcessParameters && params->ProcessGroupId != RtlGetCurrentPeb()->ProcessParameters->ProcessGroupId) ||
+                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
+                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC_NO_WINDOW ||
+                 params->ConsoleHandle == NULL)
+@@ -591,7 +611,7 @@ static NTSTATUS fork_and_exec( OBJECT_ATTRIBUTES *attr, const char *unix_name, i
+         {
+             close( fd[0] );
+ 
+-            if ((peb->ProcessParameters && params->ProcessGroupId != peb->ProcessParameters->ProcessGroupId) ||
++            if ((RtlGetCurrentPeb()->ProcessParameters && params->ProcessGroupId != RtlGetCurrentPeb()->ProcessParameters->ProcessGroupId) ||
+                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
+                 params->ConsoleHandle == CONSOLE_HANDLE_ALLOC_NO_WINDOW ||
+                 params->ConsoleHandle == NULL)
+@@ -679,6 +699,104 @@ static NTSTATUS alloc_handle_list( const PS_ATTRIBUTE *handles_attr, obj_handle_
+ /**********************************************************************
+  *           NtCreateUserProcess  (NTDLL.@)
+  */
++
++#ifdef WINE_IOS_JIT_ARENA
++/* substring search of an ASCII needle in a (non-null-terminated) WCHAR buffer */
++static int wcsstr_ascii( const WCHAR *hay, unsigned long haylen, const char *needle )
++{
++    unsigned long nlen = 0, i, j;
++    while (needle[nlen]) nlen++;
++    if (!nlen) return 1;
++    for (i = 0; i + nlen <= haylen; i++)
++    {
++        for (j = 0; j < nlen; j++) if (hay[i+j] != (WCHAR)needle[j]) break;
++        if (j == nlen) return 1;
++    }
++    return 0;
++}
++#endif
++
++#ifdef WINE_IOS_JIT_ARENA
++/* Steam without its UI while a game runs (KITSUNE_STEAM_LEAN, which the app
++ * sets for game launches). Steam's whole interface is its Chromium web
++ * helper, the largest thing in memory after the game, and neither the client
++ * nor the game needs it. When Steam starts the game the helper is ended, and
++ * its restarts are refused until the game has exited; the next one then
++ * brings the hidden UI back. steam.exe starts both, so these handles are
++ * steam.exe's, and only its calls may use them: ntdll's unix globals are
++ * shared by every threaded process. */
++enum ios_lean_kind { IOS_LEAN_NONE, IOS_LEAN_HELPER, IOS_LEAN_GAME };
++static HANDLE ios_lean_helper;   /* Steam's running web helper */
++static HANDLE ios_lean_game;     /* the game, while it runs */
++
++static BOOL ios_lean_caller_is_steam(void)
++{
++    RTL_USER_PROCESS_PARAMETERS *params = NtCurrentTeb()->Peb->ProcessParameters;
++    static const char tail[] = "\\steam.exe";
++    ULONG len, n = sizeof(tail) - 1, i;
++
++    if (!params || !params->ImagePathName.Buffer) return FALSE;
++    len = params->ImagePathName.Length / sizeof(WCHAR);
++    if (len < n) return FALSE;
++    for (i = 0; i < n; i++)
++    {
++        WCHAR c = params->ImagePathName.Buffer[len - n + i];
++        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
++        if (c != (WCHAR)tail[i]) return FALSE;
++    }
++    return TRUE;
++}
++
++static enum ios_lean_kind ios_lean_classify( const char *image )
++{
++    static int enabled = -1;
++    char lower[512];
++    size_t i;
++
++    if (enabled < 0)
++    {
++        const char *e = getenv( "KITSUNE_STEAM_LEAN" );
++        enabled = e && atoi( e );
++    }
++    if (!enabled || !ios_lean_caller_is_steam()) return IOS_LEAN_NONE;
++    for (i = 0; image[i] && i < sizeof(lower) - 1; i++)
++        lower[i] = (image[i] >= 'A' && image[i] <= 'Z') ? image[i] + 'a' - 'A' : image[i];
++    lower[i] = 0;
++    if (strstr( lower, "steamwebhelper" )) return IOS_LEAN_HELPER;
++    if (strstr( lower, "\\steamapps\\common\\" )) return IOS_LEAN_GAME;
++    return IOS_LEAN_NONE;
++}
++
++static BOOL ios_lean_game_running(void)
++{
++    LARGE_INTEGER zero = {{0}};
++
++    if (!ios_lean_game) return FALSE;
++    if (NtWaitForSingleObject( ios_lean_game, FALSE, &zero ) == STATUS_TIMEOUT) return TRUE;
++    NtClose( ios_lean_game );
++    ios_lean_game = 0;
++    ERR( "ios-lean: the game has exited; Steam's web helper may start again\n" );
++    return FALSE;
++}
++
++static void ios_lean_started( enum ios_lean_kind kind, HANDLE process )
++{
++    HANDLE *slot = kind == IOS_LEAN_HELPER ? &ios_lean_helper : &ios_lean_game;
++
++    if (kind == IOS_LEAN_NONE) return;
++    if (*slot) NtClose( *slot );
++    *slot = 0;
++    NtDuplicateObject( NtCurrentProcess(), process, NtCurrentProcess(), slot, 0, 0, DUPLICATE_SAME_ACCESS );
++    if (kind == IOS_LEAN_GAME && ios_lean_helper)
++    {
++        ERR( "ios-lean: the game started; ending Steam's web helper until it exits\n" );
++        NtTerminateProcess( ios_lean_helper, 0 );
++        NtClose( ios_lean_helper );
++        ios_lean_helper = 0;
++    }
++}
++#endif
++
+ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_handle_ptr,
+                                      ACCESS_MASK process_access, ACCESS_MASK thread_access,
+                                      OBJECT_ATTRIBUTES *process_attr, OBJECT_ATTRIBUTES *thread_attr,
+@@ -689,6 +807,122 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+     unsigned int status;
+     BOOL success = FALSE;
+     HANDLE file_handle, process_info = 0, process_handle = 0, thread_handle = 0;
++#ifdef WINE_IOS_JIT_ARENA
++    enum ios_lean_kind lean = IOS_LEAN_NONE;
++
++    if (params && params->ImagePathName.Buffer && params->CommandLine.Buffer)
++    {
++        /* No WebGL and no GPU canvas: with the compositor in software too,
++         * they leave SwiftShader (below) almost nothing to compile. */
++        static const char sw_ascii[] = " --no-sandbox --disable-gpu-sandbox --jitless --disable-gpu"
++                                       " --disable-3d-apis --disable-accelerated-2d-canvas"
++                                       " --disk-cache-size=16777216 --media-cache-size=16777216"
++                                       " \"--js-flags=--jitless --no-short-builtin-calls --max-old-space-size=128\"";
++        static const char sp_ascii[] = " --single-process --disable-site-isolation-trials --renderer-process-limit=1";
++        /* Software compositing, but GL from ANGLE on SwiftShader. With no GL
++         * at all, the first GL context anything asks for aborts Chromium
++         * ("Validating command decoder is not supported"); Steam's main
++         * window asks within seconds, and the helper can't be restarted. */
++        static const char sr_ascii[] = " --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader"
++                                       " --disable-gpu-compositing"
++                                       " --disable-features=PartitionAllocBackupRefPtr,PartitionAllocMemoryTagging,"
++                                       "SitePerProcess,IsolateOrigins,site-per-process";
++        char iname[512], cl_ascii[4096];
++        ULONG ilen = params->ImagePathName.Length / sizeof(WCHAR);
++        ULONG clen = params->CommandLine.Length / sizeof(WCHAR);
++        ULONG i, n = 0;
++
++        for (i = 0; i < ilen && n < sizeof(iname) - 1; i++)
++        {
++            WCHAR c = params->ImagePathName.Buffer[i];
++            iname[n++] = (c > 0 && c < 128) ? (char)c : '?';
++        }
++        iname[n] = 0;
++        if (getenv( "KITSUNE_FORCE_SWRAST" ) &&
++            (strstr( iname, "gldriverquery" ) || strstr( iname, "vulkandriverquery" ) ||
++             strstr( iname, "steamerrorreporter" ) || strstr( iname, "steamsysinfo" ) ||
++             strstr( iname, "conhost" ) ||
++             /* controller/Deck firmware updater: spins a core forever under FEX
++              * right after login, while the Steam UI stops responding (device
++              * 2026-09-22). Not needed to browse, install or launch games. */
++             strstr( iname, "hardwareupdater" )))
++        {
++            ERR( "ios: skipping non-essential helper %s (conserve shared-arena builtins)\n", iname );
++            return STATUS_NOT_SUPPORTED;
++        }
++        lean = ios_lean_classify( iname );
++        if (lean == IOS_LEAN_HELPER && ios_lean_game_running())
++        {
++            static unsigned held;
++            if (held++ < 8) ERR( "ios-lean: holding Steam's web helper while the game runs\n" );
++            return STATUS_NOT_SUPPORTED;
++        }
++
++        n = 0;
++        for (i = 0; i < clen && n < sizeof(cl_ascii) - 1; i++)
++        {
++            WCHAR c = params->CommandLine.Buffer[i];
++            cl_ascii[n++] = (c > 0 && c < 128) ? (char)c : '?';
++        }
++        cl_ascii[n] = 0;
++
++        if (strstr( iname, "steamwebhelper" ) && !strstr( cl_ascii, "use-angle" ) &&
++            !strstr( cl_ascii, "disable-software-rasterizer" ))
++        {
++            int want_sp = !strstr( cl_ascii, "single-process" );
++            int want_sr = getenv( "KITSUNE_FORCE_SWRAST" ) != NULL;
++            ULONG swlen = sizeof(sw_ascii) - 1;
++            ULONG splen = want_sp ? sizeof(sp_ascii) - 1 : 0;
++            ULONG srlen = want_sr ? sizeof(sr_ascii) - 1 : 0;
++            ULONG total = swlen + splen + srlen;
++            ULONG oldbytes = params->CommandLine.Length;
++            WCHAR *nbuf = malloc( oldbytes + (total + 1) * sizeof(WCHAR) );
++
++            if (nbuf)
++            {
++                WCHAR *p = (WCHAR *)((char *)nbuf + oldbytes);
++                ULONG at = 0;
++
++                memcpy( nbuf, params->CommandLine.Buffer, oldbytes );
++                for (i = 0; i < swlen; i++) p[at++] = (unsigned char)sw_ascii[i];
++                for (i = 0; i < splen; i++) p[at++] = (unsigned char)sp_ascii[i];
++                for (i = 0; i < srlen; i++) p[at++] = (unsigned char)sr_ascii[i];
++                p[total] = 0;
++                params->CommandLine.Buffer = nbuf;
++                params->CommandLine.Length = oldbytes + total * sizeof(WCHAR);
++                params->CommandLine.MaximumLength = oldbytes + (total + 1) * sizeof(WCHAR);
++                ERR( "ios-nosandbox: added \"%s\"%s%s for %s\n",
++                     sw_ascii,
++                     want_sp ? " --single-process" : "",
++                     want_sr ? " --use-angle=swiftshader" : "",
++                     debugstr_us( &params->ImagePathName ) );
++            }
++        }
++    }
++    if (params && params->ImagePathName.Buffer && params->CommandLine.Buffer &&
++        wcsstr_ascii( params->ImagePathName.Buffer, params->ImagePathName.Length/sizeof(WCHAR), "steamwebhelper" ))
++    {
++        static const char pat[] = "--variations-seed-version";
++        WCHAR *buf = params->CommandLine.Buffer;
++        ULONG len = params->CommandLine.Length / sizeof(WCHAR), i, plen = sizeof(pat) - 1;
++        for (i = 0; i + plen <= len; i++)
++        {
++            ULONG j; int match = 1;
++            for (j = 0; j < plen; j++) if (buf[i+j] != (WCHAR)pat[j]) { match = 0; break; }
++            /* valueless == the char right after the name is not '=' (space or end) */
++            if (match && (i + plen >= len || buf[i+plen] != '='))
++            {
++                ULONG start = i, end = i + plen;
++                while (end < len && buf[end] == ' ') end++;   /* eat trailing spaces */
++                while (start > 0 && buf[start-1] == ' ') start--; /* and one leading run */
++                memmove( &buf[start], &buf[end], (len - end + 1) * sizeof(WCHAR) );
++                params->CommandLine.Length -= (end - start) * sizeof(WCHAR);
++                ERR( "ios-varseed: stripped valueless --variations-seed-version from steamwebhelper\n" );
++                break;
++            }
++        }
++    }
++#endif
+     struct object_attributes *objattr;
+     data_size_t attr_len;
+     char *winedebug = NULL;
+@@ -752,6 +986,32 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+     }
+     if (!process_attr) process_attr = &empty_attr;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++    if (path.Buffer)
++    {
++        static WCHAR svc_image[] = u"\\??\\C:\\windows\\system32\\cmd.exe";
++        static WCHAR svc_dos[] = u"C:\\windows\\system32\\cmd.exe";
++        static WCHAR svc_cmd[] = u"C:\\windows\\system32\\cmd.exe /c exit 0";
++        ULONG len = path.Length / sizeof(WCHAR), k;
++        static const WCHAR svc[] = u"steamservice.exe";
++        for (k = 0; k + 16 <= len; k++)
++            if (!wcsnicmp( path.Buffer + k, svc, 16 )) break;
++        if (k + 16 <= len)
++        {
++            ERR( "ios: %s is 32-bit; running cmd.exe /c exit 0 in its place (cmdline %s)\n",
++                 debugstr_us( &path ), debugstr_us( &params->CommandLine ) );
++            path.Buffer = svc_image;
++            path.Length = (sizeof(svc_image) - sizeof(WCHAR));
++            params->ImagePathName.Buffer = svc_dos;
++            params->ImagePathName.Length = sizeof(svc_dos) - sizeof(WCHAR);
++            params->ImagePathName.MaximumLength = sizeof(svc_dos);
++            params->CommandLine.Buffer = svc_cmd;
++            params->CommandLine.Length = sizeof(svc_cmd) - sizeof(WCHAR);
++            params->CommandLine.MaximumLength = sizeof(svc_cmd);
++        }
++    }
++#endif
++
+     TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
+            debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
+ 
+@@ -774,7 +1034,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+     {
+         machine = pe_info.machine;
+         if (is_arm64ec() && pe_info.is_hybrid && machine == IMAGE_FILE_MACHINE_ARM64)
+-            machine = main_image_info.Machine;
++            machine = process_image_info.Machine;
+     }
+     if (!(startup_info = create_startup_info( attr.ObjectName, process_flags, params, &pe_info, &startup_info_size )))
+         goto done;
+@@ -939,6 +1199,9 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+             break;
+         }
+     }
++#ifdef WINE_IOS_JIT_ARENA
++    ios_lean_started( lean, process_handle );
++#endif
+     *process_handle_ptr = process_handle;
+     *thread_handle_ptr = thread_handle;
+     process_handle = thread_handle = 0;
+@@ -977,8 +1240,15 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
+     SERVER_END_REQ;
+     if (self)
+     {
++#ifdef WINE_IOS_JIT_ARENA
++        ERR( "ios-exit: NtTerminateProcess(%p, %#x) self, tid %04x\n", handle, (unsigned)exit_code,
++             (unsigned)(ULONG_PTR)NtCurrentTeb()->ClientId.UniqueThread );
++        if (!handle) ios_process_exit_state( TRUE );
++        else if (ios_process_exit_state( FALSE )) exit_process( exit_code );
++#else
+         if (!handle) process_exiting = TRUE;
+         else if (process_exiting) exit_process( exit_code );
++#endif
+         else abort_process( exit_code );
+     }
+     return ret;
+@@ -1343,8 +1613,8 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
+         break;
+ 
+     case ProcessDefaultHardErrorMode:
+-        len = sizeof(process_error_mode);
+-        if (size == len) memcpy(info, &process_error_mode, len);
++        len = sizeof(current_error_mode);
++        if (size == len) memcpy(info, &current_error_mode, len);
+         else ret = STATUS_INFO_LENGTH_MISMATCH;
+         break;
+ 
+@@ -1425,7 +1695,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
+         len = sizeof(ULONG_PTR);
+         if (size != len) return STATUS_INFO_LENGTH_MISMATCH;
+         if (handle == GetCurrentProcess())
+-            *(ULONG_PTR *)info = is_old_wow64() ? (ULONG_PTR)peb : (ULONG_PTR)wow_peb;
++            *(ULONG_PTR *)info = is_old_wow64() ? (ULONG_PTR)RtlGetCurrentPeb() : (ULONG_PTR)process_wow_peb;
+         else
+         {
+             ULONG_PTR val = 0;
+@@ -1509,7 +1779,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
+         if (handle == NtCurrentProcess())
+         {
+             len = sizeof(ULONG);
+-            if (size == len) *(ULONG *)info = process_cookie;
++            if (size == len) *(ULONG *)info = process_random_cookie;
+             else ret = STATUS_INFO_LENGTH_MISMATCH;
+         }
+         else ret = STATUS_INVALID_PARAMETER;
+@@ -1687,7 +1957,7 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class,
+ 
+     case ProcessDefaultHardErrorMode:
+         if (size != sizeof(UINT)) return STATUS_INVALID_PARAMETER;
+-        process_error_mode = *(UINT *)info;
++        current_error_mode = *(UINT *)info;
+         break;
+ 
+     case ProcessAffinityMask:
+@@ -1891,6 +2161,15 @@ NTSTATUS WINAPI NtOpenProcess( HANDLE *handle, ACCESS_MASK access,
+         if (!status) *handle = wine_server_ptr_handle( reply->handle );
+     }
+     SERVER_END_REQ;
++#ifdef WINE_IOS_JIT_ARENA
++    if (status)
++    {
++        static unsigned op_fails;
++        if (++op_fails <= 16)
++            ERR( "ios: NtOpenProcess pid %04x access %x FAILED %x (webhelper watchdog kills itself on this)\n",
++                 HandleToULong( id->UniqueProcess ), access, status );
++    }
++#endif
+     return status;
+ }
+ 

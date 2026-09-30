@@ -863,10 +863,10 @@ static void PublishJITScript(void) {
 
 - (void)launcher:(WineLauncherVC *)vc playSteamApp:(NSString *)appID named:(NSString *)name {
   if (_quickLaunchPending) return;
-  /* A game always gets a Steam of its own. Handed to a running Steam, its
-   * -silent -applaunch only raises Steam's window, and that Steam has no lean
-   * mode, so its web helper stays in memory beside the game. Steam alone still
-   * runs in the session, which is how its window is brought up. */
+  /* A game always gets a Steam of its own, started -silent so its UI never
+   * shows. Handed to a running Steam, its -silent -applaunch only raises
+   * Steam's window. Steam alone still runs in the session, which is how its
+   * window is brought up. */
   if (_wineStopped || _jitFailed || (_sessionBottle && (![_sessionBottle isEqualToString:@"Steam"] || appID.length))) {
     [self restartIntoSteamApp:appID named:name from:vc];
     return;

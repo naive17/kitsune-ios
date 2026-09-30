@@ -1,0 +1,522 @@
+xinput1_3, sechost: Read controllers from the app.
+
+XInput reads the app's controller snapshot through the gamepad
+information class (KITSUNE_GAMEPAD_INFO_CLASS, ios_gamepad.h), traced
+with KITSUNE_XINPUT_TRACE. It reports a neutral pad until Dark Souls:
+Remastered's control bindings are ready. sechost sends device notifications
+when a controller connects or disconnects.
+---
+diff --git a/dlls/sechost/service.c b/dlls/sechost/service.c
+index f05fd2d7e80e4e28b6e7a1c27313b3abd96c63a6..bb7413fce9a28120ac83e019062a22253da307fe 100644
+--- a/dlls/sechost/service.c
++++ b/dlls/sechost/service.c
+@@ -32,6 +32,7 @@
+ #include "wine/debug.h"
+ #include "wine/exception.h"
+ #include "wine/list.h"
++#include "wine/ios_gamepad.h"
+ 
+ #include "svcctl.h"
+ #include "plugplay.h"
+@@ -1984,6 +1985,8 @@ static struct list device_notify_list = LIST_INIT(device_notify_list);
+ struct device_notify
+ {
+     DWORD magic;
++    DWORD owner_pid, ios_seen, ios_event;
++    BOOL ios_gamepads;
+     struct list entry;
+     WCHAR *path;
+     HANDLE handle;
+@@ -2033,6 +2036,118 @@ static BOOL notification_filter_matches( DEV_BROADCAST_HDR *filter, const WCHAR
+     return TRUE;
+ }
+ 
++struct ios_gamepad_listener
++{
++    struct list entry;
++    DWORD pid;
++};
++static struct list ios_gamepad_listeners = LIST_INIT(ios_gamepad_listeners);
++
++struct ios_gamepad_broadcast
++{
++    DWORD size, type, reserved;
++    GUID guid;
++    WCHAR name[96];
++};
++C_ASSERT( offsetof(struct ios_gamepad_broadcast, name) == offsetof(DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name) );
++
++static void ios_gamepad_event( struct ios_gamepad_broadcast *event, unsigned int slot )
++{
++    static const GUID hid_guid = {0x4d1e55b2,0xf16f,0x11cf,{0x88,0xcb,0x00,0x11,0x11,0x00,0x00,0x30}};
++    memset( event, 0, sizeof(*event) );
++    event->type = DBT_DEVTYP_DEVICEINTERFACE;
++    event->guid = hid_guid;
++    swprintf( event->name, ARRAY_SIZE(event->name),
++              L"\\\\?\\KITSUNE#GameController#%u#{4d1e55b2-f16f-11cf-88cb-001111000030}", slot );
++    event->size = offsetof(struct ios_gamepad_broadcast, name[wcslen(event->name) + 1]);
++}
++
++static BOOL ios_gamepad_snapshot( struct ios_gamepad_info *info )
++{
++    return !NtQuerySystemInformation( (SYSTEM_INFORMATION_CLASS)KITSUNE_GAMEPAD_INFO_CLASS,
++                                      info, sizeof(*info), NULL ) && info->version == KITSUNE_GAMEPAD_VERSION;
++}
++
++/* service_cs held. Each subscription has its own baseline, including pads
++ * already attached when a new child process/window registers. Never share
++ * that baseline between Steam and its threaded child processes. */
++static BOOL ios_collect_gamepad_events( DWORD pid, const struct ios_gamepad_info *info, struct list *events )
++{
++    struct device_notify *notify, *event;
++    struct ios_gamepad_broadcast broadcast;
++    unsigned int i, mask = 0;
++    BOOL listening = FALSE;
++
++    if (info) for (i = 0; i < KITSUNE_GAMEPAD_COUNT; ++i) if (info->pads[i].connected) mask |= 1u << i;
++    LIST_FOR_EACH_ENTRY( notify, &device_notify_list, struct device_notify, entry )
++    {
++        if (!notify->ios_gamepads || notify->owner_pid != pid) continue;
++        listening = TRUE;
++        if (!info) continue; /* A failed snapshot is not a disconnection. */
++        for (i = 0; i < KITSUNE_GAMEPAD_COUNT; ++i)
++        {
++            unsigned int bit = 1u << i;
++            if (!((notify->ios_seen ^ mask) & bit)) continue;
++            ios_gamepad_event( &broadcast, i );
++            if (!(event = device_notify_copy( notify, (DEV_BROADCAST_HDR *)&broadcast ))) continue;
++            event->ios_event = mask & bit ? DBT_DEVICEARRIVAL : DBT_DEVICEREMOVECOMPLETE;
++            list_add_tail( events, &event->entry );
++            notify->ios_seen ^= bit; /* Retry next poll if allocation failed. */
++        }
++    }
++    return listening;
++}
++
++static DWORD WINAPI ios_gamepad_notify_proc( void *arg )
++{
++    struct ios_gamepad_listener *listener = arg;
++    struct ios_gamepad_info info;
++    struct device_notify *event, *next;
++    BOOL valid, listening;
++    SetThreadDescription( GetCurrentThread(), L"ios_gamepad_device_notify" );
++    for (;;)
++    {
++        struct list events = LIST_INIT(events);
++        valid = ios_gamepad_snapshot( &info );
++        EnterCriticalSection( &service_cs );
++        listening = ios_collect_gamepad_events( listener->pid, valid ? &info : NULL, &events );
++        if (!listening) list_remove( &listener->entry );
++        LeaveCriticalSection( &service_cs );
++        if (!listening) break;
++
++        /* Match the normal notification path: no service lock across a
++         * callback, which may poll XInput, unregister, or register again. */
++        LIST_FOR_EACH_ENTRY_SAFE( event, next, &events, struct device_notify, entry )
++        {
++            event->callback( event->handle, event->ios_event, event->header );
++            list_remove( &event->entry );
++            free( event );
++        }
++        Sleep( 16 );
++    }
++    free( listener );
++    return 0;
++}
++
++/* service_cs held; one native notification worker per logical Wine process. */
++static void ios_start_gamepad_listener( DWORD pid )
++{
++    struct ios_gamepad_listener *listener;
++    HANDLE thread;
++    LIST_FOR_EACH_ENTRY( listener, &ios_gamepad_listeners, struct ios_gamepad_listener, entry )
++        if (listener->pid == pid) return;
++    if (!(listener = calloc( 1, sizeof(*listener) ))) return;
++    listener->pid = pid;
++    list_add_tail( &ios_gamepad_listeners, &listener->entry );
++    if ((thread = CreateThread( NULL, 0, ios_gamepad_notify_proc, listener, 0, NULL ))) CloseHandle( thread );
++    else
++    {
++        ERR( "could not start iOS gamepad notification worker for %04lx\n", pid );
++        list_remove( &listener->entry );
++        free( listener );
++    }
++}
++
+ static DWORD WINAPI device_notify_proc( void *arg )
+ {
+     WCHAR endpoint[] = L"\\pipe\\wine_plugplay";
+@@ -2139,10 +2254,12 @@ static DWORD WINAPI device_notify_proc( void *arg )
+ HDEVNOTIFY WINAPI I_ScRegisterDeviceNotification( HANDLE handle, DEV_BROADCAST_HDR *filter, device_notify_callback callback )
+ {
+     struct device_notify *notify;
++    struct ios_gamepad_info gamepads;
++    struct ios_gamepad_broadcast broadcast;
+ 
+     TRACE( "handle %p, filter %p, callback %p\n", handle, filter, callback );
+ 
+-    if (!(notify = calloc( 1, sizeof(*notify) + filter->dbch_size )))
++    if (!(notify = calloc( 1, sizeof(*notify) + max(filter->dbch_size, sizeof(*filter)) )))
+     {
+         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+         return NULL;
+@@ -2151,6 +2268,11 @@ HDEVNOTIFY WINAPI I_ScRegisterDeviceNotification( HANDLE handle, DEV_BROADCAST_H
+     notify->handle = handle;
+     notify->callback = callback;
+     memcpy( notify->header, filter, filter->dbch_size );
++    notify->owner_pid = GetCurrentProcessId();
++    ios_gamepad_event( &broadcast, 0 );
++    notify->ios_gamepads = (filter->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE || !filter->dbch_devicetype) &&
++        notification_filter_matches( filter, L"", (DEV_BROADCAST_HDR *)&broadcast, L"" ) &&
++        ios_gamepad_snapshot( &gamepads );
+ 
+     if (filter->dbch_devicetype == DBT_DEVTYP_HANDLE)
+     {
+@@ -2173,6 +2295,7 @@ HDEVNOTIFY WINAPI I_ScRegisterDeviceNotification( HANDLE handle, DEV_BROADCAST_H
+ 
+     EnterCriticalSection( &service_cs );
+     list_add_tail( &device_notify_list, &notify->entry );
++    if (notify->ios_gamepads) ios_start_gamepad_listener( notify->owner_pid );
+ 
+     if (!device_notify_thread)
+         device_notify_thread = CreateThread( NULL, 0, device_notify_proc, NULL, 0, NULL );
+diff --git a/dlls/xinput1_3/main.c b/dlls/xinput1_3/main.c
+index 8530b028d5e60027eb9d2f44ea0df773928ab527..0dadd95da83eeb11b6c29ef302881c41b4278a97 100644
+--- a/dlls/xinput1_3/main.c
++++ b/dlls/xinput1_3/main.c
+@@ -43,6 +43,7 @@
+ #include "xinput.h"
+ 
+ #include "wine/debug.h"
++#include "wine/ios_gamepad.h"
+ 
+ DEFINE_GUID(GUID_DEVINTERFACE_WINEXINPUT,0x6c53d5fd,0x6480,0x440f,0xb6,0x18,0x47,0x67,0x50,0xc5,0xe1,0xa6);
+ 
+@@ -100,6 +101,174 @@ static HANDLE update_event;
+ static SRWLOCK state_lock = SRWLOCK_INIT;
+ static XINPUT_STATE current_state[XUSER_MAX_COUNT];
+ 
++/* iOS has GameController.framework, not the desktop HID bus. The private
++ * syscall copies native snapshots, so no guest thread waits on UIKit or HID
++ * discovery. The ordinary Wine backend is unchanged when the host lacks it. */
++static BOOL ios_backend;
++static BOOL ios_trace;
++static LONG ios_caps_traces;
++
++static BOOL ios_dsr_read( uintptr_t address, void *data, SIZE_T size )
++{
++    SIZE_T read = 0;
++    if (address < 0x10000 || address > UINTPTR_MAX - size) return FALSE;
++    return !NtReadVirtualMemory( GetCurrentProcess(), (const void *)address, data, size, &read ) && read == size;
++}
++
++static BOOL ios_dsr_match( uintptr_t address, const char *bytes, SIZE_T size )
++{
++    char data[32];
++    return size <= sizeof(data) && ios_dsr_read( address, data, size ) && !memcmp( data, bytes, size );
++}
++
++static uintptr_t ios_dsr_image(void)
++{
++    uintptr_t base = (uintptr_t)GetModuleHandleW( NULL );
++    DWORD pe, signature, stamp, size;
++    WORD dos, machine, magic;
++    if (!base || !ios_dsr_read( base, &dos, sizeof(dos) ) || dos != 0x5a4d ||
++        !ios_dsr_read( base + 0x3c, &pe, sizeof(pe) ) || pe > 0x1000 ||
++        !ios_dsr_read( base + pe, &signature, sizeof(signature) ) || signature != 0x4550 ||
++        !ios_dsr_read( base + pe + 4, &machine, sizeof(machine) ) || machine != 0x8664 ||
++        !ios_dsr_read( base + pe + 8, &stamp, sizeof(stamp) ) || stamp != 0x6344ca56 ||
++        !ios_dsr_read( base + pe + 24, &magic, sizeof(magic) ) || magic != 0x20b ||
++        !ios_dsr_read( base + pe + 80, &size, sizeof(size) ) || size != 0x319b000)
++        return 0;
++    /* Binding-manager global reference, binding vector layout, refresh code. */
++    if (!ios_dsr_match( base + 0x54c3bb, "\x48\x8b\x0d\x5e\x90\x76\x01\xe8\x79\x58\x74\x00", 12 ) ||
++        !ios_dsr_match( base + 0xc91c8c, "\x48\x8b\x5e\x08\x4c\x89\x74\x24\x50\x48\x3b\x5e\x10", 13 ) ||
++        !ios_dsr_match( base + 0xc96330, "\x48\x89\x5c\x24\x08\x48\x89\x6c\x24\x10\x48\x89\x74\x24\x18\x57\x48\x83\xec\x20", 20 ))
++        return 0;
++    return base;
++}
++
++static BOOL ios_dsr_bindings_ready( uintptr_t base )
++{
++    uint64_t address, manager[3], entry;
++    DWORD type;
++    if (!base) return TRUE;
++    if (!ios_dsr_read( base + 0x1cb5420, &address, sizeof(address) ) || address > UINTPTR_MAX ||
++        !ios_dsr_read( (uintptr_t)address, manager, sizeof(manager) ) ||
++        manager[0] != base + 0x12d2fd0 || manager[1] > manager[2] ||
++        manager[2] > UINTPTR_MAX || (manager[1] & 7) ||
++        (manager[2] - manager[1]) % 0x148 || (manager[2] - manager[1]) / 0x148 > 256)
++        return FALSE;
++    for (entry = manager[1]; entry < manager[2]; entry += 0x148)
++    {
++        if (!ios_dsr_read( (uintptr_t)entry + 0x88, &type, sizeof(type) )) return FALSE;
++        if (type == 1) return TRUE;
++    }
++    return FALSE;
++}
++
++struct ios_xinput_client
++{
++    struct ios_xinput_client *next;
++    DWORD pid;
++    LONG enabled, enable_epoch;
++    LONG trace_enable_count;
++    XINPUT_GAMEPAD last_keys[XUSER_MAX_COUNT];
++    DWORD trace_seen, trace_count;
++    DWORD trace_packet[XUSER_MAX_COUNT], trace_status[XUSER_MAX_COUNT];
++    uintptr_t dsr_image;
++    DWORD dsr_held, dsr_epoch[XUSER_MAX_COUNT], dsr_traces;
++};
++static struct ios_xinput_client *ios_clients;
++static SRWLOCK ios_clients_lock = SRWLOCK_INIT;
++
++static struct ios_xinput_client *ios_client(void)
++{
++    struct ios_xinput_client *client;
++    DWORD pid = GetCurrentProcessId();
++    AcquireSRWLockExclusive(&ios_clients_lock);
++    for (client = ios_clients; client && client->pid != pid; client = client->next) {}
++    if (!client && (client = calloc(1, sizeof(*client))))
++    {
++        client->pid = pid;
++        client->enabled = TRUE;
++        client->dsr_image = ios_dsr_image();
++        if (client->dsr_image)
++            WINE_MESSAGE("[ios-xinput] DSR binding guard enabled pid=%04lx image=%p\n", pid, (void *)client->dsr_image);
++        client->next = ios_clients;
++        ios_clients = client;
++    }
++    ReleaseSRWLockExclusive(&ios_clients_lock);
++    return client;
++}
++
++static DWORD ios_read_pad(DWORD index, struct ios_gamepad_state *pad)
++{
++    struct ios_gamepad_info info;
++    if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
++    if (NtQuerySystemInformation((SYSTEM_INFORMATION_CLASS)KITSUNE_GAMEPAD_INFO_CLASS,
++                                &info, sizeof(info), NULL) || info.version != KITSUNE_GAMEPAD_VERSION)
++        return ERROR_DEVICE_NOT_CONNECTED;
++    *pad = info.pads[index];
++    return pad->connected ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
++}
++
++static DWORD ios_get_state(DWORD index, XINPUT_STATE *state)
++{
++    struct ios_gamepad_state pad = {0};
++    struct ios_xinput_client *client;
++    DWORD ret;
++    BOOL enabled, emit = FALSE, held = FALSE, gate_emit = FALSE;
++    DWORD packet, count = 0;
++    if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
++    if (!(client = ios_client())) return ERROR_NOT_ENOUGH_MEMORY;
++    ret = ios_read_pad(index, &pad);
++    enabled = InterlockedCompareExchange(&client->enabled, 0, 0);
++    packet = pad.packet + InterlockedCompareExchange(&client->enable_epoch, 0, 0);
++    if (client->dsr_image)
++    {
++        DWORD bit = 1u << index;
++        AcquireSRWLockExclusive(&ios_clients_lock);
++        held = !ret && !ios_dsr_bindings_ready( client->dsr_image );
++        if (!!(client->dsr_held & bit) != held)
++        {
++            client->dsr_held ^= bit;
++            ++client->dsr_epoch[index]; /* Releasing neutral must change the packet even without native input. */
++            if (client->dsr_traces++ < 32) gate_emit = TRUE;
++        }
++        packet += client->dsr_epoch[index];
++        ReleaseSRWLockExclusive(&ios_clients_lock);
++        if (gate_emit)
++            WINE_MESSAGE("[ios-xinput] DSR binding gate pid=%04lx slot=%lu %s ret=%lu packet=%lu\n",
++                         client->pid, index, held ? "waiting-neutral" : "ready-or-disconnected", ret, packet);
++    }
++    if (ios_trace)
++    {
++        AcquireSRWLockExclusive(&ios_clients_lock);
++        if (client->trace_count < 128 && (!(client->trace_seen & (1u << index)) ||
++            client->trace_packet[index] != packet || client->trace_status[index] != ret))
++        {
++            client->trace_seen |= 1u << index;
++            client->trace_packet[index] = packet;
++            client->trace_status[index] = ret;
++            count = ++client->trace_count;
++            emit = TRUE;
++        }
++        ReleaseSRWLockExclusive(&ios_clients_lock);
++        if (emit) WINE_MESSAGE("[ios-xinput] state pid=%04lx slot=%lu ret=%lu enabled=%d held=%d packet=%lu raw-buttons=%04x lt=%u rt=%u l=%d,%d r=%d,%d trace=%lu/128\n",
++                              client->pid, index, ret, enabled, held, packet, pad.buttons,
++                              pad.left_trigger, pad.right_trigger, pad.lx, pad.ly, pad.rx, pad.ry, count);
++    }
++    if (ret) return ret;
++    memset(state, 0, sizeof(*state));
++    state->dwPacketNumber = packet;
++    if (enabled && !held)
++    {
++        state->Gamepad.wButtons = pad.buttons;
++        state->Gamepad.bLeftTrigger = pad.left_trigger;
++        state->Gamepad.bRightTrigger = pad.right_trigger;
++        state->Gamepad.sThumbLX = pad.lx;
++        state->Gamepad.sThumbLY = pad.ly;
++        state->Gamepad.sThumbRX = pad.rx;
++        state->Gamepad.sThumbRY = pad.ry;
++    }
++    return ERROR_SUCCESS;
++}
++
+ static void set_current_state(UINT index, const XINPUT_STATE *state)
+ {
+     AcquireSRWLockExclusive(&state_lock);
+@@ -802,6 +971,16 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
+     case DLL_PROCESS_ATTACH:
+         xinput_instance = inst;
+         DisableThreadLibraryCalls(inst);
++        {
++            struct ios_gamepad_info info;
++            char trace[8];
++            ios_trace = GetEnvironmentVariableA("KITSUNE_XINPUT_TRACE", trace, sizeof(trace)) == 1 && trace[0] == '1';
++            ios_backend = !NtQuerySystemInformation((SYSTEM_INFORMATION_CLASS)KITSUNE_GAMEPAD_INFO_CLASS,
++                                                    &info, sizeof(info), NULL) &&
++                          info.version == KITSUNE_GAMEPAD_VERSION;
++            if (ios_backend) WINE_MESSAGE("[ios-xinput] native GameController snapshot v1, four slots, no HID thread; pid=%04lx module=%p trace=%d\n",
++                                         GetCurrentProcessId(), inst, ios_trace);
++        }
+         break;
+     }
+     return TRUE;
+@@ -813,6 +992,18 @@ void WINAPI DECLSPEC_HOTPATCH XInputEnable(BOOL enable)
+ 
+     TRACE("enable %d.\n", enable);
+ 
++    if (ios_backend)
++    {
++        struct ios_xinput_client *client = ios_client();
++        if (client && InterlockedExchange(&client->enabled, !!enable) != !!enable)
++        {
++            InterlockedIncrement(&client->enable_epoch);
++            if (ios_trace && InterlockedIncrement(&client->trace_enable_count) <= 32)
++                WINE_MESSAGE("[ios-xinput] enable pid=%04lx enabled=%d\n", client->pid, !!enable);
++        }
++        return;
++    }
++
+     /* Setting to false will stop messages from XInputSetState being sent
+     to the controllers. Setting to true will send the last vibration
+     value (sent to XInputSetState) to the controller and allow messages to
+@@ -835,6 +1026,14 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputSetState(DWORD index, XINPUT_VIBRATION *vib
+ 
+     TRACE("index %lu, vibration %p.\n", index, vibration);
+ 
++    if (!vibration) return ERROR_BAD_ARGUMENTS;
++    if (ios_backend)
++    {
++        struct ios_gamepad_state pad;
++        /* No force-feedback capability advertised. No motor output yet. */
++        return ios_read_pad(index, &pad);
++    }
++
+     start_update_thread();
+ 
+     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
+@@ -858,6 +1057,8 @@ static DWORD xinput_get_state(DWORD index, XINPUT_STATE *state)
+ 
+     if (!state) return ERROR_BAD_ARGUMENTS;
+ 
++    if (ios_backend) return ios_get_state(index, state);
++
+     start_update_thread();
+ 
+     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
+@@ -1019,6 +1220,12 @@ static DWORD check_for_keystroke(const DWORD index, XINPUT_KEYSTROKE *keystroke)
+     };
+ 
+     if ((ret = xinput_get_state(index, &state))) return ret;
++    if (ios_backend)
++    {
++        struct ios_xinput_client *client = ios_client();
++        if (!client) return ERROR_NOT_ENOUGH_MEMORY;
++        last = client->last_keys + index;
++    }
+     AcquireSRWLockExclusive(&keystroke_lock);
+ 
+     cur = &state.Gamepad;
+@@ -1094,6 +1301,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetKeystroke(DWORD index, DWORD reserved, P
+ {
+     TRACE("index %lu, reserved %lu, keystroke %p.\n", index, reserved, keystroke);
+ 
++    if (!keystroke) return ERROR_BAD_ARGUMENTS;
+     if (index >= XUSER_MAX_COUNT && index != XUSER_INDEX_ANY) return ERROR_BAD_ARGUMENTS;
+ 
+     if (index == XUSER_INDEX_ANY)
+@@ -1113,6 +1321,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetCapabilities(DWORD index, DWORD flags, X
+     XINPUT_CAPABILITIES_EX caps_ex;
+     DWORD ret;
+ 
++    if (!capabilities) return ERROR_BAD_ARGUMENTS;
+     ret = XInputGetCapabilitiesEx(1, index, flags, &caps_ex);
+ 
+     if (!ret) *capabilities = caps_ex.Capabilities;
+@@ -1129,6 +1338,15 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetDSoundAudioDeviceGuids(DWORD index, GUID
+ 
+     if (index >= XUSER_MAX_COUNT || !render_guid || !capture_guid) return ERROR_BAD_ARGUMENTS;
+ 
++    if (ios_backend)
++    {
++        struct ios_gamepad_state pad;
++        if ((ret = ios_read_pad(index, &pad))) return ret;
++        memset(render_guid, 0, sizeof(*render_guid));
++        memset(capture_guid, 0, sizeof(*capture_guid));
++        return ERROR_SUCCESS;
++    }
++
+     EnterCriticalSection(&xinput_cs);
+     ret = controllers[index].device ? ERROR_NOT_SUPPORTED : ERROR_DEVICE_NOT_CONNECTED;
+     LeaveCriticalSection(&xinput_cs);
+@@ -1143,7 +1361,16 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetBatteryInformation(DWORD index, BYTE typ
+ 
+     if (!once++) FIXME("index %lu, type %u, battery %p.\n", index, type, battery);
+ 
+-    if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
++    if (index >= XUSER_MAX_COUNT || !battery) return ERROR_BAD_ARGUMENTS;
++    if (ios_backend)
++    {
++        struct ios_gamepad_state pad;
++        if ((ret = ios_read_pad(index, &pad))) return ret;
++        if (type != BATTERY_DEVTYPE_GAMEPAD) return ERROR_DEVICE_NOT_CONNECTED;
++        battery->BatteryType = pad.battery_type;
++        battery->BatteryLevel = pad.battery_level;
++        return ERROR_SUCCESS;
++    }
+ 
+     EnterCriticalSection(&xinput_cs);
+     ret = controllers[index].device ? ERROR_NOT_SUPPORTED : ERROR_DEVICE_NOT_CONNECTED;
+@@ -1159,6 +1386,29 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetCapabilitiesEx(DWORD unk, DWORD index, D
+ 
+     TRACE("unk %lu, index %lu, flags %#lx, capabilities %p.\n", unk, index, flags, caps);
+ 
++    if (!caps || index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
++    if (ios_backend)
++    {
++        struct ios_gamepad_state pad;
++        if ((ret = ios_read_pad(index, &pad))) return ret;
++        memset(caps, 0, sizeof(*caps));
++        caps->Capabilities.Type = XINPUT_DEVTYPE_GAMEPAD;
++        caps->Capabilities.SubType = XINPUT_DEVSUBTYPE_GAMEPAD;
++        if (pad.battery_type != BATTERY_TYPE_WIRED) caps->Capabilities.Flags = XINPUT_CAPS_WIRELESS;
++        caps->Capabilities.Gamepad.wButtons = 0xf3ff;
++        caps->Capabilities.Gamepad.bLeftTrigger = 255;
++        caps->Capabilities.Gamepad.bRightTrigger = 255;
++        caps->Capabilities.Gamepad.sThumbLX = 32767;
++        caps->Capabilities.Gamepad.sThumbLY = 32767;
++        caps->Capabilities.Gamepad.sThumbRX = 32767;
++        caps->Capabilities.Gamepad.sThumbRY = 32767;
++        if (ios_trace && InterlockedIncrement(&ios_caps_traces) <= 32)
++            WINE_MESSAGE("[ios-xinput] caps pid=%04lx slot=%lu type=%u subtype=%u flags=%04x buttons=%04x\n",
++                         GetCurrentProcessId(), index, caps->Capabilities.Type, caps->Capabilities.SubType,
++                         caps->Capabilities.Flags, caps->Capabilities.Gamepad.wButtons);
++        return ERROR_SUCCESS;
++    }
++
+     start_update_thread();
+ 
+     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;

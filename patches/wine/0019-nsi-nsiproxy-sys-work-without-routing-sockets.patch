@@ -1,0 +1,280 @@
+nsi, nsiproxy.sys: Work without routing sockets.
+
+iOS has no routing socket or kernel event socket, so nsiproxy skips
+them (WINE_IOS_NO_ROUTE_SOCKET, WINE_NSI_KEV_EVENTS), reports an empty
+route table and stubs if_get_physical. nsi calls nsiproxy in-process
+when there is no \\.\Nsi device; 11-wine-ios.sh installs nsiproxy.so
+as nsi.so for that.
+---
+diff --git a/dlls/nsi/nsi.c b/dlls/nsi/nsi.c
+index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792bbc14b24 100644
+--- a/dlls/nsi/nsi.c
++++ b/dlls/nsi/nsi.c
+@@ -17,6 +17,8 @@
+  * License along with this library; if not, write to the Free Software
+  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+  */
++#include "ntstatus.h"
++#define WIN32_NO_STATUS
+ #include "winsock2.h"
+ #include "winternl.h"
+ #include "ws2ipdef.h"
+@@ -26,12 +28,32 @@
+ #include "netiodef.h"
+ #include "wine/nsi.h"
+ #include "wine/debug.h"
++#include "wine/unixlib.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(nsi);
+ 
+ static HANDLE nsi_device = INVALID_HANDLE_VALUE;
+ static HANDLE nsi_device_async = INVALID_HANDLE_VALUE;
+ 
++enum { nsi_unix_enumerate_all_ex = 2, nsi_unix_get_all_parameters_ex = 3, nsi_unix_get_parameter_ex = 4 };
++
++static BOOL nsi_unix_fallback( void )
++{
++    static int available = -1;
++    if (available == -1)
++    {
++        available = !__wine_init_unix_call();
++        ERR( "no \\\\.\\Nsi device; in-process nsiproxy fallback %s\n", available ? "ready" : "UNAVAILABLE" );
++    }
++    return available == 1;
++}
++
++static DWORD nsi_unix_status( NTSTATUS status )
++{
++    if (status == STATUS_BUFFER_OVERFLOW) return ERROR_MORE_DATA;
++    return RtlNtStatusToDosError( status );
++}
++
+ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
+ {
+     switch (reason)
+@@ -168,7 +190,12 @@ DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *pa
+     struct nsiproxy_enumerate_all in;
+     BYTE *out, *ptr;
+ 
+-    if (device == INVALID_HANDLE_VALUE) return GetLastError();
++    if (device == INVALID_HANDLE_VALUE)
++    {
++        DWORD device_err = GetLastError();
++        if (!nsi_unix_fallback()) return device_err;
++        return nsi_unix_status( WINE_UNIX_CALL( nsi_unix_enumerate_all_ex, params ) );
++    }
+ 
+     out_size = sizeof(DWORD) +
+         (params->key_size + params->rw_size + params->dynamic_size + params->static_size) * params->count;
+@@ -251,7 +278,12 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
+     DWORD err = ERROR_SUCCESS;
+     BYTE *out, *ptr;
+ 
+-    if (device == INVALID_HANDLE_VALUE) return GetLastError();
++    if (device == INVALID_HANDLE_VALUE)
++    {
++        DWORD device_err = GetLastError();
++        if (!nsi_unix_fallback()) return device_err;
++        return nsi_unix_status( WINE_UNIX_CALL( nsi_unix_get_all_parameters_ex, params ) );
++    }
+ 
+     in = malloc( in_size );
+     out = malloc( out_size );
+@@ -318,7 +350,12 @@ DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
+     ULONG in_size = FIELD_OFFSET( struct nsiproxy_get_parameter, key[params->key_size] ), received;
+     DWORD err = ERROR_SUCCESS;
+ 
+-    if (device == INVALID_HANDLE_VALUE) return GetLastError();
++    if (device == INVALID_HANDLE_VALUE)
++    {
++        DWORD device_err = GetLastError();
++        if (!nsi_unix_fallback()) return device_err;
++        return nsi_unix_status( WINE_UNIX_CALL( nsi_unix_get_parameter_ex, params ) );
++    }
+ 
+     in = malloc( in_size );
+     if (!in) return ERROR_OUTOFMEMORY;
+diff --git a/dlls/nsiproxy.sys/ip.c b/dlls/nsiproxy.sys/ip.c
+index 6c4d5808be40d2f112b6205e419a309eb4f3dd74..b81b2640492e45b5ab4618ae6dd77c83b26d8612 100644
+--- a/dlls/nsiproxy.sys/ip.c
++++ b/dlls/nsiproxy.sys/ip.c
+@@ -160,6 +160,13 @@ struct ip6stat {
+ #include "wine/nsi.h"
+ #include "wine/debug.h"
+ 
++#if defined(__APPLE__)
++# include <TargetConditionals.h>
++#endif
++#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE && !TARGET_OS_OSX
++# define WINE_IOS_NO_ROUTE_SOCKET
++#endif
++
+ #include "unix_private.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(nsi);
+@@ -242,7 +249,7 @@ static NTSTATUS ip_cmpt_get_all_parameters( UINT fam, const UINT *key, UINT key_
+         if (!read_sysctl_int( fwd, &value )) rw.not_forwarding = !value;
+         if (!read_sysctl_int( ttl, &value )) rw.default_ttl = value;
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H)
++#elif defined(HAVE_SYS_SYSCTL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET)
+     {
+         int fwd_4[] = { CTL_NET, PF_INET, IPPROTO_IP, IPCTL_FORWARDING };
+         int fwd_6[] = { CTL_NET, PF_INET6, IPPROTO_IPV6, IPV6CTL_FORWARDING };
+@@ -364,7 +371,7 @@ static NTSTATUS ipv4_icmpstats_get_all_parameters( const void *key, UINT key_siz
+         fclose( fp );
+         return status;
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H) && defined(ICMPCTL_STATS) && defined(HAVE_STRUCT_ICMPSTAT_ICPS_ERROR)
++#elif defined(HAVE_SYS_SYSCTL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET) && defined(ICMPCTL_STATS) && defined(HAVE_STRUCT_ICMPSTAT_ICPS_ERROR)
+     {
+         int mib[] = { CTL_NET, PF_INET, IPPROTO_ICMP, ICMPCTL_STATS };
+         struct icmpstat icmp_stat;
+@@ -537,7 +544,7 @@ static NTSTATUS ipv6_icmpstats_get_all_parameters( const void *key, UINT key_siz
+         if (dynamic_data) *(struct nsi_ip_icmpstats_dynamic *)dynamic_data = dyn;
+         return STATUS_SUCCESS;
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H) && defined(ICMPV6CTL_STATS) && defined(HAVE_STRUCT_ICMP6STAT_ICP6S_ERROR)
++#elif defined(HAVE_SYS_SYSCTL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET) && defined(ICMPV6CTL_STATS) && defined(HAVE_STRUCT_ICMP6STAT_ICP6S_ERROR)
+     {
+         int mib[] = { CTL_NET, PF_INET6, IPPROTO_ICMPV6, ICMPV6CTL_STATS };
+         struct icmp6stat icmp_stat;
+@@ -663,7 +670,7 @@ static NTSTATUS ipv4_ipstats_get_all_parameters( const void *key, UINT key_size,
+         fclose( fp );
+         return status;
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H) && defined(IPCTL_STATS) && (defined(HAVE_STRUCT_IPSTAT_IPS_TOTAL) || defined(HAVE_STRUCT_IP_STATS_IPS_TOTAL))
++#elif defined(HAVE_SYS_SYSCTL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET) && defined(IPCTL_STATS) && (defined(HAVE_STRUCT_IPSTAT_IPS_TOTAL) || defined(HAVE_STRUCT_IP_STATS_IPS_TOTAL))
+     {
+         int mib[] = { CTL_NET, PF_INET, IPPROTO_IP, IPCTL_STATS };
+ #if defined(HAVE_STRUCT_IPSTAT_IPS_TOTAL)
+@@ -776,7 +783,7 @@ static NTSTATUS ipv6_ipstats_get_all_parameters( const void *key, UINT key_size,
+         if (static_data) *(struct nsi_ip_ipstats_static *)static_data = stat;
+         return status;
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H) && defined(IPV6CTL_STATS) && (defined(HAVE_STRUCT_IP6STAT_IP6S_TOTAL) || defined(__APPLE__))
++#elif defined(HAVE_SYS_SYSCTL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET) && defined(IPV6CTL_STATS) && (defined(HAVE_STRUCT_IP6STAT_IP6S_TOTAL) || defined(__APPLE__))
+     {
+         int mib[] = { CTL_NET, PF_INET6, IPPROTO_IPV6, IPV6CTL_STATS };
+         struct ip6stat ip_stat;
+@@ -1318,7 +1325,7 @@ static NTSTATUS ipv4_neighbour_enumerate_all( void *key_data, UINT key_size, voi
+         }
+         fclose( fp );
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H)
++#elif defined(HAVE_SYS_SYSCTL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET)
+     {
+         int mib[] = { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO }, sinarp_len;
+         size_t needed;
+@@ -1583,7 +1590,7 @@ static NTSTATUS ipv4_forward_enumerate_all( void *key_data, UINT key_size, void
+         }
+         fclose( fp );
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_DUMP)
++#elif defined(HAVE_SYS_SYSCTL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET) && defined(NET_RT_DUMP)
+     {
+         int mib[6] = { CTL_NET, PF_ROUTE, 0, PF_INET, NET_RT_DUMP, 0 };
+         size_t needed;
+@@ -1698,8 +1705,9 @@ static NTSTATUS ipv4_forward_enumerate_all( void *key_data, UINT key_size, void
+         free( buf );
+     }
+ #else
+-    FIXME( "not implemented\n" );
+-    return STATUS_NOT_IMPLEMENTED;
++    FIXME( "no route table on iOS; reporting zero routes\n" );
++    *count = 0;
++    return STATUS_SUCCESS;
+ #endif
+ 
+     if (!want_data || num <= *count) *count = num;
+diff --git a/dlls/nsiproxy.sys/ndis.c b/dlls/nsiproxy.sys/ndis.c
+index 5dde17244d9a6164dcf69b3470d2cb769419c781..87f6e4e30581df4f55e9d4df777c004d2cbdfe2c 100644
+--- a/dlls/nsiproxy.sys/ndis.c
++++ b/dlls/nsiproxy.sys/ndis.c
+@@ -84,6 +84,14 @@
+ #include "wine/nsi.h"
+ #include "wine/list.h"
+ #include "wine/debug.h"
++
++#if defined(__APPLE__)
++# include <TargetConditionals.h>
++#endif
++#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE && !TARGET_OS_OSX
++# define WINE_IOS_NO_ROUTE_SOCKET
++#endif
++
+ #include "wine/unixlib.h"
+ 
+ #include "unix_private.h"
+@@ -196,7 +204,7 @@ err:
+     return ret;
+ }
+ 
+-#elif defined (HAVE_SYS_SYSCTL_H) && defined (HAVE_NET_IF_DL_H)
++#elif defined (HAVE_SYS_SYSCTL_H) && defined (HAVE_NET_IF_DL_H) && !defined(WINE_IOS_NO_ROUTE_SOCKET)
+ 
+ static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRESS *phys_addr )
+ {
+@@ -261,6 +269,17 @@ static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRE
+     free( buf );
+     return STATUS_SUCCESS;
+ }
++#else
++
++/* iOS: no routing-socket interface list; report an Ethernet-typed interface
++ * with no hardware address (loopback is typed by name). */
++static NTSTATUS if_get_physical( const char *name, UINT *type, IF_PHYSICAL_ADDRESS *phys_addr )
++{
++    memset( phys_addr, 0, sizeof(*phys_addr) );
++    *type = !strncmp( name, "lo", 2 ) ? MIB_IF_TYPE_LOOPBACK : MIB_IF_TYPE_ETHERNET;
++    return STATUS_SUCCESS;
++}
++
+ #endif
+ 
+ static WCHAR *strdupAtoW( const char *str )
+@@ -420,7 +439,7 @@ static void ifinfo_fill_dynamic( struct if_entry *entry, struct nsi_ndis_ifinfo_
+             fclose( fp );
+         }
+     }
+-#elif defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_IFLIST)
++#elif defined(HAVE_SYS_SYSCTL_H) && defined(NET_RT_IFLIST) && !defined(WINE_IOS_NO_ROUTE_SOCKET)
+     {
+         int mib[] = { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_IFLIST, entry->if_index };
+         size_t needed;
+diff --git a/dlls/nsiproxy.sys/nsi.c b/dlls/nsiproxy.sys/nsi.c
+index 09ced8f814eeaf0ad745f66b70d40ecd2524ebd3..edc6a9b32fb2403d95912601595eeb2bb980184c 100644
+--- a/dlls/nsiproxy.sys/nsi.c
++++ b/dlls/nsiproxy.sys/nsi.c
+@@ -32,9 +32,13 @@
+ #include <linux/rtnetlink.h>
+ #endif
+ #ifdef __APPLE__
++#include <TargetConditionals.h>
+ #include <sys/ioctl.h>
++#if !TARGET_OS_IPHONE || TARGET_OS_OSX
++#define WINE_NSI_KEV_EVENTS
+ #include <sys/kern_event.h>
+ #endif
++#endif
+ 
+ #include "ntstatus.h"
+ #include "windef.h"
+@@ -159,7 +163,7 @@ static NTSTATUS unix_nsi_get_parameter_ex( void *args )
+     return nsi_get_parameter_ex( params );
+ }
+ 
+-#if defined(HAVE_LINUX_RTNETLINK_H) || defined(__APPLE__)
++#if defined(HAVE_LINUX_RTNETLINK_H) || defined(WINE_NSI_KEV_EVENTS)
+ static struct
+ {
+     const NPI_MODULEID *module;
+@@ -247,7 +251,7 @@ static NTSTATUS poll_events(void)
+     }
+     return STATUS_SUCCESS;
+ }
+-#elif defined(__APPLE__)
++#elif defined(WINE_NSI_KEV_EVENTS)
+ static NTSTATUS poll_events(void)
+ {
+     static int sock = -1;

@@ -1,0 +1,174 @@
+ntdll, wineboot: Start from a prebuilt prefix.
+
+find_system_builtin finds builtin modules in a prefix without placeholder
+files, wineboot writes the hardware keys as non-volatile, and wine.inf
+registers the MMDevEnumerator class. The wineboot skip is in env.c
+(0005).
+---
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index d8b7a92bade64530164a01eae1b367d13b9cfbfd..2cf3080703b11db6fdd160963bf3b76cc34842ad 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -51,6 +51,8 @@ WINE_DECLARE_DEBUG_CHANNEL(imports);
+ 
+ #ifdef __i386__
+ static const WCHAR pe_dir[] = L"\\i386-windows";
++#elif defined __arm64ec__
++static const WCHAR pe_dir[] = L"\\aarch64-windows";
+ #elif defined __x86_64__
+ static const WCHAR pe_dir[] = L"\\x86_64-windows";
+ #elif defined __arm__
+@@ -3264,6 +3266,28 @@ done:
+     return status;
+ }
+ 
++/***********************************************************************
++ *	find_system_builtin
++ *
++ * Find the builtin for a system directory path that names no file, as all of
++ * them do in a prefix bootstrapped without placeholder files.
++ */
++static NTSTATUS find_system_builtin( UNICODE_STRING *nt_name, WINE_MODREF **pwm, HANDLE *mapping,
++                                     SECTION_IMAGE_INFORMATION *image_info, struct file_id *id )
++{
++    const WCHAR *path = nt_name->Buffer + 4;  /* skip \??\ */
++    ULONG len = wcslen( system_dir );
++    WCHAR name[MAX_PATH];
++
++    if (wcsnicmp( path, system_dir, len ) || wcschr( path + len, '\\' ) ||
++        wcslen( path + len ) >= ARRAY_SIZE(name))
++        return STATUS_DLL_NOT_FOUND;
++    wcscpy( name, path + len );
++    RtlFreeUnicodeString( nt_name );
++    return find_builtin_without_file( name, nt_name, pwm, mapping, image_info, id );
++}
++
++
+ /***********************************************************************
+  *	find_dll_file
+  *
+@@ -3284,6 +3308,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, UNI
+     if (!contains_path( libname ))
+     {
+         status = find_apiset_dll( libname, &fullname );
++        TRACE( "ios: %s apiset->%08x\n", debugstr_w(libname), (unsigned)status );
+         if (status == STATUS_DLL_NOT_FOUND) return status;
+ 
+         if (status)
+@@ -3299,6 +3324,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, UNI
+         }
+         else
+         {
++            TRACE( "ios: %s actctx->%08x\n", debugstr_w(libname), (unsigned)status );
+             if (status != STATUS_SXS_KEY_NOT_FOUND) return status;
+             if ((*pwm = find_basename_module( libname ))) return STATUS_SUCCESS;
+             if (find_loaded)
+@@ -3320,7 +3346,11 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, UNI
+             status = find_builtin_without_file( libname, nt_name, pwm, mapping, image_info, id );
+     }
+     else if (!(status = RtlDosPathNameToNtPathName_U_WithStatus( libname, nt_name, NULL, NULL )))
++    {
+         status = open_dll_file( nt_name, pwm, mapping, image_info, id );
++        if (status == STATUS_DLL_NOT_FOUND && !find_loaded)
++            status = find_system_builtin( nt_name, pwm, mapping, image_info, id );
++    }
+ 
+     if (status == STATUS_NOT_SUPPORTED) status = STATUS_INVALID_IMAGE_FORMAT;
+ 
+diff --git a/loader/wine.inf.in b/loader/wine.inf.in
+index 738e98f4a83af7553e82b97023385ecd7d068b17..99f3f1283bef66095d7935ca6723b285c0ee89b4 100644
+--- a/loader/wine.inf.in
++++ b/loader/wine.inf.in
+@@ -65,6 +65,7 @@ AddReg=\
+     Fonts,\
+     LicenseInformation,\
+     MCI,\
++    MMDevAPIClasses,\
+     Misc,\
+     OLE,\
+     Printing,\
+@@ -646,6 +647,17 @@ HKCU,Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserCho
+ HKLM,"Software\Microsoft\OLE","EnableDCOM",,"Y"
+ HKLM,"Software\Microsoft\OLE","EnableRemoteConnect",,"N"
+ 
++[MMDevAPIClasses]
++; mmdevapi's MMDeviceEnumerator coclass (mmdevapi_classes.idl, threading(both)).
++; mmdevapi.dll is NOT listed in [RegisterDllsSection], so nothing else populates
++; HKCR\CLSID for it. dsound's DirectSoundCreate8 path (dsound_main.c get_mmdevenum
++; -> CoCreateInstance(CLSID_MMDeviceEnumerator)) needs this class registered or it
++; returns REGDB_E_CLASSNOTREG (0x80040154) and audio never initialises. This is the
++; only coclass dsound/winmm require to reach mmdevapi -> winecoreaudio.
++HKCR,"CLSID\{BCDE0395-E52F-467C-8E3D-C4579291692E}",,2,"MMDeviceEnumerator class"
++HKCR,"CLSID\{BCDE0395-E52F-467C-8E3D-C4579291692E}\InprocServer32",,2,"mmdevapi.dll"
++HKCR,"CLSID\{BCDE0395-E52F-467C-8E3D-C4579291692E}\InprocServer32","ThreadingModel",2,"Both"
++
+ [Printing]
+ HKLM,%Control%\Print\Monitors\Local Port,"Driver",2,"localspl.dll"
+ HKLM,%Control%\Print\Printers,"DefaultSpoolDirectory",2,"%11%\spool\printers"
+diff --git a/programs/wineboot/wineboot.c b/programs/wineboot/wineboot.c
+index aa91d01c92f2317152749cb3360f07d60a3c4f0e..fb9cb8ea4cd47c8de322a490971c0ce4e826ae19 100644
+--- a/programs/wineboot/wineboot.c
++++ b/programs/wineboot/wineboot.c
+@@ -646,6 +646,12 @@ static void create_id_reg_keys_arm64( HKEY core_key, UINT core, const char *buf,
+ 
+ #endif
+ 
++#ifdef WINE_IOS_JIT_ARENA
++#define WINE_HW_KEY_OPTION 0
++#else
++#define WINE_HW_KEY_OPTION REG_OPTION_VOLATILE
++#endif
++
+ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT len )
+ {
+     const struct smbios_header *hdr;
+@@ -678,14 +684,14 @@ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT
+     case PROCESSOR_ARCHITECTURE_AMD64:
+     default:
+         set_reg_value( system_key, L"Identifier", L"AT compatible" );
+-        if (RegCreateKeyExW( system_key, L"FloatingPointProcessor", 0, NULL, REG_OPTION_VOLATILE,
++        if (RegCreateKeyExW( system_key, L"FloatingPointProcessor", 0, NULL, WINE_HW_KEY_OPTION,
+                              KEY_ALL_ACCESS, NULL, &fpu_key, NULL ))
+             fpu_key = 0;
+         break;
+     }
+     set_reg_value( system_key, L"SystemBiosDate", L"01/01/70" );
+ 
+-    if (RegCreateKeyExW( system_key, L"CentralProcessor", 0, NULL, REG_OPTION_VOLATILE,
++    if (RegCreateKeyExW( system_key, L"CentralProcessor", 0, NULL, WINE_HW_KEY_OPTION,
+                          KEY_ALL_ACCESS, NULL, &cpu_key, NULL ))
+         cpu_key = 0;
+ 
+@@ -728,7 +734,7 @@ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT
+         for (i = 0; i < thread_count; i++, core++)
+         {
+             swprintf( buffer, ARRAY_SIZE(buffer), L"%u", core );
+-            if (!RegCreateKeyExW( cpu_key, buffer, 0, NULL, REG_OPTION_VOLATILE,
++            if (!RegCreateKeyExW( cpu_key, buffer, 0, NULL, WINE_HW_KEY_OPTION,
+                                   KEY_ALL_ACCESS, NULL, &hkey, NULL ))
+             {
+                 DWORD tsc_freq_mhz = (DWORD)(tsc_frequency / 1000000ull); /* Hz -> Mhz */
+@@ -745,7 +751,7 @@ static void create_bios_processor_values( HKEY system_key, const char *buf, UINT
+ #endif
+                 RegCloseKey( hkey );
+             }
+-            if (fpu_key && !RegCreateKeyExW( fpu_key, buffer, 0, NULL, REG_OPTION_VOLATILE,
++            if (fpu_key && !RegCreateKeyExW( fpu_key, buffer, 0, NULL, WINE_HW_KEY_OPTION,
+                                              KEY_ALL_ACCESS, NULL, &hkey, NULL ))
+             {
+                 set_reg_value( hkey, L"Identifier", id );
+@@ -794,12 +800,12 @@ static void create_hardware_registry_keys(void)
+     len = GetSystemFirmwareTable( RSMB, 0, buf, len );
+ 
+     if (RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"Hardware\\Description\\System", 0, NULL,
+-                         REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &system_key, NULL ))
++                         WINE_HW_KEY_OPTION, KEY_ALL_ACCESS, NULL, &system_key, NULL ))
+     {
+         free( buf );
+         return;
+     }
+-    if (!RegCreateKeyExW( system_key, L"BIOS", 0, NULL, REG_OPTION_VOLATILE,
++    if (!RegCreateKeyExW( system_key, L"BIOS", 0, NULL, WINE_HW_KEY_OPTION,
+                           KEY_ALL_ACCESS, NULL, &bios_key, NULL ))
+     {
+         create_bios_baseboard_values( bios_key, buf, len );

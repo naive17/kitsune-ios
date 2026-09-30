@@ -1,0 +1,109 @@
+include: Add the interfaces shared with the app and FEX.
+
+ios_shared_data.h: where KUSER_SHARED_DATA lives on iOS
+(WINE_USER_SHARED_DATA_ADDR); 0x7ffe0000 is inside the app's
+__PAGEZERO. ios_gamepad.h: the pointer-free GameController snapshot the
+app publishes and XInput reads. winternl.h: MemoryWineIosJitWriteDelta,
+the information class FEX queries for the JIT arena's write alias.
+---
+diff --git a/include/Makefile.in b/include/Makefile.in
+index 867a608b0dd6f33276a261f39eab868a4b4c191d..a265f4959428bfec7413273d3281fc9d3e28ef66 100644
+--- a/include/Makefile.in
++++ b/include/Makefile.in
+@@ -1126,10 +1126,12 @@ SOURCES = \
+ 	wine/glu.h \
+ 	wine/hid.h \
+ 	wine/http.h \
++	wine/ios_gamepad.h \
+ 	wine/iaccessible2.idl \
+ 	wine/irot.idl \
+ 	wine/irpcss.idl \
+ 	wine/itss.idl \
++	wine/ios_shared_data.h \
+ 	wine/list.h \
+ 	wine/mfinternal.idl \
+ 	wine/mmsystem16.h \
+diff --git a/include/wine/ios_gamepad.h b/include/wine/ios_gamepad.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6cddc86f949dfcfb7f6a78e858cb02ab6d5a9fda
+--- /dev/null
++++ b/include/wine/ios_gamepad.h
+@@ -0,0 +1,31 @@
++/* Kitsune private, pointer-free GameController -> XInput snapshot ABI.
++ * Shared by the native host, ntdll unix and ARM64EC PE XInput modules.
++ * Copyright 2026 the Kitsune project. SPDX-License-Identifier: GPL-3.0-or-later */
++#ifndef __WINE_IOS_GAMEPAD_H
++#define __WINE_IOS_GAMEPAD_H
++#include <stdint.h>
++
++#define KITSUNE_GAMEPAD_INFO_CLASS 1001
++#define KITSUNE_GAMEPAD_VERSION 1
++#define KITSUNE_GAMEPAD_COUNT 4
++
++struct ios_gamepad_state
++{
++    uint32_t connected, packet;
++    uint16_t buttons;
++    uint8_t left_trigger, right_trigger;
++    int16_t lx, ly, rx, ry;
++    uint8_t battery_type, battery_level;
++    uint16_t reserved;
++};
++
++struct ios_gamepad_info
++{
++    uint32_t version;
++    struct ios_gamepad_state pads[KITSUNE_GAMEPAD_COUNT];
++};
++
++/* No pointers, native long, BOOL, atomics or platform ABI-dependent enums. */
++_Static_assert(sizeof(struct ios_gamepad_state) == 24, "gamepad state ABI");
++_Static_assert(sizeof(struct ios_gamepad_info) == 100, "gamepad snapshot ABI");
++#endif
+diff --git a/include/wine/ios_shared_data.h b/include/wine/ios_shared_data.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..1b86d76c78b3da4054e88601a27fe27d3d4e6a34
+--- /dev/null
++++ b/include/wine/ios_shared_data.h
+@@ -0,0 +1,20 @@
++#ifndef __WINE_IOS_SHARED_DATA_H
++#define __WINE_IOS_SHARED_DATA_H
++
++#ifdef __APPLE__
++
++#ifdef WINE_IOS_JIT_ARENA
++# define WINE_IOS_NO_LOW_MEMORY 1
++#else
++# define WINE_IOS_NO_LOW_MEMORY 0
++#endif
++
++#endif
++
++#ifdef WINE_IOS_JIT_ARENA
++# define WINE_USER_SHARED_DATA_ADDR 0x120000000ull
++#else
++# define WINE_USER_SHARED_DATA_ADDR 0x7ffe0000ull
++#endif
++
++#endif
+diff --git a/include/winternl.h b/include/winternl.h
+index 33d32b6de5cb28087e97df260a42522a8a6441dd..be6438187d95ef4118d535170ef64b840490860c 100644
+--- a/include/winternl.h
++++ b/include/winternl.h
+@@ -2440,8 +2440,16 @@ typedef enum _MEMORY_INFORMATION_CLASS {
+     MemoryWineLoadUnixLibByNameWow64,
+     MemoryWineUnloadUnixLib,
+ #endif
++    MemoryWineIosJitWriteDelta = 1100,
+ } MEMORY_INFORMATION_CLASS;
+ 
++typedef struct _WINE_IOS_JIT_ALIAS
++{
++    ULONG64 ExecBase;
++    ULONG64 Size;
++    INT64   WriteDelta;   /* write_address - exec_address */
++} WINE_IOS_JIT_ALIAS;
++
+ typedef struct _MEMORY_SECTION_NAME
+ {
+     UNICODE_STRING SectionFileName;

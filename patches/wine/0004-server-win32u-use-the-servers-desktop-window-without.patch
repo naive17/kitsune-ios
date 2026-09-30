@@ -1,0 +1,110 @@
+server, win32u: Use the server's desktop window without explorer.
+
+No explorer.exe runs, so the desktop window the server creates stands
+in: get_desktop_window treats the session like a service's, a desktop
+window with no owning thread is WND_DESKTOP, and the server sizes the
+ownerless desktop to the monitors (update_ownerless_desktop_rect).
+---
+diff --git a/dlls/win32u/window.c b/dlls/win32u/window.c
+index 6a5a3881799f6f1b499c4b8ccd6783e27af9b0c2..dfcdc0be0505cd132dfa1b094b39ab868bdc704d 100644
+--- a/dlls/win32u/window.c
++++ b/dlls/win32u/window.c
+@@ -529,6 +529,13 @@ WND *get_win_ptr( HWND hwnd )
+     {
+         if (is_desktop_window( hwnd )) win = WND_DESKTOP;
+     }
++    else if (!win && is_desktop_window( hwnd ))
++    {
++        /* The desktop window of a session whose desktop thread is elsewhere
++         * is still the desktop: without this, GA_ROOT is 0 for every
++         * top-level window and clicks on child controls are dropped. */
++        win = WND_DESKTOP;
++    }
+     return win;
+ }
+ 
+diff --git a/dlls/win32u/winstation.c b/dlls/win32u/winstation.c
+index 3da9acdd3afffdbe2252b29c9dd963c8bf070477..3148b9bb16aab4401339d3e3e95c9fe0c33a1f0e 100644
+--- a/dlls/win32u/winstation.c
++++ b/dlls/win32u/winstation.c
+@@ -796,6 +796,12 @@ HWND get_desktop_window(void)
+ 
+     /* don't create an actual explorer desktop window for services */
+     is_service = is_service_process();
++#ifdef WINE_IOS_JIT_ARENA
++    /* explorer.exe takes its graphics driver from the registry's list, none of
++     * which exists here, and exits without making a desktop; the server's
++     * desktop window serves instead. */
++    is_service = TRUE;
++#endif
+ 
+     SERVER_START_REQ( get_desktop_window )
+     {
+diff --git a/server/user.h b/server/user.h
+index d002b8d6b88afb100a0a0ac3cdfd19d5b13887e3..063f2f765359c752b647daa3de64b2a6eee1f95f 100644
+--- a/server/user.h
++++ b/server/user.h
+@@ -169,6 +169,7 @@ extern int rect_in_region( struct region *region, const struct rectangle *rect )
+ 
+ extern struct process *get_top_window_owner( struct desktop *desktop );
+ extern void get_virtual_screen_rect( struct desktop *desktop, struct rectangle *rect, int is_raw );
++extern void update_ownerless_desktop_rect( struct desktop *desktop );
+ extern void post_desktop_message( struct desktop *desktop, unsigned int message,
+                                   lparam_t wparam, lparam_t lparam );
+ extern void free_window_handle( struct window *win );
+diff --git a/server/window.c b/server/window.c
+index 88f906cb746b3ebaf2c8f824690dc6a90a7dda46..b19c3961f90d9e7c52c5e68ed0af61d9244fa30c 100644
+--- a/server/window.c
++++ b/server/window.c
+@@ -1062,6 +1062,24 @@ struct thread *window_thread_from_point( user_handle_t scope, int x, int y )
+     return (struct thread *)grab_object( win->thread );
+ }
+ 
++void update_ownerless_desktop_rect( struct desktop *desktop )
++{
++    struct window *win = desktop->top_window;
++    struct rectangle rect;
++
++    if (!win || win->thread) return;
++
++    get_virtual_screen_rect( desktop, &rect, 1 );
++    if (rect.right <= rect.left || rect.bottom <= rect.top) return;
++    if (is_rect_equal( &win->window_rect, &rect )) return;
++
++    win->window_rect = win->visible_rect = win->surface_rect = win->client_rect = rect;
++    /* Same follow-up set_window_pos does when the desktop changes size: the
++     * clip rect is initialised to nothing and clamps every cursor position to
++     * the origin until it is reset. */
++    set_clip_rectangle( desktop, NULL, SET_CURSOR_NOCLIP, 1 );
++}
++
+ /* return list of all windows containing point (in absolute coords) */
+ static int all_windows_from_point( struct window *top, int x, int y, struct ratio dpi,
+                                    struct user_handle_array *array )
+@@ -2352,6 +2370,10 @@ DECL_HANDLER(get_desktop_window)
+             desktop->top_window->style  = WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+         }
+     }
++    /* Not only after creation: the display driver usually reports its monitors
++     * later than the first thread asks for the desktop, so the virtual screen
++     * is still empty at that point. */
++    update_ownerless_desktop_rect( desktop );
+ 
+     if (!desktop->msg_window && req->force)  /* create it */
+     {
+diff --git a/server/winstation.c b/server/winstation.c
+index 3e410c544880c2bca0669e5d5738ad14dd79336c..17b6cc6da4b869b05fc6d7e2bad372a82d8119ab 100644
+--- a/server/winstation.c
++++ b/server/winstation.c
+@@ -634,6 +634,11 @@ DECL_HANDLER(set_winstation_monitors)
+     if (size && (winstation->monitors = memdup( get_req_data(), size )))
+         winstation->monitor_count = size / sizeof(*winstation->monitors);
+ 
++    /* The virtual screen has just changed, and a desktop window nobody owns
++     * has nothing to resize it. See update_ownerless_desktop_rect(). */
++    LIST_FOR_EACH_ENTRY(desktop, &winstation->desktops, struct desktop, entry)
++        update_ownerless_desktop_rect( desktop );
++
+     reply->serial = winstation->monitor_serial;
+     release_object( winstation );
+ }

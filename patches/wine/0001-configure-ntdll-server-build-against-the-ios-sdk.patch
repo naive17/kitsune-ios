@@ -1,0 +1,327 @@
+configure, ntdll, server: Build against the iOS SDK.
+
+configure recognises iOS through TargetConditionals, leaves AppKit out
+and adds wineios.drv's makefile (the driver itself is 0015).
+ios_compat.h and ios_mach_vm.h supply what the iOS SDK lacks (VLNK and
+D_DISK constants, the mach_vm prototypes); cdrom.c builds as a non-Apple
+target; server/sock.c uses Apple's TCPS values. file.c corrects the case
+of the app container's path under HOME.
+---
+diff --git a/configure b/configure
+index aa3c65e1f81a41247f1edd53459d25c2fb753d35..ee14f76e794e92c46c3f45c659395b1c59510da9 100755
+--- a/configure
++++ b/configure
+@@ -1571,6 +1571,7 @@ enable_wined3d
+ enable_winedmo
+ enable_winegstreamer
+ enable_winehid_sys
++enable_wineios_drv
+ enable_winemac_drv
+ enable_winemapi
+ enable_wineoss_drv
+@@ -12364,7 +12365,23 @@ case $host_os in
+ 
+     CORESERVICES_LIBS="-framework CoreServices"
+ 
+-    APPKIT_LIBS="-framework AppKit"
++    # AppKit does not exist on iOS. Detect via TargetConditionals rather than the
++    # host triple: --host stays *-apple-darwin so that every other Darwin check
++    # (Mach, CoreFoundation, dylib handling) still applies. Nothing in win32u
++    # actually calls AppKit; it is linked unconditionally on Darwin.
++    cat > conftest_ios.c <<_IOSEOF
++#include <TargetConditionals.h>
++#if TARGET_OS_IPHONE
++#error building for iOS
++#endif
++int main(void){return 0;}
++_IOSEOF
++    if $CC $CFLAGS -c conftest_ios.c -o conftest_ios.o >/dev/null 2>&1; then
++      APPKIT_LIBS="-framework AppKit"
++    else
++      APPKIT_LIBS=""
++    fi
++    rm -f conftest_ios.c conftest_ios.o
+ 
+     SECURITY_LIBS="-framework Security -framework CoreFoundation"
+ 
+@@ -23102,6 +23119,7 @@ wine_fn_config_makefile dlls/wined3d enable_wined3d
+ wine_fn_config_makefile dlls/winedmo enable_winedmo
+ wine_fn_config_makefile dlls/winegstreamer enable_winegstreamer
+ wine_fn_config_makefile dlls/winehid.sys enable_winehid_sys
++wine_fn_config_makefile dlls/wineios.drv enable_wineios_drv
+ wine_fn_config_makefile dlls/winemac.drv enable_winemac_drv
+ wine_fn_config_makefile dlls/winemapi enable_winemapi
+ wine_fn_config_makefile dlls/wineoss.drv enable_wineoss_drv
+diff --git a/configure.ac b/configure.ac
+index ee0b1c483d47bad175007f1dd615de7e927058d9..5e13119760164f1928918f0d42f753b001bcc10a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -987,7 +987,24 @@ case $host_os in
+     AC_SUBST(IOKIT_LIBS,"-framework IOKit -framework CoreFoundation")
+     AC_SUBST(APPLICATIONSERVICES_LIBS,"-framework ApplicationServices")
+     AC_SUBST(CORESERVICES_LIBS,"-framework CoreServices")
+-    AC_SUBST(APPKIT_LIBS,"-framework AppKit")
++    dnl AppKit does not exist on iOS. Detect via TargetConditionals rather than the
++    dnl host triple: --host stays *-apple-darwin so that every other Darwin check
++    dnl (Mach, CoreFoundation, dylib handling) still applies. Nothing in win32u
++    dnl actually calls AppKit; it is linked unconditionally on Darwin.
++    cat > conftest_ios.c <<_IOSEOF
++#include <TargetConditionals.h>
++#if TARGET_OS_IPHONE
++#error building for iOS
++#endif
++int main(void){return 0;}
++_IOSEOF
++    if $CC $CFLAGS -c conftest_ios.c -o conftest_ios.o >/dev/null 2>&1; then
++      APPKIT_LIBS="-framework AppKit"
++    else
++      APPKIT_LIBS=""
++    fi
++    rm -f conftest_ios.c conftest_ios.o
++    AC_SUBST(APPKIT_LIBS)
+     AC_SUBST(SECURITY_LIBS,"-framework Security -framework CoreFoundation")
+     AC_SUBST(SYSTEMCONFIGURATION_LIBS,"-framework SystemConfiguration")
+ 
+@@ -3395,6 +3412,7 @@ WINE_CONFIG_MAKEFILE(dlls/wined3d)
+ WINE_CONFIG_MAKEFILE(dlls/winedmo)
+ WINE_CONFIG_MAKEFILE(dlls/winegstreamer)
+ WINE_CONFIG_MAKEFILE(dlls/winehid.sys)
++WINE_CONFIG_MAKEFILE(dlls/wineios.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winemac.drv)
+ WINE_CONFIG_MAKEFILE(dlls/winemapi)
+ WINE_CONFIG_MAKEFILE(dlls/wineoss.drv)
+diff --git a/dlls/ntdll/unix/cdrom.c b/dlls/ntdll/unix/cdrom.c
+index 2ed5b5dc680c8f1785a0c0e72561e29766eaa0bb..9e7fa06ba3aac90b653c3b4aec69135366eef0a4 100644
+--- a/dlls/ntdll/unix/cdrom.c
++++ b/dlls/ntdll/unix/cdrom.c
+@@ -75,6 +75,15 @@
+ # include <sys/scsiio.h>
+ #endif
+ 
++#ifdef __APPLE__
++# include <TargetConditionals.h>
++#endif
++/* iOS has no optical media and lacks the macOS disk headers: build this file
++ * as a non-Apple one. */
++#if defined(__APPLE__) && !TARGET_OS_OSX
++# undef __APPLE__
++#endif
++
+ #ifdef __APPLE__
+ # include <libkern/OSByteOrder.h>
+ # include <sys/disk.h>
+diff --git a/dlls/ntdll/unix/file.c b/dlls/ntdll/unix/file.c
+index d9b9e578d6548131681a929f945bf69f693d9590..fc4afbe06d8844edea4a3b110a3efc683f627fce 100644
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -123,6 +123,7 @@
+ #include "wine/server.h"
+ #include "wine/list.h"
+ #include "wine/debug.h"
++#include "ios_compat.h"
+ #include "unix_private.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(file);
+@@ -3726,9 +3727,74 @@ static NTSTATUS lookup_unix_name( int root_fd, OBJECT_ATTRIBUTES *attr, UNICODE_
+ /******************************************************************************
+  *           nt_to_unix_file_name_no_root
+  */
++static NTSTATUS ios_nt_to_unix_no_root( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nt_name,
++                                        char **unix_name_ret, UINT disposition,
++                                        BOOL open_reparse, unsigned int reparse_count );
++
++#ifdef WINE_IOS_JIT_ARENA
++static WCHAR *ios_fix_container_case( const WCHAR *name, int len )
++{
++    static WCHAR home[512];
++    static int home_len = -1;
++    int i, start;
++    WCHAR *out;
++
++    if (home_len < 0)
++    {
++        const char *h = getenv( "HOME" );
++        home_len = 0;
++        if (h && h[0] == '/' && strlen( h ) < ARRAY_SIZE(home))
++        {
++            for (i = 0; h[i]; i++) home[i] = h[i] == '/' ? '\\' : (unsigned char)h[i];
++            home_len = i;
++        }
++    }
++    if (home_len <= 0) return NULL;
++    /* \??\Z:\var\... */
++    if (len < 6 + home_len || name[0] != '\\' || name[1] != '?' || name[2] != '?' || name[3] != '\\' ||
++        (name[4] != 'Z' && name[4] != 'z') || name[5] != ':')
++        return NULL;
++    start = 6;
++    if (wcsnicmp( name + start, home, home_len )) return NULL;
++    if (len > start + home_len && name[start + home_len] != '\\') return NULL;
++    if (!memcmp( name + start, home, home_len * sizeof(WCHAR) )) return NULL;   /* already right */
++    if (!(out = malloc( len * sizeof(WCHAR) ))) return NULL;
++    memcpy( out, name, len * sizeof(WCHAR) );
++    memcpy( out + start, home, home_len * sizeof(WCHAR) );
++    return out;
++}
++#endif
++
+ static NTSTATUS nt_to_unix_file_name_no_root( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nt_name,
+                                               char **unix_name_ret, UINT disposition,
+                                               BOOL open_reparse, unsigned int reparse_count )
++{
++#ifdef WINE_IOS_JIT_ARENA
++    UNICODE_STRING *orig = attr->ObjectName, fixed_us;
++    WCHAR *fixed = orig && orig->Buffer ? ios_fix_container_case( orig->Buffer, orig->Length / sizeof(WCHAR) ) : NULL;
++    NTSTATUS status;
++
++    if (fixed)
++    {
++        fixed_us = *orig;
++        fixed_us.Buffer = fixed;
++        attr->ObjectName = &fixed_us;
++    }
++    status = ios_nt_to_unix_no_root( attr, nt_name, unix_name_ret, disposition, open_reparse, reparse_count );
++    if (fixed)
++    {
++        attr->ObjectName = orig;
++        free( fixed );
++    }
++    return status;
++#else
++    return ios_nt_to_unix_no_root( attr, nt_name, unix_name_ret, disposition, open_reparse, reparse_count );
++#endif
++}
++
++static NTSTATUS ios_nt_to_unix_no_root( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *nt_name,
++                                        char **unix_name_ret, UINT disposition,
++                                        BOOL open_reparse, unsigned int reparse_count )
+ {
+     static const WCHAR unixW[] = {'u','n','i','x'};
+     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
+diff --git a/dlls/ntdll/unix/ios_compat.h b/dlls/ntdll/unix/ios_compat.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..de375a2fde6c0015f4c6615de71999af49c7a5f4
+--- /dev/null
++++ b/dlls/ntdll/unix/ios_compat.h
+@@ -0,0 +1,32 @@
++
++#ifndef __WINE_NTDLL_IOS_COMPAT_H
++#define __WINE_NTDLL_IOS_COMPAT_H
++
++#include <TargetConditionals.h>
++
++#if defined(__APPLE__) && !TARGET_OS_OSX
++
++/* <sys/vnode.h> is not in the iOS SDK. enum vtype, used here only to spot a
++ * symlink in the getattrlist() result. */
++#ifndef VLNK
++#define VNON  0
++#define VREG  1
++#define VDIR  2
++#define VBLK  3
++#define VCHR  4
++#define VLNK  5
++#define VSOCK 6
++#define VFIFO 7
++#define VBAD  8
++#endif
++
++/* <sys/disk.h>'s device types, returned by ioctl(FIODTYPE). */
++#ifndef D_DISK
++#define D_TAPE 1
++#define D_DISK 2
++#define D_TTY  3
++#endif
++
++#endif /* __APPLE__ && !TARGET_OS_OSX */
++
++#endif /* __WINE_NTDLL_IOS_COMPAT_H */
+diff --git a/dlls/ntdll/unix/ios_mach_vm.h b/dlls/ntdll/unix/ios_mach_vm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..a2d87cd2c09800005f499a80b7b6fdd91c724d2d
+--- /dev/null
++++ b/dlls/ntdll/unix/ios_mach_vm.h
+@@ -0,0 +1,52 @@
++
++#ifndef __WINE_NTDLL_IOS_MACH_VM_H
++#define __WINE_NTDLL_IOS_MACH_VM_H
++
++#include <TargetConditionals.h>
++
++#if defined(__APPLE__) && !TARGET_OS_OSX
++
++#include <mach/mach.h>
++#include <mach/vm_map.h>
++#include <mach/vm_types.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++extern kern_return_t mach_vm_allocate( vm_map_t target, mach_vm_address_t *address,
++                                       mach_vm_size_t size, int flags );
++
++extern kern_return_t mach_vm_deallocate( vm_map_t target, mach_vm_address_t address,
++                                         mach_vm_size_t size );
++
++extern kern_return_t mach_vm_protect( vm_map_t target, mach_vm_address_t address,
++                                      mach_vm_size_t size, boolean_t set_maximum,
++                                      vm_prot_t new_protection );
++
++extern kern_return_t mach_vm_map( vm_map_t target, mach_vm_address_t *address,
++                                  mach_vm_size_t size, mach_vm_offset_t mask, int flags,
++                                  mem_entry_name_port_t object,
++                                  memory_object_offset_t offset, boolean_t copy,
++                                  vm_prot_t cur_protection, vm_prot_t max_protection,
++                                  vm_inherit_t inheritance );
++
++extern kern_return_t mach_vm_region( vm_map_t target, mach_vm_address_t *address,
++                                     mach_vm_size_t *size, vm_region_flavor_t flavor,
++                                     vm_region_info_t info, mach_msg_type_number_t *count,
++                                     mach_port_t *object_name );
++
++extern kern_return_t mach_vm_read_overwrite( vm_map_t target, mach_vm_address_t address,
++                                             mach_vm_size_t size, mach_vm_address_t data,
++                                             mach_vm_size_t *out_size );
++
++extern kern_return_t mach_vm_write( vm_map_t target, mach_vm_address_t address,
++                                    vm_offset_t data, mach_msg_type_number_t count );
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __APPLE__ && !TARGET_OS_OSX */
++
++#endif /* __WINE_NTDLL_IOS_MACH_VM_H */
+diff --git a/server/sock.c b/server/sock.c
+index 0716b3f71f4af9ab6fc59195de5f20789da06fcf..d30c555cd674921a9f782f4425d09bdca6889525 100644
+--- a/server/sock.c
++++ b/server/sock.c
+@@ -124,6 +124,19 @@
+ #endif
+ 
+ #ifndef HAVE_NETINET_TCP_FSM_H
++# ifdef __APPLE__
++#define TCPS_CLOSED       0
++#define TCPS_LISTEN       1
++#define TCPS_SYN_SENT     2
++#define TCPS_SYN_RECEIVED 3
++#define TCPS_ESTABLISHED  4
++#define TCPS_CLOSE_WAIT   5
++#define TCPS_FIN_WAIT_1   6
++#define TCPS_CLOSING      7
++#define TCPS_LAST_ACK     8
++#define TCPS_FIN_WAIT_2   9
++#define TCPS_TIME_WAIT   10
++# else
+ #define TCPS_ESTABLISHED  1
+ #define TCPS_SYN_SENT     2
+ #define TCPS_SYN_RECEIVED 3
+@@ -135,6 +148,7 @@
+ #define TCPS_LAST_ACK     9
+ #define TCPS_LISTEN      10
+ #define TCPS_CLOSING     11
++# endif
+ #endif
+ 
+ static const char magic_loopback_addr[] = {127, 12, 34, 56};

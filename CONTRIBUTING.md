@@ -44,9 +44,15 @@ The body is free-form: say why, and what was measured. Merge, revert and
 Wine, DXMT and FEX are kept as patches against the upstream revisions in
 `pins.env`; `third_party/` holds the patched checkouts and is not tracked.
 
-- **Wine and DXMT**: edit `third_party/wine` or `third_party/dxmt`, then run
-  `scripts/save-patches.sh`. Until then the change exists only in that
-  checkout, and `scripts/02-fetch.sh` or a `git checkout` there discards it.
+- **Wine**: the port is the numbered series in `patches/wine`
+  ([README](patches/wine/README)), kept as one commit per patch in
+  `third_party/wine`: `git log` there lists it and `git diff` shows what is
+  not recorded yet. Edit the checkout, then run `scripts/save-patches.sh`,
+  which folds each edit into the patch that changes that file and writes the
+  series out.
+- **DXMT**: edit `third_party/dxmt`, then run `scripts/save-patches.sh`. Until
+  then the change exists only in that checkout, and a `git checkout` there
+  discards it.
 - **FEX**: the port is the numbered stack in `patches/fex`, applied in order by
   `scripts/06-fex-arm64ec.sh`, which resets `third_party/fex` first. Change a
   patch, or add the next number

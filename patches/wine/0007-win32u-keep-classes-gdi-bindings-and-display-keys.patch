@@ -1,0 +1,346 @@
+win32u: Keep classes, GDI bindings and display keys per process.
+
+Threaded children share win32u, so its per-process tables are keyed by
+the owning PEB: the builtin window procedures, the class list, the GDI
+handle table binding (gdi_bind_owner_peb) and the display registry
+keys. add_modes also drops a stale virtual mode.
+---
+diff --git a/dlls/win32u/class.c b/dlls/win32u/class.c
+index 24f7e64b46b98819c6558e57c50a27f6336428dd..76a637a0a04b1ff0f1a554fc1acaff1856c41f04 100644
+--- a/dlls/win32u/class.c
++++ b/dlls/win32u/class.c
+@@ -176,6 +176,80 @@ static struct list class_list = LIST_INIT( class_list );
+ 
+ HINSTANCE user32_module = 0;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++struct ios_owner_procs
++{
++    PEB *peb;
++    HINSTANCE user32_module;
++    WINDOWPROC procs[NTUSER_NB_PROCS];
++    struct list class_list;      /* per-owner: a child's classes and their
++                                  * freed shared objects must never be found
++                                  * by another Windows process (seqlock spin). */
++    BOOL class_list_init;
++    BOOL user_init;              /* init_user's per-process parts have run */
++};
++#define IOS_MAX_OWNERS 64
++static struct ios_owner_procs ios_owner_procs[IOS_MAX_OWNERS];
++static unsigned int ios_owner_count;
++static pthread_mutex_t ios_owner_lock = PTHREAD_MUTEX_INITIALIZER;
++
++static struct ios_owner_procs *ios_current_owner( BOOL create, BOOL *created )
++{
++    PEB *peb = NtCurrentTeb()->Peb;
++    struct ios_owner_procs *owner = NULL;
++    unsigned int i;
++
++    if (created) *created = FALSE;
++    if (!peb) return NULL;
++    pthread_mutex_lock( &ios_owner_lock );
++    for (i = 0; i < ios_owner_count; i++)
++        if (ios_owner_procs[i].peb == peb) { owner = &ios_owner_procs[i]; break; }
++    if (!owner && create && ios_owner_count < IOS_MAX_OWNERS)
++    {
++        owner = &ios_owner_procs[ios_owner_count++];
++        owner->peb = peb;
++        list_init( &owner->class_list );
++        owner->class_list_init = TRUE;
++        if (created) *created = TRUE;
++    }
++    pthread_mutex_unlock( &ios_owner_lock );
++    return owner;
++}
++
++static WINDOWPROC *builtin_winproc( UINT index )
++{
++    struct ios_owner_procs *owner = ios_current_owner( FALSE, NULL );
++    return owner ? &owner->procs[index] : &winproc_array[index];
++}
++
++static HINSTANCE get_user32_module(void)
++{
++    struct ios_owner_procs *owner = ios_current_owner( FALSE, NULL );
++    return owner ? owner->user32_module : user32_module;
++}
++
++static struct list *ios_class_list( struct list *fallback )
++{
++    struct ios_owner_procs *owner = ios_current_owner( TRUE, NULL );
++    if (owner && owner->class_list_init) return &owner->class_list;
++    return fallback; /* owner table full or pre-PEB: shared list, never cross it silently */
++}
++
++static UINT winproc_index( const WINDOWPROC *proc )
++{
++    struct ios_owner_procs *owner;
++    if (proc >= winproc_array && proc < winproc_array + MAX_WINPROCS) return proc - winproc_array;
++    if ((owner = ios_current_owner( FALSE, NULL )) && proc >= owner->procs && proc < owner->procs + NTUSER_NB_PROCS)
++        return proc - owner->procs;
++    return MAX_WINPROCS; /* not a table entry; MAKE_WNDPROC of this is rejected by get_winproc_ptr */
++}
++#else
++#define builtin_winproc(index) (&winproc_array[index])
++#define get_user32_module() user32_module
++#define winproc_index(proc) ((UINT)((proc) - winproc_array))
++#define ios_class_list(fallback) (fallback)
++#endif
++
+ /* find an existing winproc for a given function and type */
+ /* FIXME: probably should do something more clever than a linear search */
+ static WINDOWPROC *find_winproc( WNDPROC func, BOOL ansi )
+@@ -184,9 +258,10 @@ static WINDOWPROC *find_winproc( WNDPROC func, BOOL ansi )
+ 
+     for (i = 0; i < NTUSER_NB_PROCS; i++)
+     {
++        WINDOWPROC *builtin = builtin_winproc( i );
+         /* match either proc, some apps confuse A and W */
+-        if (winproc_array[i].procA != func && winproc_array[i].procW != func) continue;
+-        return &winproc_array[i];
++        if (builtin->procA != func && builtin->procW != func) continue;
++        return builtin;
+     }
+     for ( ; i < winproc_used; i++)
+     {
+@@ -205,6 +280,7 @@ static WINDOWPROC *get_winproc_ptr( WNDPROC handle )
+     if (handle != MAKE_WNDPROC(index)) return NULL;
+     if (index >= MAX_WINPROCS) return WINPROC_PROC16;
+     if (index >= winproc_used) return NULL;
++    if (index < NTUSER_NB_PROCS) return builtin_winproc( index );
+     return &winproc_array[index];
+ }
+ 
+@@ -227,12 +303,12 @@ static inline WINDOWPROC *alloc_winproc_ptr( WNDPROC func, BOOL ansi )
+             proc = &winproc_array[winproc_used++];
+             if (ansi) proc->procA = func;
+             else proc->procW = func;
+-            TRACE_(win)( "allocated %p for %c %p (%d/%d used)\n", MAKE_WNDPROC(proc - winproc_array),
++            TRACE_(win)( "allocated %p for %c %p (%d/%d used)\n", MAKE_WNDPROC(winproc_index( proc )),
+                          ansi ? 'A' : 'W', func, winproc_used, MAX_WINPROCS );
+         }
+         else WARN_(win)( "too many winprocs, cannot allocate one for %p\n", func );
+     }
+-    else TRACE_(win)( "reusing %p for %p\n", MAKE_WNDPROC(proc - winproc_array), func );
++    else TRACE_(win)( "reusing %p for %p\n", MAKE_WNDPROC(winproc_index( proc )), func );
+ 
+     pthread_mutex_unlock( &winproc_lock );
+     return proc;
+@@ -253,7 +329,7 @@ WNDPROC alloc_winproc( WNDPROC func, BOOL ansi )
+ 
+     if (!(proc = alloc_winproc_ptr( func, ansi ))) return func;
+     if (proc == WINPROC_PROC16) return func;
+-    return MAKE_WNDPROC(proc - winproc_array);
++    return MAKE_WNDPROC(winproc_index( proc ));
+ }
+ 
+ /* Get a window procedure pointer that can be passed to the Windows program. */
+@@ -341,7 +417,33 @@ NTSTATUS WINAPI NtUserInitializeClientPfnArrays( const ntuser_client_func_ptr *c
+ {
+     static pthread_once_t init_once = PTHREAD_ONCE_INIT;
+     UINT i;
++#ifdef WINE_IOS_JIT_ARENA
++    static struct ios_owner_procs *first_owner;
++    struct ios_owner_procs *owner = ios_current_owner( TRUE, NULL );
+ 
++    if (!owner) return STATUS_TOO_MANY_OPENED_FILES; /* owner table full: never alias another process */
++    for (i = 0; i < NTUSER_NB_PROCS; i++)
++    {
++        owner->procs[i].procA = client_procsA[i][0];
++        owner->procs[i].procW = client_procsW[i][0];
++    }
++    owner->user32_module = user_module;
++    if (!first_owner) first_owner = owner;
++    pthread_once( &init_once, init_user );
++    /* Per-process parts of init_user for a later owner: its own PEB startup
++     * info and window station/desktop, and the shared GDI handle table its
++     * gdi32 reads through its own PEB. Other lookups may have made the owner
++     * entry first, so its existence does not say these ran. */
++    if (owner == first_owner) owner->user_init = TRUE;
++    else if (!owner->user_init)
++    {
++        owner->user_init = TRUE;
++        gdi_bind_owner_peb();
++        init_startup_info();
++        winstation_init();
++    }
++    return STATUS_SUCCESS;
++#else
+     for (i = 0; i < NTUSER_NB_PROCS; i++)
+     {
+         winproc_array[i].procA = client_procsA[i][0];
+@@ -351,6 +453,7 @@ NTSTATUS WINAPI NtUserInitializeClientPfnArrays( const ntuser_client_func_ptr *c
+ 
+     pthread_once( &init_once, init_user );
+     return STATUS_SUCCESS;
++#endif
+ }
+ 
+ /***********************************************************************
+@@ -545,7 +648,7 @@ static CLASS *find_class( HINSTANCE module, UNICODE_STRING *name )
+     int is_win16;
+ 
+     user_lock();
+-    LIST_FOR_EACH_ENTRY( class, &class_list, CLASS, entry )
++    LIST_FOR_EACH_ENTRY( class, ios_class_list( &class_list ), CLASS, entry )
+     {
+         UINT_PTR class_instance = get_class_instance( class );
+         if (!class_name_matches( class, name )) continue;
+@@ -599,7 +702,7 @@ ATOM WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING *nam
+     if (!fnid) get_desktop_window();
+ 
+     if (wc->cbSize != sizeof(*wc) || wc->cbClsExtra < 0 || wc->cbWndExtra < 0 ||
+-        (!fnid && wc->hInstance == user32_module))  /* we can't register a class for user32 */
++        (!fnid && wc->hInstance == get_user32_module()))  /* we can't register a class for user32 */
+     {
+          RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+          return 0;
+@@ -672,8 +775,8 @@ ATOM WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_STRING *nam
+     class->icon_internal = icon_internal;
+     class->shared        = shared;
+ 
+-    if (is_local_class( class )) list_add_head( &class_list, &class->entry );
+-    else list_add_tail( &class_list, &class->entry );
++    if (is_local_class( class )) list_add_head( ios_class_list( &class_list ), &class->entry );
++    else list_add_tail( ios_class_list( &class_list ), &class->entry );
+ 
+     release_class_ptr( class );
+     return atom;
+@@ -755,7 +858,7 @@ ATOM WINAPI NtUserGetClassInfoEx( HINSTANCE instance, UNICODE_STRING *name, WNDC
+             wc->lpfnWndProc   = get_winproc( wine_server_get_ptr( class_shm->info.wndproc ), ansi );
+             wc->cbClsExtra    = class_shm->info.cls_extra;
+             wc->cbWndExtra    = class_shm->info.win_extra;
+-            wc->hInstance     = (instance == user32_module) ? 0 : instance;
++            wc->hInstance     = (instance == get_user32_module()) ? 0 : instance;
+             wc->hIcon         = wine_server_ptr_handle( class_shm->info.icon );
+             wc->hIconSm       = wine_server_ptr_handle( class_shm->info.icon_small );
+             wc->hCursor       = wine_server_ptr_handle( class_shm->info.cursor );
+@@ -1074,7 +1177,7 @@ static void register_builtin( enum ntuser_client_procs proc )
+     WNDCLASSEXW class =
+     {
+         .cbSize = sizeof(class),
+-        .hInstance = user32_module,
++        .hInstance = get_user32_module(),
+         .style = descr->style,
+         .cbWndExtra = descr->extra,
+         .hbrBackground = descr->brush,
+diff --git a/dlls/win32u/gdiobj.c b/dlls/win32u/gdiobj.c
+index e861dee167de6965f8647104099247d4bc2989c0..b491b00cab374a8b679ce6c054f0653f5584ebd9 100644
+--- a/dlls/win32u/gdiobj.c
++++ b/dlls/win32u/gdiobj.c
+@@ -583,6 +583,15 @@ static void init_gdi_shared(void)
+     RtlGetCurrentPeb()->GdiSharedHandleTable = gdi_shared;
+ }
+ 
++#ifdef WINE_IOS_JIT_ARENA
++/* A threaded Windows child shares this win32u's GDI handle table; its gdi32
++ * still reads the table through its own PEB, which init_gdi_shared never saw. */
++void gdi_bind_owner_peb(void)
++{
++    if (gdi_shared) RtlGetCurrentPeb()->GdiSharedHandleTable = gdi_shared;
++}
++#endif
++
+ /***********************************************************************
+  *           GetStockObject    (win32u.so)
+  */
+diff --git a/dlls/win32u/sysparams.c b/dlls/win32u/sysparams.c
+index fa22d6294c0f2cabfb7613a12f879675c9910050..74c1e85bc8ad1226704d2ba5111bb6f17aead58a 100644
+--- a/dlls/win32u/sysparams.c
++++ b/dlls/win32u/sysparams.c
+@@ -42,12 +42,57 @@ WINE_DEFAULT_DEBUG_CHANNEL(system);
+ 
+ static LONG dpi_context; /* process DPI awareness context */
+ 
++#ifdef WINE_IOS_JIT_ARENA
++enum { IOS_DISPLAY_KEY_COUNT = 5 };
++struct ios_display_keys { PEB *peb; HKEY keys[IOS_DISPLAY_KEY_COUNT]; };
++#define IOS_DISPLAY_MAX_OWNERS 64
++static struct ios_display_keys ios_display_key_table[IOS_DISPLAY_MAX_OWNERS];
++static unsigned int ios_display_key_owners;
++static pthread_mutex_t ios_display_key_lock = PTHREAD_MUTEX_INITIALIZER;
++static HKEY ios_zero_keys[IOS_DISPLAY_KEY_COUNT];
++
++static HKEY *ios_display_keys(void)
++{
++    PEB *peb = NtCurrentTeb()->Peb;
++    struct ios_display_keys *owner = NULL;
++    unsigned int i;
++
++    if (!peb) return ios_zero_keys; /* pre-PEB init: never alias another owner */
++    pthread_mutex_lock( &ios_display_key_lock );
++    for (i = 0; i < ios_display_key_owners; i++)
++        if (ios_display_key_table[i].peb == peb) { owner = &ios_display_key_table[i]; break; }
++    if (!owner && ios_display_key_owners < IOS_DISPLAY_MAX_OWNERS)
++    {
++        owner = &ios_display_key_table[ios_display_key_owners++];
++        owner->peb = peb;
++    }
++    pthread_mutex_unlock( &ios_display_key_lock );
++    return owner ? owner->keys : ios_zero_keys;
++}
++#define video_key         (ios_display_keys()[0])
++#define enum_key          (ios_display_keys()[1])
++#define control_key       (ios_display_keys()[2])
++#define config_key        (ios_display_keys()[3])
++#define volatile_base_key (ios_display_keys()[4])
++#else
+ static HKEY video_key, enum_key, control_key, config_key, volatile_base_key;
++#endif
+ 
+ static const char devicemap_video_keyA[] = "\\Registry\\Machine\\HARDWARE\\DEVICEMAP\\VIDEO";
+ static const char enum_keyA[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Enum";
+ static const char control_keyA[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Control";
+ static const char config_keyA[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Hardware Profiles\\Current";
++
++#ifdef WINE_IOS_JIT_ARENA
++static HKEY *ios_config_key(void)
++{
++    HKEY *slot = &ios_display_keys()[3];
++    if (!*slot) *slot = reg_create_ascii_key( NULL, config_keyA, 0, NULL );
++    return slot;
++}
++#undef config_key
++#define config_key (*ios_config_key())
++#endif
+ static const char directx_keyA[] = "\\Registry\\Machine\\Software\\Microsoft\\DirectX";
+ 
+ static const char devpropkey_gpu_uuidA[] = "Properties\\{233A9EF3-AFC4-4ABD-B564-C32F21F1535C}\\0002";
+@@ -2236,6 +2281,23 @@ static void add_modes( const DEVMODEW *current, UINT host_modes_count, const DEV
+ 
+         if ((virtual_modes = get_virtual_modes( current, &physical, host_modes, host_modes_count, &virtual_count )))
+         {
++#ifdef WINE_IOS_JIT_ARENA
++            UINT i;
++            for (i = 0; i < virtual_count; i++)
++                if (virtual_modes[i].dmPelsWidth == virtual.dmPelsWidth &&
++                    virtual_modes[i].dmPelsHeight == virtual.dmPelsHeight &&
++                    virtual_modes[i].dmBitsPerPel == virtual.dmBitsPerPel &&
++                    virtual_modes[i].dmDisplayOrientation == virtual.dmDisplayOrientation &&
++                    virtual_modes[i].dmDisplayFrequency == virtual.dmDisplayFrequency)
++                    break;
++            if (i == virtual_count)
++            {
++                ERR( "ios-display: discarding stale virtual mode %ux%u for physical %ux%u (%u modes)\n",
++                     virtual.dmPelsWidth, virtual.dmPelsHeight,
++                     physical.dmPelsWidth, physical.dmPelsHeight, virtual_count );
++                virtual = physical;
++            }
++#endif
+             modes_count = virtual_count;
+             modes = virtual_modes;
+             current = &virtual;
+diff --git a/dlls/win32u/win32u_private.h b/dlls/win32u/win32u_private.h
+index 4e2b9283ba156b4725320161ce2ca95ffdc8dc0a..ffd0707648dda261f080fb32cc827025fcceb624 100644
+--- a/dlls/win32u/win32u_private.h
++++ b/dlls/win32u/win32u_private.h
+@@ -337,6 +337,9 @@ static inline void release_win_ptr( struct tagWND *ptr )
+ extern SYSTEM_BASIC_INFORMATION system_info;
+ extern void shared_session_init(void);
+ extern void gdi_init(void);
++#ifdef WINE_IOS_JIT_ARENA
++extern void gdi_bind_owner_peb(void);
++#endif
+ extern void winstation_init(void);
+ extern void sysparams_init(void);
+ extern int muldiv( int a, int b, int c );

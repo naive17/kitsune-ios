@@ -86,10 +86,11 @@ created through its memory syscalls, its members of the shared mid-size
 bands and its CEF pools (`ios_reclaim_owner_arena_views` in `virtual.c`).
 What Wine's shared unix libraries allocate is never counted as a child's.
 
-A game started through Steam runs without Steam's web helper, its UI and its
-largest process (`KITSUNE_STEAM_LEAN`, set for game launches): the helper is
-ended when Steam starts the game, refused while the game runs, and back after
-it exits (`NtCreateUserProcess` in `process.c`).
+A game started through Steam runs beside Steam's web helper, hidden by
+`-silent`. `KITSUNE_STEAM_LEAN=1`, which the app no longer sets, ends the helper
+when Steam starts the game, refuses its restarts while the game runs, and lets
+it back after it exits (`NtCreateUserProcess` in `process.c`). Games ran worse
+with it on.
 
 The debugger-blessed JIT arena holds only code the CPU runs: Wine's ARM64 and
 ARM64EC modules and FEX's code buffers. Executable memory a program allocates
@@ -128,11 +129,11 @@ log snapshots (`src/ios/diagnostics.h`).
 
 ## Source and build
 
-The port is kept as patches against pinned upstreams: `patches/wine`,
-`patches/dxmt` and the FEX stack in `patches/fex`, with revisions in
-`pins.env`. `scripts/setup.sh` runs the numbered build scripts in order
-([building.md](building.md)); `scripts/save-patches.sh` records the Wine and
-DXMT trees after an edit.
+The port is kept as patches against pinned upstreams: the Wine series in
+`patches/wine`, `patches/dxmt` and the FEX stack in `patches/fex`, with
+revisions in `pins.env`. `scripts/setup.sh` runs the numbered build scripts in
+order ([building.md](building.md)); `scripts/save-patches.sh` records the Wine
+and DXMT trees after an edit.
 
 Tests run at two levels: `scripts/test.sh` for host unit tests, and the macOS
 harness (`16`, `20` and `21-regress.sh`) for the port's own logic: the

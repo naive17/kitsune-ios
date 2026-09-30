@@ -33,8 +33,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 touch "$TMP/expected"
 
-# The scripts that apply patches with apply_patch, and the checkout that their
-# $SRC or $FEX_SRC names.
+# The scripts that apply patches with apply_patch or apply_series, and the
+# checkout that their $SRC or $FEX_SRC names.
 STACK_SCRIPTS="02-fetch.sh: 06-fex-arm64ec.sh:third_party/fex 08-dxvk.sh:third_party/dxvk
   09-vkd3d.sh:third_party/vkd3d-proton"
 
@@ -44,17 +44,32 @@ show() {
   else git show "$1:$2" 2>/dev/null || true; fi
 }
 
-# stacks <rev>: "<checkout> <patch>" per line, in the order the build applies them.
+# series_at <rev> <dir>: the patches of a series as of <rev>, in order.
+series_at() {
+  if [ "$1" = work ]; then series_patches "$2" 2>/dev/null || true
+  else git ls-tree --name-only "$1" "$2/" | { grep -E '/[0-9]{4}-[^/]*\.patch$' || true; } | sort; fi
+}
+
+# stacks <rev>: "<checkout> <patch>" per line, in the order the build applies
+# them. A series' checkout and directory also go to $TMP/series.<rev>.
 stacks() {
-  local rev="$1" entry script src
+  local rev="$1" entry script src fn tree path
+  touch "$TMP/series.$rev"
   for entry in $STACK_SCRIPTS; do
     script="${entry%%:*}" src="${entry#*:}"
-    # Joins continued lines, keeps the apply_patch calls, resolves the checkout.
+    # Joins continued lines, keeps the calls, resolves the checkout.
     show "$rev" "scripts/$script" |
       sed -e ':a' -e '/\\$/N' -e 's/\\\n[[:space:]]*//' -e 'ta' |
-      sed -n 's|^[[:space:]]*apply_patch "\([^"]*\)" "\$ROOT/\([^"]*\)".*|\1 \2|p' |
-      sed -e 's|^\$THIRD_PARTY|third_party|' -e 's|^\$FEX_SRC|@SRC@|' -e 's|^\$SRC|@SRC@|' |
-      sed "s|^@SRC@|$src|"
+      sed -nE 's#^[[:space:]]*(apply_patch|apply_series) "([^"]*)" "\$ROOT/([^"]*)".*#\1 \2 \3#p' |
+      sed -e 's# \$THIRD_PARTY# third_party#' -e "s# \\\$FEX_SRC# $src#" -e "s# \\\$SRC# $src#" |
+      while read -r fn tree path; do
+        if [ "$fn" = apply_patch ]; then
+          echo "$tree $path"
+        else
+          echo "$tree $path" >> "$TMP/series.$rev"
+          series_at "$rev" "$path" | sed "s#^#$tree #"
+        fi
+      done
   done
   # apply-dxmt-port.sh applies 0001 and 0002 (its base commit), then the full
   # patch; the stack is the pin plus all three.
@@ -64,14 +79,19 @@ stacks() {
 
 stack_of() { awk -v t="$1" '$1 == t { print $2 }' "$TMP/stack.$2"; }
 
-# The commit a checkout's stack applies to. DXMT's is under the base commit
-# that apply-dxmt-port.sh makes; "ios-wine base" is its name before the rename.
+# series_dir <checkout>: its patch series' directory, when the current scripts
+# apply one to it.
+series_dir() { awk -v t="$1" '$1 == t { print $2 }' "$TMP/series.work"; }
+
+# The commit a checkout's stack applies to: under a series' commits, or under
+# the base commit that apply-dxmt-port.sh makes ("ios-wine base" before the
+# rename).
 base_of() {
   if [ "$1" = third_party/dxmt ] &&
      git -C "$1" log -1 --format=%s | grep -Eq '^(Kitsune|ios-wine) base$'; then
     git -C "$1" rev-parse HEAD^
   else
-    git -C "$1" rev-parse HEAD
+    series_base "$1"
   fi
 }
 
@@ -86,17 +106,8 @@ pin() {
   esac
 }
 
-# current <checkout>: the tree id of its files, tracked and untracked, not
-# ignored. A scratch index leaves the checkout's own index alone; starting
-# from a copy of it keeps the stat cache, so only changed files are hashed.
-# Meson leaves subprojects/.wraplock in DXVK's source tree while it builds.
-current() {
-  local idx="$TMP/index.current"
-  cp "$(git -C "$1" rev-parse --absolute-git-dir)/index" "$idx" 2>/dev/null || rm -f "$idx"
-  GIT_INDEX_FILE="$idx" git -C "$1" add -A -- . ':(exclude,glob)**/.wraplock' >/dev/null 2>&1 \
-    || die "$1: git add failed"
-  GIT_INDEX_FILE="$idx" git -C "$1" write-tree
-}
+# current <checkout>: the tree id of its files as they are on disk.
+current() { worktree_tree "$1"; }
 
 # expected <checkout> <base> <rev>: the tree id of <base> with the checkout's
 # stack as of <rev> ("pristine": none), or nothing when a patch is missing or
@@ -169,7 +180,7 @@ done
 # Superprojects sort before their submodules.
 TREES="$(cat "$TMP"/stack.* | awk '{ print $1 }' | sort -u)"
 
-stale="" edited="" broken=0
+stale="" adopt="" edited="" broken=0
 for tree in $TREES; do
   selected "$tree" || continue
   if [ ! -e "$tree/.git" ]; then
@@ -190,7 +201,13 @@ for tree in $TREES; do
       continue
     fi
     if same "$tree" "$cur" "$want"; then
-      log "$tree: up to date"
+      # A series checkout also needs the series as its commits.
+      if [ -n "$(series_dir "$tree")" ] && ! same "$tree" HEAD "$want"; then
+        log "$tree: has the current patches, but not as commits"
+        adopt="$adopt $tree"
+      else
+        log "$tree: up to date"
+      fi
       continue
     fi
   fi
@@ -233,9 +250,14 @@ for tree in $TREES; do
 done
 
 if [ "$check" = 1 ]; then
-  [ -z "$stale$edited" ] && [ "$broken" = 0 ] && exit 0
+  [ -z "$stale$adopt$edited" ] && [ "$broken" = 0 ] && exit 0
   exit 1
 fi
+
+# Commits over files that are already right: nothing to rebuild.
+for tree in $adopt; do
+  apply_series "$ROOT/$tree" "$ROOT/$(series_dir "$tree")"
+done
 
 todo="$stale"
 if [ -n "$edited" ]; then
@@ -255,7 +277,10 @@ for tree in $(printf '%s\n' $todo | sort); do
   if [ -n "$pinned" ] && [ "$pinned" != "$(git -C "$tree" rev-parse HEAD)" ]; then
     pin_clone "$url" "$pinned" "$ROOT/$tree"
   fi
-  if [ "$tree" = third_party/dxmt ]; then
+  series="$(series_dir "$tree")"
+  if [ -n "$series" ]; then
+    apply_series "$ROOT/$tree" "$ROOT/$series"
+  elif [ "$tree" = third_party/dxmt ]; then
     bash "$ROOT/scripts/apply-dxmt-port.sh"
   else
     for p in $(stack_of "$tree" work); do apply_patch "$ROOT/$tree" "$ROOT/$p"; done
@@ -263,6 +288,8 @@ for tree in $(printf '%s\n' $todo | sort); do
   want="$(expected "$tree" "$(base_of "$tree")" work)"
   [ -n "$want" ] && same "$tree" "$(current "$tree")" "$want" \
     || die "$tree does not match the current patches after the sync"
+  [ -z "$series" ] || same "$tree" HEAD "$want" \
+    || die "$tree does not hold the current patches as commits after the sync"
   s="$(first_step "$tree")"
   if [ -n "$s" ] && { [ -z "$step" ] || [ "${s%% *}" -lt "${step%% *}" ]; }; then step="$s"; fi
 done
@@ -270,6 +297,8 @@ done
 if [ -n "$step" ]; then
   # setup.sh's stamps cover its scripts and pins.env, not the patches.
   log "synced. next: scripts/setup.sh --from ${step#* } rebuilds everything from the changed sources"
+elif [ -n "$adopt" ]; then
+  log "synced; the files did not change, so nothing needs rebuilding"
 elif [ -z "$edited" ] && [ "$broken" = 0 ]; then
   log "every checkout matches the current patches"
 fi

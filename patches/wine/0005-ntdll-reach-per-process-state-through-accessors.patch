@@ -1,0 +1,868 @@
+ntdll: Reach per-process state through accessors.
+
+The unix side's process globals (the PEB, the main image's info, argv
+and the rest) move into struct ios_process_state behind the
+IOS_PROCESS_FIELD accessors, so that each threaded child (0006) has its
+own; other builds keep the globals. ios_process_callbacks.h lists the
+callbacks each process publishes. unix_private.h also declares the
+arena and child-process interfaces of 0006 and 0008. env.c skips
+wineboot for a prefix made from the template (0012), accepts
+STATUS_IMAGE_NOT_AT_BASE, and routes RtlGetCurrentPeb to the current
+process. On iOS this links only together with 0006.
+---
+diff --git a/dlls/ntdll/unix/env.c b/dlls/ntdll/unix/env.c
+index 460888b95df3a1e5398949573146058d66fb6244..8e784bda1e934b2b3fe329a146708bb39e9c5059 100644
+--- a/dlls/ntdll/unix/env.c
++++ b/dlls/ntdll/unix/env.c
+@@ -65,16 +65,20 @@ WINE_DEFAULT_DEBUG_CHANNEL(environ);
+ 
+ DWORD pid = 0;
+ PEB *peb = NULL;
+-WOW_PEB *wow_peb = NULL;
+ USHORT *uctable = NULL, *lctable = NULL;
++#ifndef WINE_IOS_JIT_ARENA
++WOW_PEB *wow_peb = NULL;
+ SIZE_T startup_info_size = 0;
+ BOOL is_prefix_bootstrap = FALSE;
++#endif
+ 
+ static const WCHAR bootstrapW[] = {'W','I','N','E','B','O','O','T','S','T','R','A','P','M','O','D','E'};
+ 
++#ifndef WINE_IOS_JIT_ARENA
+ int main_argc = 0;
+ char **main_argv = NULL;
+ WCHAR **main_wargv = NULL;
++#endif
+ 
+ static LCID user_lcid, system_lcid;
+ static LANGID user_ui_language;
+@@ -514,22 +518,22 @@ static void rebuild_argv(void)
+     int i;
+ 
+ #ifndef HAVE_SETPROCTITLE
+-    for (i = 1; i < main_argc; i++)
+-        if (main_argv[i - 1] + strlen( main_argv[i - 1] ) + 1 != main_argv[i]) break;
+-    shift_strings = (i == main_argc);
++    for (i = 1; i < process_main_argc; i++)
++        if (process_main_argv[i - 1] + strlen( process_main_argv[i - 1] ) + 1 != process_main_argv[i]) break;
++    shift_strings = (i == process_main_argc);
+ #endif
+     if (shift_strings)
+     {
+-        int offset = main_argv[1] - main_argv[0];
+-        char *end = main_argv[main_argc - 1] + strlen(main_argv[main_argc - 1]) + 1;
+-        memmove( main_argv[0], main_argv[1], end - main_argv[1] );
++        int offset = process_main_argv[1] - process_main_argv[0];
++        char *end = process_main_argv[process_main_argc - 1] + strlen(process_main_argv[process_main_argc - 1]) + 1;
++        memmove( process_main_argv[0], process_main_argv[1], end - process_main_argv[1] );
+         memset( end - offset, 0, offset );
+-        for (i = 1; i < main_argc; i++) main_argv[i - 1] = main_argv[i] - offset;
++        for (i = 1; i < process_main_argc; i++) process_main_argv[i - 1] = process_main_argv[i] - offset;
+     }
+-    else memmove( main_argv, main_argv + 1, (main_argc - 1) * sizeof(main_argv[0]) );
++    else memmove( process_main_argv, process_main_argv + 1, (process_main_argc - 1) * sizeof(process_main_argv[0]) );
+ 
+-    main_argv[--main_argc] = NULL;
+-    set_process_name( main_argv[0] );
++    process_main_argv[--process_main_argc] = NULL;
++    set_process_name( process_main_argv[0] );
+ }
+ 
+ 
+@@ -543,10 +547,10 @@ static void prepend_argv( const char **args, int count )
+     char **new_argv;
+     char *p, *end;
+     BOOL write_strings = FALSE;
+-    int i, total = 0, new_argc = main_argc + count - 1;
++    int i, total = 0, new_argc = process_main_argc + count - 1;
+ 
+     for (i = 0; i < count; i++) total += strlen(args[i]) + 1;
+-    for (i = 1; i < main_argc; i++) total += strlen(main_argv[i]) + 1;
++    for (i = 1; i < process_main_argc; i++) total += strlen(process_main_argv[i]) + 1;
+ 
+     new_argv = malloc( (new_argc + 1) * sizeof(*new_argv) + total );
+     p = (char *)(new_argv + new_argc + 1);
+@@ -556,10 +560,10 @@ static void prepend_argv( const char **args, int count )
+         strcpy( p, args[i] );
+         p += strlen(p) + 1;
+     }
+-    for (i = 1; i < main_argc; i++)
++    for (i = 1; i < process_main_argc; i++)
+     {
+         new_argv[count + i - 1] = p;
+-        strcpy( p, main_argv[i] );
++        strcpy( p, process_main_argv[i] );
+         p += strlen(p) + 1;
+     }
+     new_argv[new_argc] = NULL;
+@@ -567,36 +571,36 @@ static void prepend_argv( const char **args, int count )
+     /* copy what we can over the original argv */
+ 
+ #ifndef HAVE_SETPROCTITLE
+-    for (i = 1; i < main_argc; i++)
+-        if (main_argv[i - 1] + strlen(main_argv[i - 1]) + 1 != main_argv[i]) break;
+-    write_strings = (i == main_argc);
++    for (i = 1; i < process_main_argc; i++)
++        if (process_main_argv[i - 1] + strlen(process_main_argv[i - 1]) + 1 != process_main_argv[i]) break;
++    write_strings = (i == process_main_argc);
+ #endif
+     if (write_strings)
+     {
+-        p = main_argv[0];
+-        end = main_argv[main_argc - 1] + strlen(main_argv[main_argc - 1]) + 1;
++        p = process_main_argv[0];
++        end = process_main_argv[process_main_argc - 1] + strlen(process_main_argv[process_main_argc - 1]) + 1;
+ 
+-        for (i = 0; i < min( new_argc, main_argc ) && p < end; i++)
++        for (i = 0; i < min( new_argc, process_main_argc ) && p < end; i++)
+         {
+             int len = min( end - p - 1, strlen(new_argv[i]) );
+ 
+             memcpy( p, new_argv[i], len );
+-            main_argv[i] = p;
++            process_main_argv[i] = p;
+             p += len;
+             *p++ = 0;
+         }
+         memset( p, 0, end - p );
+-        main_argv[i] = NULL;
++        process_main_argv[i] = NULL;
+     }
+     else
+     {
+-        memcpy( main_argv, new_argv, min( new_argc, main_argc ) * sizeof(*new_argv) );
+-        main_argv[min( new_argc, main_argc )] = NULL;
++        memcpy( process_main_argv, new_argv, min( new_argc, process_main_argc ) * sizeof(*new_argv) );
++        process_main_argv[min( new_argc, process_main_argc )] = NULL;
+     }
+ 
+-    main_argc = new_argc;
+-    main_argv = new_argv;
+-    set_process_name( main_argv[0] );
++    process_main_argc = new_argc;
++    process_main_argv = new_argv;
++    set_process_name( process_main_argv[0] );
+ }
+ 
+ 
+@@ -611,7 +615,7 @@ static WCHAR **build_wargv( const WCHAR *image )
+     WCHAR *p, **wargv;
+     DWORD total = wcslen(image) + 1;
+ 
+-    for (argc = 1; main_argv[argc]; argc++) total += strlen(main_argv[argc]) + 1;
++    for (argc = 1; process_main_argv[argc]; argc++) total += strlen(process_main_argv[argc]) + 1;
+ 
+     wargv = malloc( total * sizeof(WCHAR) + (argc + 1) * sizeof(*wargv) );
+     p = (WCHAR *)(wargv + argc + 1);
+@@ -619,9 +623,9 @@ static WCHAR **build_wargv( const WCHAR *image )
+     wcscpy( p, image );
+     total -= wcslen( p ) + 1;
+     p += wcslen( p ) + 1;
+-    for (argc = 1; main_argv[argc]; argc++)
++    for (argc = 1; process_main_argv[argc]; argc++)
+     {
+-        DWORD reslen = ntdll_umbstowcs( main_argv[argc], strlen(main_argv[argc]) + 1, p, total );
++        DWORD reslen = ntdll_umbstowcs( process_main_argv[argc], strlen(process_main_argv[argc]) + 1, p, total );
+         wargv[argc] = p;
+         p += reslen;
+         total -= reslen;
+@@ -1345,7 +1349,7 @@ static void get_initial_console( RTL_USER_PROCESS_PARAMETERS *params )
+     wine_server_fd_to_handle( 1, GENERIC_WRITE|SYNCHRONIZE, OBJ_INHERIT, &params->hStdOutput );
+     wine_server_fd_to_handle( 2, GENERIC_WRITE|SYNCHRONIZE, OBJ_INHERIT, &params->hStdError );
+ 
+-    if (main_image_info.SubSystemType != IMAGE_SUBSYSTEM_WINDOWS_CUI)
++    if (process_image_info.SubSystemType != IMAGE_SUBSYSTEM_WINDOWS_CUI)
+         return;
+ 
+     /* mark tty handles for kernelbase, see init_console */
+@@ -1565,6 +1569,12 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
+         return;
+     }
+ 
++#ifdef WINE_IOS_JIT_ARENA
++    virtual_init_user_shared_data();
++    NtClose( handles[0] );
++    return;
++#endif
++
+     virtual_init_user_shared_data();
+     env[size] = 0;
+     params.Flags           = PROCESS_PARAMS_FLAG_NORMALIZED;
+@@ -1732,19 +1742,19 @@ static void load_global_options( const UNICODE_STRING *image, BOOL debugged )
+     init_unicode_string( &nameW, sessionW );
+     if (!NtOpenKey( &key, KEY_QUERY_VALUE, &attr ))
+     {
+-        peb->NtGlobalFlag = get_dword_option( key, globalflagW, 0 );
+-        peb->CriticalSectionTimeout.QuadPart = get_dword_option( key, critsectionW, 30 * 24 * 60 * 60 ) * (ULONGLONG)-10000000;
+-        peb->HeapSegmentReserve = get_dword_option( key, heapreserveW, 0x100000 );
+-        peb->HeapSegmentCommit = get_dword_option( key, heapcommitW, 0x10000 );
+-        peb->HeapDeCommitTotalFreeThreshold = get_dword_option( key, heapdecommittotalW, 0x10000 );
+-        peb->HeapDeCommitFreeBlockThreshold = get_dword_option( key, heapdecommitblockW, 0x1000 );
++        RtlGetCurrentPeb()->NtGlobalFlag = get_dword_option( key, globalflagW, 0 );
++        RtlGetCurrentPeb()->CriticalSectionTimeout.QuadPart = get_dword_option( key, critsectionW, 30 * 24 * 60 * 60 ) * (ULONGLONG)-10000000;
++        RtlGetCurrentPeb()->HeapSegmentReserve = get_dword_option( key, heapreserveW, 0x100000 );
++        RtlGetCurrentPeb()->HeapSegmentCommit = get_dword_option( key, heapcommitW, 0x10000 );
++        RtlGetCurrentPeb()->HeapDeCommitTotalFreeThreshold = get_dword_option( key, heapdecommittotalW, 0x10000 );
++        RtlGetCurrentPeb()->HeapDeCommitFreeBlockThreshold = get_dword_option( key, heapdecommitblockW, 0x1000 );
+         NtClose( key );
+     }
+ 
+-    if (debugged) peb->NtGlobalFlag |= FLG_HEAP_ENABLE_TAIL_CHECK |
++    if (debugged) RtlGetCurrentPeb()->NtGlobalFlag |= FLG_HEAP_ENABLE_TAIL_CHECK |
+                                        FLG_HEAP_ENABLE_FREE_CHECK |
+                                        FLG_HEAP_VALIDATE_PARAMETERS;
+-    else peb->ProcessParameters->Flags |= PROCESS_PARAMS_IMAGE_KEY_MISSING;
++    else RtlGetCurrentPeb()->ProcessParameters->Flags |= PROCESS_PARAMS_IMAGE_KEY_MISSING;
+ 
+     init_unicode_string( &nameW, optionsW );
+     if (!NtOpenKey( &key, KEY_QUERY_VALUE, &attr ))
+@@ -1755,8 +1765,8 @@ static void load_global_options( const UNICODE_STRING *image, BOOL debugged )
+         nameW.Length = image->Length - i * sizeof(WCHAR);
+         if (!NtOpenKey( &key, KEY_QUERY_VALUE, &attr ))
+         {
+-            peb->NtGlobalFlag = get_dword_option( key, globalflagW, peb->NtGlobalFlag );
+-            peb->ProcessParameters->Flags &= ~PROCESS_PARAMS_IMAGE_KEY_MISSING;
++            RtlGetCurrentPeb()->NtGlobalFlag = get_dword_option( key, globalflagW, RtlGetCurrentPeb()->NtGlobalFlag );
++            RtlGetCurrentPeb()->ProcessParameters->Flags &= ~PROCESS_PARAMS_IMAGE_KEY_MISSING;
+             NtClose( key );
+         }
+         NtClose( attr.RootDirectory );
+@@ -1833,23 +1843,23 @@ static void *build_wow64_parameters( const RTL_USER_PROCESS_PARAMETERS *params )
+  */
+ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL debugged )
+ {
+-    peb->ImageBaseAddress           = module;
+-    peb->ProcessParameters          = params;
+-    peb->OSMajorVersion             = 10;
+-    peb->OSMinorVersion             = 0;
+-    peb->OSBuildNumber              = 19045;
+-    peb->OSPlatformId               = VER_PLATFORM_WIN32_NT;
+-    peb->ImageSubSystem             = main_image_info.SubSystemType;
+-    peb->ImageSubSystemMajorVersion = main_image_info.MajorSubsystemVersion;
+-    peb->ImageSubSystemMinorVersion = main_image_info.MinorSubsystemVersion;
++    RtlGetCurrentPeb()->ImageBaseAddress           = module;
++    RtlGetCurrentPeb()->ProcessParameters          = params;
++    RtlGetCurrentPeb()->OSMajorVersion             = 10;
++    RtlGetCurrentPeb()->OSMinorVersion             = 0;
++    RtlGetCurrentPeb()->OSBuildNumber              = 19045;
++    RtlGetCurrentPeb()->OSPlatformId               = VER_PLATFORM_WIN32_NT;
++    RtlGetCurrentPeb()->ImageSubSystem             = process_image_info.SubSystemType;
++    RtlGetCurrentPeb()->ImageSubSystemMajorVersion = process_image_info.MajorSubsystemVersion;
++    RtlGetCurrentPeb()->ImageSubSystemMinorVersion = process_image_info.MinorSubsystemVersion;
+ 
+ #ifdef _WIN64
+-    if (!is_machine_64bit( main_image_info.Machine ))
++    if (!is_machine_64bit( process_image_info.Machine ))
+     {
+         struct thread_data *data = get_thread_data();
+         data->teb->WowTebOffset = teb_offset;
+         data->teb->Tib.ExceptionList = (void *)((char *)data->teb + teb_offset);
+-        wow_peb = (PEB32 *)((char *)peb + page_size);
++        process_wow_peb = (PEB32 *)((char *)RtlGetCurrentPeb() + page_size);
+         set_thread_id( data );
+     }
+ #endif
+@@ -1857,27 +1867,27 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module, BOOL de
+     virtual_set_large_address_space();
+     load_global_options( &params->ImagePathName, debugged );
+ 
+-    if (wow_peb)
++    if (process_wow_peb)
+     {
+         void *wow64_params = build_wow64_parameters( params );
+ 
+-        wow_peb->ImageBaseAddress                = PtrToUlong( peb->ImageBaseAddress );
+-        wow_peb->ProcessParameters               = PtrToUlong( wow64_params );
+-        wow_peb->NumberOfProcessors              = peb->NumberOfProcessors;
+-        wow_peb->NtGlobalFlag                    = peb->NtGlobalFlag;
+-        wow_peb->CriticalSectionTimeout.QuadPart = peb->CriticalSectionTimeout.QuadPart;
+-        wow_peb->HeapSegmentReserve              = peb->HeapSegmentReserve;
+-        wow_peb->HeapSegmentCommit               = peb->HeapSegmentCommit;
+-        wow_peb->HeapDeCommitTotalFreeThreshold  = peb->HeapDeCommitTotalFreeThreshold;
+-        wow_peb->HeapDeCommitFreeBlockThreshold  = peb->HeapDeCommitFreeBlockThreshold;
+-        wow_peb->OSMajorVersion                  = peb->OSMajorVersion;
+-        wow_peb->OSMinorVersion                  = peb->OSMinorVersion;
+-        wow_peb->OSBuildNumber                   = peb->OSBuildNumber;
+-        wow_peb->OSPlatformId                    = peb->OSPlatformId;
+-        wow_peb->ImageSubSystem                  = peb->ImageSubSystem;
+-        wow_peb->ImageSubSystemMajorVersion      = peb->ImageSubSystemMajorVersion;
+-        wow_peb->ImageSubSystemMinorVersion      = peb->ImageSubSystemMinorVersion;
+-        wow_peb->SessionId                       = peb->SessionId;
++        process_wow_peb->ImageBaseAddress                = PtrToUlong( RtlGetCurrentPeb()->ImageBaseAddress );
++        process_wow_peb->ProcessParameters               = PtrToUlong( wow64_params );
++        process_wow_peb->NumberOfProcessors              = RtlGetCurrentPeb()->NumberOfProcessors;
++        process_wow_peb->NtGlobalFlag                    = RtlGetCurrentPeb()->NtGlobalFlag;
++        process_wow_peb->CriticalSectionTimeout.QuadPart = RtlGetCurrentPeb()->CriticalSectionTimeout.QuadPart;
++        process_wow_peb->HeapSegmentReserve              = RtlGetCurrentPeb()->HeapSegmentReserve;
++        process_wow_peb->HeapSegmentCommit               = RtlGetCurrentPeb()->HeapSegmentCommit;
++        process_wow_peb->HeapDeCommitTotalFreeThreshold  = RtlGetCurrentPeb()->HeapDeCommitTotalFreeThreshold;
++        process_wow_peb->HeapDeCommitFreeBlockThreshold  = RtlGetCurrentPeb()->HeapDeCommitFreeBlockThreshold;
++        process_wow_peb->OSMajorVersion                  = RtlGetCurrentPeb()->OSMajorVersion;
++        process_wow_peb->OSMinorVersion                  = RtlGetCurrentPeb()->OSMinorVersion;
++        process_wow_peb->OSBuildNumber                   = RtlGetCurrentPeb()->OSBuildNumber;
++        process_wow_peb->OSPlatformId                    = RtlGetCurrentPeb()->OSPlatformId;
++        process_wow_peb->ImageSubSystem                  = RtlGetCurrentPeb()->ImageSubSystem;
++        process_wow_peb->ImageSubSystemMajorVersion      = RtlGetCurrentPeb()->ImageSubSystemMajorVersion;
++        process_wow_peb->ImageSubSystemMinorVersion      = RtlGetCurrentPeb()->ImageSubSystemMinorVersion;
++        process_wow_peb->SessionId                       = RtlGetCurrentPeb()->SessionId;
+     }
+ }
+ 
+@@ -1908,7 +1918,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     add_registry_environment( &env, &env_pos, &env_size );
+     bootstrap = get_env_var( env, env_pos, bootstrapW, ARRAY_SIZE(bootstrapW) );
+     set_env_var( &env, &env_pos, &env_size, bootstrapW, ARRAY_SIZE(bootstrapW), valueW );
+-    is_prefix_bootstrap = TRUE;
++    process_bootstrap = TRUE;
+     env[env_pos] = 0;
+     run_wineboot( env, env_pos );
+ 
+@@ -1916,18 +1926,18 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     set_env_var( &env, &env_pos, &env_size, pathW, 4, path );  /* reset PATH */
+     free( path );
+     set_env_var( &env, &env_pos, &env_size, bootstrapW, ARRAY_SIZE(bootstrapW), bootstrap );
+-    is_prefix_bootstrap = !!bootstrap;
++    process_bootstrap = !!bootstrap;
+     free( bootstrap );
+     add_registry_environment( &env, &env_pos, &env_size );
+     env[env_pos++] = 0;
+ 
+-    get_full_path( main_argv[1], curdir, &nt_name );
++    get_full_path( process_main_argv[1], curdir, &nt_name );
+     status = load_main_exe( &nt_name, 0, module );
+     /* fail only if the file contained an explicit path */
+     if (status == STATUS_DLL_NOT_FOUND &&
+-        (strpbrk( main_argv[1], "/\\" ) || (main_argv[1][0] && main_argv[1][1] == ':')))
++        (strpbrk( process_main_argv[1], "/\\" ) || (process_main_argv[1][0] && process_main_argv[1][1] == ':')))
+     {
+-        MESSAGE( "wine: failed to open %s\n", debugstr_a(main_argv[1]) );
++        MESSAGE( "wine: failed to open %s\n", debugstr_a(process_main_argv[1]) );
+         NtTerminateProcess( GetCurrentProcess(), status );
+     }
+ 
+@@ -1935,14 +1945,17 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     {
+         char *loader;
+ 
+-        if (main_image_info.ImageCharacteristics & IMAGE_FILE_DLL) status = STATUS_INVALID_IMAGE_FORMAT;
++        if (process_image_info.ImageCharacteristics & IMAGE_FILE_DLL) status = STATUS_INVALID_IMAGE_FORMAT;
+         /* if we have to use a different loader, fall back to start.exe */
+-        if ((loader = get_alternate_wineloader( main_image_info.Machine )))
++        if ((loader = get_alternate_wineloader( process_image_info.Machine )))
+         {
+             free( loader );
+             status = STATUS_INVALID_IMAGE_FORMAT;
+         }
+     }
++#ifdef WINE_IOS_JIT_ARENA
++    if (status == STATUS_IMAGE_NOT_AT_BASE) status = STATUS_SUCCESS;
++#endif
+ 
+     if (status)  /* try launching it through start.exe */
+     {
+@@ -1958,16 +1971,16 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+         if (teb64) teb64->TlsSlots[WOW64_TLS_FILESYSREDIR] = FALSE;
+     }
+ 
+-    main_wargv = build_wargv( get_dos_path( nt_name.Buffer ));
+-    cmdline = build_command_line( main_wargv );
++    process_main_wargv = build_wargv( get_dos_path( nt_name.Buffer ));
++    cmdline = build_command_line( process_main_wargv );
+ 
+     TRACE( "image %s cmdline %s dir %s\n",
+-           debugstr_w(main_wargv[0]), debugstr_w(cmdline), debugstr_w(curdir) );
++           debugstr_w(process_main_wargv[0]), debugstr_w(cmdline), debugstr_w(curdir) );
+ 
+     size = (sizeof(*params)
+             + MAX_PATH * sizeof(WCHAR)  /* curdir */
+             + (wcslen( cmdline ) + 1) * sizeof(WCHAR)  /* command line */
+-            + (wcslen( main_wargv[0] ) + 1) * sizeof(WCHAR) * 2 /* image path + window title */
++            + (wcslen( process_main_wargv[0] ) + 1) * sizeof(WCHAR) * 2 /* image path + window title */
+             + env_pos * sizeof(WCHAR));
+ 
+     status = NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&params, 0, &size,
+@@ -1978,7 +1991,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     params->Size            = size;
+     params->Flags           = PROCESS_PARAMS_FLAG_NORMALIZED;
+     params->wShowWindow     = 1; /* SW_SHOWNORMAL */
+-    params->ProcessGroupId  = pid;
++    params->ProcessGroupId  = get_current_process_id();
+ 
+     params->CurrentDirectory.DosPath.Buffer = (WCHAR *)(params + 1);
+     wcscpy( params->CurrentDirectory.DosPath.Buffer, get_dos_path( curdir ));
+@@ -1986,9 +1999,9 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
+     params->CurrentDirectory.DosPath.MaximumLength = MAX_PATH * sizeof(WCHAR);
+     dst = params->CurrentDirectory.DosPath.Buffer + MAX_PATH;
+ 
+-    put_unicode_string( main_wargv[0], &dst, &params->ImagePathName );
++    put_unicode_string( process_main_wargv[0], &dst, &params->ImagePathName );
+     put_unicode_string( cmdline, &dst, &params->CommandLine );
+-    put_unicode_string( main_wargv[0], &dst, &params->WindowTitle );
++    put_unicode_string( process_main_wargv[0], &dst, &params->WindowTitle );
+     free( nt_name.Buffer );
+     free( cmdline );
+     free( curdir );
+@@ -2019,18 +2032,18 @@ void init_startup_info(void)
+     USHORT machine;
+     BOOL debugged;
+ 
+-    if (!startup_info_size)
++    if (!process_startup_size)
+     {
+         params = build_initial_params( &module );
+         init_peb( params, module, FALSE );
+         return;
+     }
+ 
+-    info = malloc( startup_info_size );
++    info = malloc( process_startup_size );
+ 
+     SERVER_START_REQ( get_startup_info )
+     {
+-        wine_server_set_reply( req, info, startup_info_size );
++        wine_server_set_reply( req, info, process_startup_size );
+         status = wine_server_call( req );
+         machine = reply->machine;
+         debugged = reply->debugged;
+@@ -2044,7 +2057,7 @@ void init_startup_info(void)
+     memcpy( env, (char *)info + info_size, env_size * sizeof(WCHAR) );
+     env_pos = env_size - 1;
+     add_dynamic_environment( &env, &env_pos, &env_size );
+-    is_prefix_bootstrap = !!find_env_var( env, env_pos, bootstrapW, ARRAY_SIZE(bootstrapW) );
++    process_bootstrap = !!find_env_var( env, env_pos, bootstrapW, ARRAY_SIZE(bootstrapW) );
+     env[env_pos++] = 0;
+ 
+     size = (sizeof(*params)
+@@ -2120,7 +2133,7 @@ void init_startup_info(void)
+         NtTerminateProcess( GetCurrentProcess(), status );
+     }
+     rebuild_argv();
+-    main_wargv = build_wargv( params->ImagePathName.Buffer );
++    process_main_wargv = build_wargv( params->ImagePathName.Buffer );
+     free( nt_name.Buffer );
+     init_peb( params, module, debugged );
+ }
+@@ -2466,7 +2479,11 @@ void WINAPI RtlSetLastWin32Error( DWORD err )
+  */
+ PEB * WINAPI RtlGetCurrentPeb(void)
+ {
++#ifdef WINE_IOS_JIT_ARENA
++    return ios_process_current_peb( peb );
++#else
+     return peb;
++#endif
+ }
+ 
+ /**********************************************************************
+@@ -2474,7 +2491,7 @@ PEB * WINAPI RtlGetCurrentPeb(void)
+  */
+ HANDLE WINAPI PsGetCurrentProcessId(void)
+ {
+-    return ULongToHandle( pid );
++    return ULongToHandle( get_current_process_id() );
+ }
+ 
+ /**********************************************************************
+diff --git a/dlls/ntdll/unix/ios_process_callbacks.h b/dlls/ntdll/unix/ios_process_callbacks.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f0cc85e95df8901cc6dc2c0e59cd3259a42537b1
+--- /dev/null
++++ b/dlls/ntdll/unix/ios_process_callbacks.h
+@@ -0,0 +1,23 @@
++/* Per-owner Unix -> PE callback identity. Kitsune authors, 2026.
++ * SPDX-License-Identifier: GPL-3.0-or-later */
++#ifndef KITSUNE_PROCESS_CALLBACKS_H
++#define KITSUNE_PROCESS_CALLBACKS_H
++#define IOS_PROCESS_CALLBACKS(X) \
++    X(DbgUiRemoteBreakin) \
++    X(KiRaiseUserExceptionDispatcher) \
++    X(KiUserExceptionDispatcher) \
++    X(KiUserApcDispatcher) \
++    X(KiUserCallbackDispatcher) \
++    X(KiUserEmulationDispatcher) \
++    X(LdrInitializeThunk) \
++    X(RtlUserThreadStart) \
++    X(__wine_ctrl_routine) \
++    X(LdrSystemDllInitBlock)
++enum ios_process_callback
++{
++#define IOS_CALLBACK_ID(name) IOS_CALLBACK_##name,
++    IOS_PROCESS_CALLBACKS(IOS_CALLBACK_ID)
++#undef IOS_CALLBACK_ID
++    IOS_CALLBACK_COUNT
++};
++#endif
+diff --git a/dlls/ntdll/unix/ios_process_state.h b/dlls/ntdll/unix/ios_process_state.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..b4c51bbcdb353833547b673b5f2ec6707d356752
+--- /dev/null
++++ b/dlls/ntdll/unix/ios_process_state.h
+@@ -0,0 +1,26 @@
++/* Mutable Unix-side startup state for one Windows process, not one pthread.
++ * Copyright 2026 Kitsune contributors. SPDX-License-Identifier: GPL-3.0-or-later
++ * Wine types (including WOW_PEB) must be available before this header. */
++#ifndef KITSUNE_PROCESS_STATE_H
++#define KITSUNE_PROCESS_STATE_H
++struct ios_process_state
++{
++    SECTION_IMAGE_INFORMATION image;
++    WOW_PEB *wow;
++    SIZE_T startup_size;
++    int argc;
++    char **argv;
++    WCHAR **wargv;
++    BOOL bootstrap;
++    HANDLE keyed;
++    ULONG cookie;
++    LONG threads;
++    BOOL child;
++    struct ios_ntdll_image *private_ntdll;
++    HANDLE loadorder_std, loadorder_app;
++    BOOL loadorder_init, main_exe_loaded;
++    struct { int count, alloc; struct module_loadorder *order; } loadorder_env;
++    UINT error_mode;
++    void *previous_thread;
++};
++#endif
+diff --git a/dlls/ntdll/unix/loadorder.c b/dlls/ntdll/unix/loadorder.c
+index 54d485a5b588ef3723d9fe1648ca61d10d387cea..de21fe121666a80d753e436f891a1cbea3e87b4b 100644
+--- a/dlls/ntdll/unix/loadorder.c
++++ b/dlls/ntdll/unix/loadorder.c
+@@ -46,12 +46,14 @@ struct module_loadorder
+     enum loadorder      loadorder;
+ };
+ 
++#ifndef WINE_IOS_JIT_ARENA
+ static struct
+ {
+     int                 count;
+     int                 alloc;
+     struct module_loadorder *order;
+ } env_list;
++#endif
+ 
+ struct version_info
+ {
+@@ -71,10 +73,12 @@ struct version_entry
+ 
+ static const WCHAR separatorsW[] = {',',' ','\t',0};
+ 
++#ifndef WINE_IOS_JIT_ARENA
+ static HANDLE std_key;
+ static HANDLE app_key;
+ static BOOL init_done;
+ static BOOL main_exe_loaded;
++#endif
+ 
+ /***************************************************************************
+  *	get_version_entry
+@@ -225,25 +229,25 @@ static void add_load_order( const struct module_loadorder *lo )
+ {
+     int i;
+ 
+-    for(i = 0; i < env_list.count; i++)
++    for(i = 0; i < process_loadorder_env.count; i++)
+     {
+-        if (!cmp_sort_func( lo, &env_list.order[i] ))
++        if (!cmp_sort_func( lo, &process_loadorder_env.order[i] ))
+         {
+             /* replace existing option */
+-            env_list.order[i].loadorder = lo->loadorder;
++            process_loadorder_env.order[i].loadorder = lo->loadorder;
+             return;
+         }
+     }
+ 
+-    if (i >= env_list.alloc)
++    if (i >= process_loadorder_env.alloc)
+     {
+         /* No space in current array, make it larger */
+-        env_list.alloc += LOADORDER_ALLOC_CLUSTER;
+-        env_list.order = realloc( env_list.order, env_list.alloc * sizeof(*lo) );
++        process_loadorder_env.alloc += LOADORDER_ALLOC_CLUSTER;
++        process_loadorder_env.order = realloc( process_loadorder_env.order, process_loadorder_env.alloc * sizeof(*lo) );
+     }
+-    env_list.order[i].loadorder  = lo->loadorder;
+-    env_list.order[i].modulename = lo->modulename;
+-    env_list.count++;
++    process_loadorder_env.order[i].loadorder  = lo->loadorder;
++    process_loadorder_env.order[i].modulename = lo->modulename;
++    process_loadorder_env.count++;
+ }
+ 
+ 
+@@ -286,9 +290,9 @@ static void init_load_order(void)
+     const char *overrides = getenv( "WINEDLLOVERRIDES" );
+ 
+     /* @@ Wine registry key: HKCU\Software\Wine\DllOverrides */
+-    open_hkcu_key( "Software\\Wine\\DllOverrides", &std_key );
++    open_hkcu_key( "Software\\Wine\\DllOverrides", &process_loadorder_std );
+ 
+-    init_done = TRUE;
++    process_loadorder_init = TRUE;
+ 
+     if (!overrides) return;
+     order = entry = malloc( (strlen(overrides) + 1) * sizeof(WCHAR) );
+@@ -305,8 +309,8 @@ static void init_load_order(void)
+     }
+ 
+     /* sort the array for quick lookup */
+-    if (env_list.count)
+-        qsort(env_list.order, env_list.count, sizeof(env_list.order[0]), cmp_sort_func);
++    if (process_loadorder_env.count)
++        qsort(process_loadorder_env.order, process_loadorder_env.count, sizeof(process_loadorder_env.order[0]), cmp_sort_func);
+ 
+     /* note: we don't free the string because the stored module names point inside it */
+ }
+@@ -323,8 +327,8 @@ static inline enum loadorder get_env_load_order( const WCHAR *module )
+ 
+     tmp.modulename = module;
+     /* some bsearch implementations (Solaris) are buggy when the number of items is 0 */
+-    if (env_list.count &&
+-        (res = bsearch(&tmp, env_list.order, env_list.count, sizeof(env_list.order[0]), cmp_sort_func)))
++    if (process_loadorder_env.count &&
++        (res = bsearch(&tmp, process_loadorder_env.order, process_loadorder_env.count, sizeof(process_loadorder_env.order[0]), cmp_sort_func)))
+         return res->loadorder;
+     return LO_INVALID;
+ }
+@@ -483,8 +487,8 @@ void set_load_order_app_name( const WCHAR *app_name )
+     const WCHAR *p;
+ 
+     if ((p = wcsrchr( app_name, '\\' ))) app_name = p + 1;
+-    app_key = open_app_key( app_name );
+-    main_exe_loaded = TRUE;
++    process_loadorder_app = open_app_key( app_name );
++    process_main_loaded = TRUE;
+ }
+ 
+ 
+@@ -503,7 +507,7 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name, BOOL is_system_dir
+     unsigned int len = nt_name->Length / sizeof(WCHAR);
+     WCHAR *module, *basename;
+ 
+-    if (!init_done) init_load_order();
++    if (!process_loadorder_init) init_load_order();
+ 
+     if (len > 4 && !wcsncmp( path, prefixW, 4 ))
+     {
+@@ -518,22 +522,22 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name, BOOL is_system_dir
+     basename = get_basename( module + 1 );
+ 
+     /* first explicit module name */
+-    if ((ret = get_load_order_value( std_key, app_key, is_system_dir ? basename : module+1 )) != LO_INVALID)
++    if ((ret = get_load_order_value( process_loadorder_std, process_loadorder_app, is_system_dir ? basename : module+1 )) != LO_INVALID)
+         goto done;
+ 
+     /* then module basename preceded by '*' */
+     basename[-1] = '*';
+-    if ((ret = get_load_order_value( std_key, app_key, basename-1 )) != LO_INVALID)
++    if ((ret = get_load_order_value( process_loadorder_std, process_loadorder_app, basename-1 )) != LO_INVALID)
+         goto done;
+ 
+     /* now some heuristics for explicit paths */
+     if (!is_system_dir)
+     {
+         /* module basename without '*' */
+-        if (((ret = get_load_order_value( std_key, app_key, basename )) != LO_INVALID))
++        if (((ret = get_load_order_value( process_loadorder_std, process_loadorder_app, basename )) != LO_INVALID))
+             goto done;
+ 
+-        if (!main_exe_loaded)  /* if loading the main exe, try native first */
++        if (!process_main_loaded)  /* if loading the main exe, try native first */
+         {
+             ret = LO_NATIVE_BUILTIN;
+             TRACE( "got main exe default %s for %s\n", debugstr_loadorder(ret), debugstr_us(nt_name) );
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index e0eddb83e9ad899df5408e594e4e2dd533af4106..24fd3daf41f3982513277233db47e57d84b442ee 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -2919,7 +2919,7 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, TEB *teb )
+     {
+         wow_context->ContextFlags = CONTEXT_I386_ALL;
+         wow_context->Eax = (ULONG_PTR)entry;
+-        wow_context->Ebx = (arg == peb ? (ULONG_PTR)wow_peb : (ULONG_PTR)arg);
++        wow_context->Ebx = (arg == RtlGetCurrentPeb() ? (ULONG_PTR)process_wow_peb : (ULONG_PTR)arg);
+         wow_context->Esp = get_wow_teb( teb )->Tib.StackBase - 16;
+         wow_context->Eip = pLdrSystemDllInitBlock->pRtlUserThreadStart;
+         wow_context->SegCs = cs32_sel;
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index c8ca97d21a0163099dcba8a0dc7a8b10b8aa31bc..ad6de2d595bd5675a2b9ba57c1a7b0bdcfa7b537 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -76,6 +76,34 @@ extern WOW_PEB *wow_peb;
+ extern ULONG_PTR user_space_wow_limit;
+ extern SECTION_IMAGE_INFORMATION main_image_info;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++#include "ios_process_state.h"
++extern struct ios_process_state *ios_current_process_state(void);
++#define IOS_PROCESS_FIELD(field, legacy) (ios_current_process_state()->field)
++#else
++#define IOS_PROCESS_FIELD(field, legacy) (legacy)
++#endif
++/* Distinct accessor names avoid rewriting server wire fields/local variables
++ * such as startup_info_size and select_op.keyed_event. Root defaults remain
++ * the normal path; an unbound experimental caller never borrows root state. */
++#define process_image_info    IOS_PROCESS_FIELD(image, main_image_info)
++#define process_wow_peb       IOS_PROCESS_FIELD(wow, wow_peb)
++#define process_startup_size  IOS_PROCESS_FIELD(startup_size, startup_info_size)
++#define process_main_argc     IOS_PROCESS_FIELD(argc, main_argc)
++#define process_main_argv     IOS_PROCESS_FIELD(argv, main_argv)
++#define process_main_wargv    IOS_PROCESS_FIELD(wargv, main_wargv)
++#define process_bootstrap    IOS_PROCESS_FIELD(bootstrap, is_prefix_bootstrap)
++#define process_keyed_event  IOS_PROCESS_FIELD(keyed, keyed_event)
++#define process_random_cookie IOS_PROCESS_FIELD(cookie, process_cookie)
++#define process_thread_count IOS_PROCESS_FIELD(threads, nb_threads)
++#define process_loadorder_std IOS_PROCESS_FIELD(loadorder_std, std_key)
++#define process_loadorder_app IOS_PROCESS_FIELD(loadorder_app, app_key)
++#define process_loadorder_init IOS_PROCESS_FIELD(loadorder_init, init_done)
++#define process_main_loaded IOS_PROCESS_FIELD(main_exe_loaded, main_exe_loaded)
++#define process_loadorder_env IOS_PROCESS_FIELD(loadorder_env, env_list)
++#define current_error_mode IOS_PROCESS_FIELD(error_mode, process_error_mode)
++#define process_previous_thread IOS_PROCESS_FIELD(previous_thread, prev_data)
++
+ static inline WOW_TEB *get_wow_teb( TEB *teb )
+ {
+     return teb->WowTebOffset ? (WOW_TEB *)((char *)teb + teb->WowTebOffset) : NULL;
+@@ -83,19 +111,19 @@ static inline WOW_TEB *get_wow_teb( TEB *teb )
+ 
+ static inline BOOL is_wow64(void)
+ {
+-    return !!wow_peb;
++    return !!process_wow_peb;
+ }
+ 
+ /* check for old-style Wow64 (using a 32-bit ntdll.so) */
+ static inline BOOL is_old_wow64(void)
+ {
+-    return !is_win64 && wow_peb;
++    return !is_win64 && process_wow_peb;
+ }
+ 
+ static inline BOOL is_arm64ec(void)
+ {
+     return (current_machine == IMAGE_FILE_MACHINE_ARM64 &&
+-            main_image_info.Machine == IMAGE_FILE_MACHINE_AMD64);
++            process_image_info.Machine == IMAGE_FILE_MACHINE_AMD64);
+ }
+ 
+ /* per-thread data for the Unix side, stored at the bottom of the signal stack */
+@@ -116,12 +144,39 @@ struct thread_data
+     void        *param;             /* thread entry point parameter */
+     struct list  entry;             /* entry in TEB list */
+     char         debug_info[0x800]; /* debug_info structure */
++#ifdef WINE_IOS_JIT_ARENA
++    struct ios_process_context *ios_process; /* retained; also for TEB-less workers */
++    void        *ios_process_reserved;       /* preserve signal-stack alignment */
++#endif
+     char         signal_stack[];    /* signal stack */
+     /* char kernel_stack[] */
+ };
+ 
+ extern pthread_key_t thread_data_key;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++#include "ios_process_callbacks.h"
++extern NTSTATUS ios_process_inherit_thread( struct thread_data *data );
++extern void ios_process_release_thread( struct thread_data *data );
++extern void ios_process_bind_thread_id( struct thread_data *data );
++extern BOOL ios_process_exit_state( BOOL begin_exit );
++extern PEB *ios_process_current_peb( PEB *root_peb );
++extern DWORD ios_process_current_pid( DWORD root_pid );
++extern void *ios_process_current_callback( enum ios_process_callback which, void *root_callback );
++extern NTSTATUS ios_process_publish_callbacks( void *const *callbacks );
++struct ios_ntdll_image;
++extern NTSTATUS ios_prepare_private_ntdll( struct ios_ntdll_image *out );
++extern NTSTATUS ios_spawn_threaded_child( int socketfd, char **argv, USHORT machine );
++extern void *ios_current_child_peb(void);
++extern void ios_view_owner_enter(void);
++extern void ios_view_owner_leave(void);
++extern void ios_reclaim_owner_arena_views( void *peb );
++extern NTSTATUS ios_bind_child_context( struct thread_data *data, struct ios_process_state *state,
++                                        PEB *child_peb, int fd );
++extern NTSTATUS ios_server_init_child( SIZE_T *startup_size );
++extern NTSTATUS ios_server_start_child(void);
++#endif
++
+ static inline struct thread_data *get_thread_data(void)
+ {
+     return pthread_getspecific( thread_data_key );
+@@ -190,6 +245,16 @@ extern void *pRtlUserThreadStart;
+ extern void *p__wine_ctrl_routine;
+ extern SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock;
+ 
++/* Keep root publishers explicit; all runtime consumers use this accessor.
++ * With per-process contexts on (KITSUNE_PROCESS_CACHE_EXPERIMENT=1), a thread
++ * bound to no process gets NULL, never another owner's PE. */
++#ifdef WINE_IOS_JIT_ARENA
++#define CURRENT_NTDLL_CALLBACK(name) \
++    ((__typeof__(p##name))ios_process_current_callback( IOS_CALLBACK_##name, p##name ))
++#else
++#define CURRENT_NTDLL_CALLBACK(name) p##name
++#endif
++
+ struct _FILE_FS_DEVICE_INFORMATION;
+ 
+ extern const char wine_build[];
+@@ -204,6 +269,14 @@ extern const char **dll_paths;
+ extern const char **system_dll_paths;
+ extern PEB *peb;
+ extern DWORD pid;
++static inline DWORD get_current_process_id(void)
++{
++#ifdef WINE_IOS_JIT_ARENA
++    return ios_process_current_pid( pid );
++#else
++    return pid;
++#endif
++}
+ extern USHORT *uctable;
+ extern USHORT *lctable;
+ extern SIZE_T startup_info_size;
+@@ -409,6 +482,9 @@ extern NTSTATUS wow64_wine_spawnvp( void *args );
+ #endif
+ 
+ extern void dbg_init(void);
++#ifdef WINE_IOS_JIT_ARENA
++extern void dbg_init_child_peb( PEB *peb );
++#endif
+ 
+ extern void close_inproc_sync( HANDLE handle );
+ 
+@@ -480,7 +556,7 @@ static inline BOOL is_inside_syscall( struct thread_data *data, ULONG_PTR sp )
+ 
+ static inline BOOL is_ec_code( ULONG_PTR ptr )
+ {
+-    const UINT64 *map = (const UINT64 *)peb->EcCodeBitMap;
++    const UINT64 *map = (const UINT64 *)RtlGetCurrentPeb()->EcCodeBitMap;
+     ULONG_PTR page = ptr / page_size;
+     return (map[page / 64] >> (page & 63)) & 1;
+ }
+@@ -737,4 +813,27 @@ static inline int is_gdt_sel( WORD sel )
+ 
+ #endif  /* defined(__i386__) || defined(__x86_64__) */
+ 
++#ifdef WINE_IOS_JIT_ARENA
++/* The ARM64EC bitmap's extent, so the SIGSEGV trace can say whether a faulting
++ * address is inside it. Defined in virtual.c; reporting only. */
++extern BOOL ios_ec_map_range( const void **base, size_t *size );
++
++/* The RW alias of a still-blessed arena page, or NULL. segv_handler replays a
++ * faulting store through it so that a 16k host page spanning a 4k .text and a
++ * 4k .rdata can stay executable. Defined in virtual.c. */
++extern void *ios_arena_write_alias( const void *addr );
++/* Whether the page's Windows protection allows a store; a store it forbids is
++ * raised as an access violation instead of being forwarded. Defined in virtual.c. */
++extern BOOL ios_arena_store_allowed( const void *addr );
++
++static inline const char *ios_tail( const char *path )
++{
++    const char *p, *slash = NULL, *prev = NULL;
++
++    if (!path) return "(null)";
++    for (p = path; *p; p++) if (*p == '/') { prev = slash; slash = p; }
++    return prev ? prev + 1 : path;
++}
++#endif
++
+ #endif /* __NTDLL_UNIX_PRIVATE_H */
