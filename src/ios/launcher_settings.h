@@ -99,7 +99,9 @@ static inline double KitsuneMinimumScaleForPoints(double width, double height) {
 static inline KitsuneLaunchOptions KitsuneLaunchOptionsFromSettings(NSUserDefaults *ud) {
   KitsuneLaunchOptions o = KitsuneDefaultLaunchOptions();
   o.diag = KitsuneDiagLevelStored(ud);
-  o.console = (o.diag == KitsuneDiagFull);
+  /* Not tied to Full diagnostics: -console overrides -silent, so Steam's UI came
+   * up over a game launched from the library. Steam writes console_log.txt anyway. */
+  o.console = NO;
   o.steamVisible = KitsuneSteamVisibleStored(ud);
   o.textures = KitsuneTextureModeStored(ud);
   o.frameCap = KitsuneFrameCapStored(ud);

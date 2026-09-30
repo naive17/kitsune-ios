@@ -65,9 +65,7 @@ static inline NSString *KitsuneDXMTConfig(KitsuneTextureMode textures, int frame
 /* The request for steam.exe, launching `appID` (nil: just the client). */
 static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLaunchOptions o) {
   NSMutableArray<NSString *> *args = [NSMutableArray array];
-  /* -console makes this Steam start with its window hidden (seen with Full
-   * diagnostics on a plain client launch), so it only goes with -silent. */
-  if (o.console && (appID.length || !o.steamVisible)) [args addObject:@"-console"];
+  if (o.console) [args addObject:@"-console"];   /* overrides -silent: Steam's UI shows */
   /* A game starts Steam without its window, which spares the memory and GPU
    * time its UI takes; the setting is for opening Steam itself. */
   if (appID.length || !o.steamVisible) [args addObject:@"-silent"];

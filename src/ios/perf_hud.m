@@ -1,4 +1,5 @@
 #import "perf_hud.h"
+#import "diagnostics.h"
 
 #include <dlfcn.h>
 #include <mach/mach.h>
@@ -108,8 +109,24 @@ static unsigned long long footprint_mb(void) {
     }
   }
   unsigned long long used = footprint_mb(), avail = os_proc_available_memory() >> 20;
-  _label.text = [NSString stringWithFormat:NSLocalizedString(@"%@ fps%@ · %.2f GB · %llu MB free", nil), fps, gpu, used / 1024.0, avail];
-  _label.textColor = avail < 256 ? UIColor.systemRedColor : avail < 512 ? UIColor.systemYellowColor : UIColor.whiteColor;
+  NSString *line = [NSString stringWithFormat:NSLocalizedString(@"%@ fps%@ · %.2f GB · %llu MB free", nil), fps, gpu, used / 1024.0, avail];
+  UIColor *color = avail < 256 ? UIColor.systemRedColor : avail < 512 ? UIColor.systemYellowColor : UIColor.whiteColor;
+  /* Logging costs frames (Full dumps every thread and walks the memory map every
+   * 5 s), so a run with it on says so; the level is the one this launch runs with. */
+  KitsuneDiagLevel level = KitsuneDiagLevelFromEnv();
+  NSString *note = level == KitsuneDiagFull ? NSLocalizedString(@"Logging Full · slower · ", nil)
+                 : level == KitsuneDiagBasic ? NSLocalizedString(@"Logging Basic · ", nil) : nil;
+  if (!note) {
+    _label.attributedText = nil;
+    _label.text = line;
+    _label.textColor = color;
+    return;
+  }
+  NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:note
+      attributes:@{ NSForegroundColorAttributeName: UIColor.systemOrangeColor, NSFontAttributeName: _label.font }];
+  [text appendAttributedString:[[NSAttributedString alloc] initWithString:line
+      attributes:@{ NSForegroundColorAttributeName: color, NSFontAttributeName: _label.font }]];
+  _label.attributedText = text;
 }
 
 @end

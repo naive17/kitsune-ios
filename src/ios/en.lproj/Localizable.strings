@@ -437,5 +437,8 @@
 /* Performance overlay */
 /* frame rate, the GPU part below, memory used, memory free */
 "%@ fps%@ · %.2f GB · %llu MB free" = "%@ fps%@ · %.2f GB · %llu MB free";
+/* in-session readout, prefixed while logging is on */
+"Logging Full · slower · " = "Logging Full · slower · ";
+"Logging Basic · " = "Logging Basic · ";
 /* added after fps when GPU timing is on */
 " · GPU %.0f%%" = " · GPU %.0f%%";

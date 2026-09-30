@@ -2529,10 +2529,10 @@ index d102112..8373344 100644
 +} // namespace dxmt
 diff --git a/src/winemetal/unix/bc_transcode.cpp b/src/winemetal/unix/bc_transcode.cpp
 new file mode 100644
-index 0000000..5dac38b
+index 0000000..6994250
 --- /dev/null
 +++ b/src/winemetal/unix/bc_transcode.cpp
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,47 @@
 +/* RGBA8/R8/RG8 -> ETC2/EAC block encoding for BC textures on GPUs without BC. */
 +#include <stdint.h>
 +#include <stdlib.h>
@@ -2564,7 +2564,9 @@ index 0000000..5dac38b
 +    for (unsigned x = 0; x < w4; x++) {
 +      const uint8_t *p = row + (size_t)(x < width ? x : width - 1) * bpp;
 +      uint32_t r = p[0], g = bpp >= 2 ? p[1] : 0, b = bpp == 4 ? p[2] : 0, a = bpp == 4 ? p[3] : 255;
-+      out[x] = r | (g << 8) | (b << 16) | (a << 24);
++      /* etcpak reads B, G, R, A bytes (its EAC R/RG encoders take bytes 2 and
++       * 1); packing R first swapped red and blue and zeroed EAC's red. */
++      out[x] = b | (g << 8) | (r << 16) | (a << 24);
 +    }
 +  }
 +  switch (kind) {

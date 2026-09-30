@@ -1,0 +1,70 @@
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index 370bfac..71d0e24 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/TypeDefines.h>
++#include <FEXCore/Utils/JITWriteAlias.h>
+ #include <FEXCore/fextl/vector.h>
+ #include <FEXCore/Utils/SignalScopeGuards.h>
+ #include <FEXCore/Core/Context.h>
+@@ -19,9 +20,17 @@ namespace FEX::Windows {
+ // was RWX, the write never faulted, and a JIT that patches its own code (Mono)
+ // kept running the stale translation. Trap, untrap and invalidate whole host
+ // pages instead.
+-static constexpr uint64_t TrapPageSize = 0x4000;
++// Inside the JIT arena every store faults anyway and Wine checks the exact 4K
++// Windows protection (ios_arena_store_allowed), so 4K trapping is precise
++// there, and 16K made a game that writes data beside its code fault and
++// retranslate constantly (Dark Souls: Remastered ran in slow motion).
++static uint64_t TrapPageSize(uint64_t Address) {
++  return FEXCore::JIT::IsAliased(Address) ? FEXCore::Utils::FEX_PAGE_SIZE : 0x4000;
++}
+ #else
+-static constexpr uint64_t TrapPageSize = FEXCore::Utils::FEX_PAGE_SIZE;
++static uint64_t TrapPageSize(uint64_t) {
++  return FEXCore::Utils::FEX_PAGE_SIZE;
++}
+ #endif
+ 
+ InvalidationTracker::InvalidationTracker(FEXCore::Context::Context& CTX, const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads)
+@@ -243,20 +252,21 @@ bool InvalidationTracker::HandleRWXAccessViolation(FEXCore::Core::InternalThread
+     {
+       std::scoped_lock Lock(CTX.GetCodeInvalidationMutex());
+ 
+-      const uint64_t Page = FaultAddress & ~(TrapPageSize - 1);
+-      InvalidateIntervalInternalLocked(Page, TrapPageSize);
++      const uint64_t Granule = TrapPageSize(FaultAddress);
++      const uint64_t Page = FaultAddress & ~(Granule - 1);
++      InvalidateIntervalInternalLocked(Page, Granule);
+ 
+       // Invalidate, then unprotect the faulting page with the compilation lock held to ensure that any racing invalidations are not dropped.
+       // Every RWX part of the host page is untrapped: its protection is shared, so a part left trapped would not fault anyway.
+       fextl::vector<std::pair<uint64_t, uint64_t>> Parts;
+       {
+         std::shared_lock IntervalLock(IntervalsLock);
+-        for (uint64_t Address = Page; Address < Page + TrapPageSize;) {
++        for (uint64_t Address = Page; Address < Page + Granule;) {
+           const auto Query = RWXIntervals.Query(Address);
+           if (!Query.Size) {
+             break;
+           }
+-          const uint64_t Next = std::min(Page + TrapPageSize, Address + Query.Size);
++          const uint64_t Next = std::min(Page + Granule, Address + Query.Size);
+           if (Query.Enclosed) {
+             Parts.emplace_back(Address, Next - Address);
+           }
+@@ -396,8 +406,9 @@ void InvalidationTracker::InvalidateIntervalInternalLocked(uint64_t Address, uin
+ }
+ 
+ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t Size, bool ForWriteLocked) {
+-  const auto End = (Address + Size + TrapPageSize - 1) & ~(TrapPageSize - 1);
+-  Address &= ~(TrapPageSize - 1);
++  const uint64_t Granule = TrapPageSize(Address);
++  const auto End = (Address + Size + Granule - 1) & ~(Granule - 1);
++  Address &= ~(Granule - 1);
+   Size = End - Address;
+   std::shared_lock Lock(IntervalsLock);
+ 

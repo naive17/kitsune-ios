@@ -2,7 +2,7 @@ FEX port
 ========
 
 Base: FEX_SHA in pins.env. scripts/06-fex-arm64ec.sh resets the checkout and
-applies 0001..0013 in order; that stack is the source of truth. 0002 applies
+applies 0001..0014 in order; that stack is the source of truth. 0002 applies
 inside the External/rpmalloc submodule, the rest at the top of the tree.
 
 0001  dual-mapped JIT memory: code is written through the arena's RW alias;
@@ -22,5 +22,7 @@ inside the External/rpmalloc submodule, the rest at the top of the tree.
       JIT that patches its own code (Mono) faults and gets retranslated
 0013  the code-buffer write alias is queried without GetModuleHandle/GetProcAddress,
       whose loader lock deadlocked against ImageTracker (webhelper wedge)
+0014  ...but only outside the arena: inside it Wine checks the exact 4K protection, and
+      16K made Dark Souls: Remastered (writes data beside its code) run in slow motion
 
 06 builds with -DFEX_HOST_DARWIN -DFEX_IOS.

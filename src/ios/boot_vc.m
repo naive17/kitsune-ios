@@ -863,7 +863,11 @@ static void PublishJITScript(void) {
 
 - (void)launcher:(WineLauncherVC *)vc playSteamApp:(NSString *)appID named:(NSString *)name {
   if (_quickLaunchPending) return;
-  if (_wineStopped || _jitFailed || (_sessionBottle && ![_sessionBottle isEqualToString:@"Steam"])) {
+  /* A game always gets a Steam of its own. Handed to a running Steam, its
+   * -silent -applaunch only raises Steam's window, and that Steam has no lean
+   * mode, so its web helper stays in memory beside the game. Steam alone still
+   * runs in the session, which is how its window is brought up. */
+  if (_wineStopped || _jitFailed || (_sessionBottle && (![_sessionBottle isEqualToString:@"Steam"] || appID.length))) {
     [self restartIntoSteamApp:appID named:name from:vc];
     return;
   }
@@ -1300,7 +1304,8 @@ static void PublishJITScript(void) {
                  "KitsunePointerModeStored returns these values");
   _input.pointerMode = (WinePointerMode)KitsunePointerModeStored(ud);
   [self updateModeButton];
-  [_hud setVisible:KitsunePerfHUDStored(ud)];
+  /* Shown whenever logging is on, which it announces, even with the HUD off. */
+  [_hud setVisible:KitsunePerfHUDStored(ud) || KitsuneDiagLevelFromEnv() != KitsuneDiagOff];
   [self updatePowerButton];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePowerButton)
                                              name:WinePowerDidChangeNotification object:nil];
@@ -1374,7 +1379,7 @@ static void PublishJITScript(void) {
 
 /* The overlay's switch is in Settings, which the Library shows over a program. */
 - (void)updateHUD {
-  [_hud setVisible:KitsunePerfHUDStored(NSUserDefaults.standardUserDefaults)];
+  [_hud setVisible:KitsunePerfHUDStored(NSUserDefaults.standardUserDefaults) || KitsuneDiagLevelFromEnv() != KitsuneDiagOff];
 }
 
 - (void)updateModeButton {

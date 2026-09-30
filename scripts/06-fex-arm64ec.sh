@@ -31,6 +31,7 @@ apply_patch "$FEX_SRC" "$ROOT/patches/fex/0010-quiet-debug-log.patch"
 apply_patch "$FEX_SRC" "$ROOT/patches/fex/0011-retire-stale-code-buffers.patch"
 apply_patch "$FEX_SRC" "$ROOT/patches/fex/0012-trap-rwx-code-per-host-page.patch"
 apply_patch "$FEX_SRC" "$ROOT/patches/fex/0013-write-alias-query-without-loader-lock.patch"
+apply_patch "$FEX_SRC" "$ROOT/patches/fex/0014-trap-per-4k-inside-the-arena.patch"
 
 # FEX needs bylaws' llvm-mingw; the upstream release crashes in the ARM64EC SEH
 # unwind emitter (see pins.env).

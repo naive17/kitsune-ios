@@ -46,14 +46,6 @@ int main(void) {
     assert([env[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"]);   /* large RGBA8 atlases stored as ETC2 */
     assert(!env[@"KITSUNE_THREAD_DUMP"] && !env[@"WINEIOS_METAL_DEBUG"] && !env[@"KITSUNE_XINPUT_TRACE"] && !env[@"KITSUNE_TRACE_BIGALLOC"]);
 
-    /* The client alone, visible, with full diagnostics: no -console, which
-     * starts this Steam with its window hidden. */
-    {
-      KitsuneLaunchOptions v = KitsuneDefaultLaunchOptions();
-      v.console = YES; v.diag = KitsuneDiagFull;
-      NSDictionary *visible = KitsuneSteamLaunchRequest(nil, v);
-      assert([visible[@"args"] isEqual:@[]]);
-    }
     /* The client alone, hidden, with the console and full diagnostics. */
     o.steamVisible = NO; o.console = YES; o.diag = KitsuneDiagFull; o.frameCap = 30;
     o.textures = KitsuneTexturesNative;
@@ -82,7 +74,8 @@ int main(void) {
     [ud setBool:NO forKey:KITSUNE_KEY_STEAM_VISIBLE];
     KitsuneDiagStore(ud, KitsuneDiagFull);
     s = KitsuneLaunchOptionsFromSettings(ud);
-    assert(!s.steamVisible && s.console && s.diag == KitsuneDiagFull && s.textures == KitsuneTexturesNative && s.frameCap == 60);
+    /* Full diagnostics no longer add -console: it overrides -silent and Steam's UI comes up over the game. */
+    assert(!s.steamVisible && !s.console && s.diag == KitsuneDiagFull && s.textures == KitsuneTexturesNative && s.frameCap == 60);
     [ud setInteger:45 forKey:KITSUNE_KEY_FRAME_CAP];
     assert(KitsuneFrameCapStored(ud) == 0);
     [ud setInteger:99 forKey:KITSUNE_KEY_TEXTURES];
