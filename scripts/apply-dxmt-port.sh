@@ -12,7 +12,7 @@ case "$(git -C "$SRC" log -1 --format=%s)" in
   # The project was called ios-wine; its base commit predates the renamed
   # patches, so the full patch no longer applies on top of it.
   "ios-wine base"*)
-    die "third_party/dxmt was set up before the rename to Kitsune. Save any DXMT edits, then run: git -C third_party/dxmt reset -q --hard $DXMT_SHA && git -C third_party/dxmt clean -fdq && scripts/02-fetch.sh" ;;
+    die "third_party/dxmt was set up before the rename to Kitsune; scripts/sync-sources.sh moves it to the current port" ;;
   *)
     [ "$(git -C "$SRC" rev-parse HEAD)" = "$DXMT_SHA" ] || die "dxmt is at $(git -C "$SRC" rev-parse --short HEAD), expected $DXMT_SHA or the Kitsune base commit"
     [ -z "$(git -C "$SRC" status --porcelain)" ] || die "dxmt has local changes; commit or discard them first"

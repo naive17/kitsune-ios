@@ -51,6 +51,8 @@ Wine, DXMT and FEX are kept as patches against the upstream revisions in
   `scripts/06-fex-arm64ec.sh`, which resets `third_party/fex` first. Change a
   patch, or add the next number
   ([Recording a FEX change](docs/building.md#recording-a-fex-change)).
+- **After a pull** that changed `patches/`, `scripts/sync-sources.sh` moves the
+  checkouts to the new patches ([After a pull](docs/building.md#after-a-pull)).
 
 After a change to Wine's unix side, `scripts/11-wine-ios.sh` rebuilds it
 incrementally and `scripts/19-stage-runtime.sh` stages it for a thin app build.

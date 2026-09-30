@@ -114,6 +114,28 @@ Apple Developer Program membership.
 A phone that has never had a Wine tree needs one `--full` install, or
 `scripts/device.sh sync-tree`.
 
+## After a pull
+
+A pull that changes `patches/` leaves the checkouts in `third_party/` on the
+old patches, and `setup.sh` does not see it: its stamps cover the scripts and
+`pins.env`, not the patches.
+
+```sh
+scripts/sync-sources.sh           # reset stale checkouts to the pin, apply the current patches
+scripts/setup.sh --from STEP      # the step it names
+```
+
+`sync-sources.sh` resets a checkout only when its files are exactly its pin
+plus the patches of some commit, so it never loses anything git does not
+have. It leaves a checkout alone if it has edits that no commit has, such as
+Wine or DXMT work not yet recorded with `save-patches.sh`. It saves those
+edits to `build/source-backups/`. `--discard` resets that checkout too, and
+`git -C <checkout> apply -3 <saved patch>` then carries the edits onto the
+new patches. Record them with `save-patches.sh` only after that, because
+running it before the sync overwrites the pulled patch with your old one.
+`--check` only reports, and naming checkouts (`wine`, `fex`) limits it to
+them.
+
 ## After you edit a component
 
 `setup.sh` does not notice source edits: a step it has finished stays done

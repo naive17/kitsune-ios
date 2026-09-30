@@ -75,7 +75,7 @@ apply_patch() {
     log "applying $(basename "$p") to $(basename "$repo")"
     git -C "$repo" apply "$p"
   else
-    die "patch does not apply to $repo: $p. A checkout from before the rename to Kitsune, or one with unsaved edits, needs resetting: save your edits, then git -C $repo reset -q --hard && git -C $repo clean -fdq, and rerun"
+    die "patch does not apply to $repo: $p. After a pull that changed it, scripts/sync-sources.sh moves the checkout to the current patches"
   fi
 }
 
