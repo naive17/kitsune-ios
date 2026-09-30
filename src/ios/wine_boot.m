@@ -178,6 +178,13 @@ static void configure_environment(NSString *root) {
                                           attributes:nil
                                                error:nil];
   set_env("DXMT_SHADER_CACHE_PATH", scache);
+  /* FEX's Mono hack stops write-trapping all RWX memory once it has hooked
+   * Mono's backpatcher, trusting that nothing else patches code. Unity games
+   * whose obfuscators decrypt methods at runtime break that: the rewritten code
+   * ran stale and Blasphemous threw NullReferenceException leaving its title
+   * screen. Full detection costs some faults on Mono code and is correct. */
+  setenv("FEX_MONOHACKS", "0", 0);
+
   /* The diagnostics level's environment and WINEDEBUG, for launches that did
    * not bring them; what a launch request set is kept. */
   {
@@ -610,7 +617,9 @@ void WineBootDumpVM(const char *tag, void (*emit)(const char *)) {
       emit(line); lines++; \
     } } while (0)
 
-  struct { unsigned tag; unsigned count; uint64_t bytes; } hist[64];
+  /* dirty/swapped: pages a region has dirtied or had compressed away, which is
+   * what the footprint charges; file-backed ones (the swap file) are not charged. */
+  struct { unsigned tag; unsigned count; uint64_t bytes, dirty, swapped, file; } hist[64];
   unsigned hist_n = 0, tiny = 0, small = 0, medium = 0, big = 0;
 
   snprintf(line, sizeof line, "VM %s: begin", tag ? tag : ""); emit(line);
@@ -634,12 +643,19 @@ void WineBootDumpVM(const char *tag, void (*emit)(const char *)) {
         vm_address_t ta = a; vm_size_t tsz = 0; natural_t depth = 1;
         vm_region_submap_info_data_64_t ti; mach_msg_type_number_t tc = VM_REGION_SUBMAP_INFO_COUNT_64;
         unsigned utag = 0, k;
-        if (vm_region_recurse_64(mach_task_self(), &ta, &tsz, &depth,
-                                 (vm_region_recurse_info_t)&ti, &tc) == KERN_SUCCESS)
-          utag = ti.user_tag;
+        BOOL got = vm_region_recurse_64(mach_task_self(), &ta, &tsz, &depth,
+                                        (vm_region_recurse_info_t)&ti, &tc) == KERN_SUCCESS;
+        if (got) utag = ti.user_tag;
         for (k = 0; k < hist_n; k++) if (hist[k].tag == utag) break;
-        if (k == hist_n && hist_n < 64) { hist[hist_n].tag = utag; hist[hist_n].count = 0; hist[hist_n].bytes = 0; hist_n++; }
-        if (k < 64 && k < hist_n) { hist[k].count++; hist[k].bytes += sz; }
+        if (k == hist_n && hist_n < 64) { memset(&hist[hist_n], 0, sizeof hist[hist_n]); hist[hist_n].tag = utag; hist_n++; }
+        if (k < 64 && k < hist_n) {
+          hist[k].count++; hist[k].bytes += sz;
+          if (got && ta == a) {
+            uint64_t d = (uint64_t)ti.pages_dirtied * vm_page_size, w = (uint64_t)ti.pages_swapped_out * vm_page_size;
+            if (ti.external_pager) hist[k].file += d + w;
+            else { hist[k].dirty += d; hist[k].swapped += w; }
+          }
+        }
       }
     }
     if (!first_map) { first_map = a; prev_end = a; }   /* never count PAGEZERO as a hole */
@@ -691,15 +707,22 @@ void WineBootDumpVM(const char *tag, void (*emit)(const char *)) {
   emit(line);
   {
     unsigned shown, k, best;
-    for (shown = 0; shown < 6 && shown < hist_n; shown++) {
+    uint64_t charged = 0;
+    for (k = 0; k < hist_n; k++) charged += hist[k].dirty + hist[k].swapped;
+    snprintf(line, sizeof line, "VM %s: charged by tag (dirty+swapped, not file-backed) %llu MB",
+             tag ? tag : "", (unsigned long long)(charged >> 20));
+    emit(line);
+    for (shown = 0; shown < 8 && shown < hist_n; shown++) {
       best = 0;
-      for (k = 1; k < hist_n; k++) if (hist[k].count > hist[best].count) best = k;
+      for (k = 1; k < hist_n; k++)
+        if (hist[k].dirty + hist[k].swapped > hist[best].dirty + hist[best].swapped) best = k;
       if (!hist[best].count) break;
-      snprintf(line, sizeof line, "VM %s: tag=%u %u regions %llu MB",
+      snprintf(line, sizeof line, "VM %s: tag=%u %u regions %llu MB, dirty %llu MB, swapped %llu MB, file %llu MB",
                tag ? tag : "", hist[best].tag, hist[best].count,
-               (unsigned long long)(hist[best].bytes >> 20));
+               (unsigned long long)(hist[best].bytes >> 20), (unsigned long long)(hist[best].dirty >> 20),
+               (unsigned long long)(hist[best].swapped >> 20), (unsigned long long)(hist[best].file >> 20));
       emit(line);
-      hist[best].count = 0;   /* consume so the next loop finds the runner-up */
+      hist[best].count = 0; hist[best].dirty = hist[best].swapped = 0;   /* consume */
     }
   }
 }

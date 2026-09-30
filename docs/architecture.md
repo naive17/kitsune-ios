@@ -91,6 +91,21 @@ largest process (`KITSUNE_STEAM_LEAN`, set for game launches): the helper is
 ended when Steam starts the game, refused while the game runs, and back after
 it exits (`NtCreateUserProcess` in `process.c`).
 
+The debugger-blessed JIT arena holds only code the CPU runs: Wine's ARM64 and
+ARM64EC modules and FEX's code buffers. Executable memory a program allocates
+holds x86-64 code, which FEX only reads, so it is ordinary memory
+(`ios_app_vm_call` in `virtual.c`). There its Windows protection applies, and
+that is what makes self-modifying code work: FEX write-protects code it has
+translated, one 16 KB host page at a time, and a JIT that patches its own code
+(Mono) faults and gets it retranslated. FEX's Mono hack, which stops that
+detection once it has hooked Mono's backpatcher, is off (`FEX_MONOHACKS=0`,
+`wine_boot.m`).
+
+Games started through Steam store large RGBA8 textures they only sample as
+ETC2, a quarter of the size (`KITSUNE_RGBA_ETC2`, in winemetal): Unity games
+ship uncompressed atlases that would not fit the app's 4 GB. The first load of
+a level pauses while they are encoded.
+
 ## Storage on the phone
 
 | Path in the app's Documents | Contents |
@@ -103,9 +118,10 @@ it exits (`NtCreateUserProcess` in `process.c`).
 
 ## The app
 
-`src/ios/boot_vc.m` owns a launch: it waits for JIT, sets up the arena,
-installs or checks the runtime tree and the default bottle, then shows the
-launcher and runs the chosen program. The launcher has three tabs: Library
+`src/ios/boot_vc.m` owns a launch: it installs or checks the runtime tree,
+which needs no JIT, then waits for JIT, sets up the arena and the default
+bottle, and runs the chosen program. A bottle made from an older template is
+brought up to date before Wine starts (`KitsuneRepairBottle` in `bottles.h`). The launcher has three tabs: Library
 (Steam, imported programs, Wine's own tools), Bottles, and Settings.
 Diagnostics have three levels, and only Full pays for thread dumps, traces and
 log snapshots (`src/ios/diagnostics.h`).

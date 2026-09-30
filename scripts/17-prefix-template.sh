@@ -24,7 +24,7 @@ TREE_HASH=$( { find "$CORE/lib" "$CORE/share" -type f -exec shasum {} \; ; } \
              | sed "s|$CORE/||" | sort | shasum | cut -c1-16 )
 # The hash covers only the tree, so the suffix must change whenever the prefix
 # edits below change; otherwise an older cached template is reused.
-CACHE="$BUILD/prefix-template-cache/$TREE_HASH-v3"
+CACHE="$BUILD/prefix-template-cache/$TREE_HASH-v4"
 
 if [ -f "$CACHE/system.reg" ]; then
   rm -rf "$DEST"
@@ -52,6 +52,26 @@ KITSUNE_UNIX="$UNIX" KITSUNE_TREE="$CORE" KITSUNE_PREFIX="$WORK" \
 # FEX reads the CPU-feature keys to identify the host; without them it
 # mis-decodes and fails in ways that look like translation bugs.
 grep -q "CP 4030" "$WORK/system.reg" || die "prefix has no CPU-feature keys"
+
+# The time zone table. wineboot --init leaves "Time Zones" empty: the zones are
+# kernelbase's WINE_REGISTRY script, which only the fake-DLL step of wine.inf's
+# DefaultInstall applies, and that install never finishes in the harness. With
+# no zones GetTimeZoneInformation returns no name, and Mono (every Unity game)
+# throws "Can't get timezone name". Install just kernelbase and tzres as fake
+# DLLs: the first applies the script, the second is the file the zone names
+# (@tzres.dll,-NNNN) are loaded from as a datafile, which has no builtin
+# fallback. kernelbase's copy is 4 MB and not needed after its script ran.
+TZ_INF="$BUILD/prefix-template-tz.inf"
+printf '[version]\r\nsignature="$CHICAGO$"\r\n\r\n[DefaultInstall]\r\nWineFakeDlls=KitsuneFakeDlls\r\n\r\n[KitsuneFakeDlls]\r\n11,,kernelbase.dll\r\n11,,tzres.dll\r\n' > "$TZ_INF"
+USER=wine LOGNAME=wine \
+KITSUNE_UNIX="$UNIX" KITSUNE_TREE="$CORE" KITSUNE_PREFIX="$WORK" \
+  env WINEDEBUG=-all "$HOST" "$CORE/lib/wine/aarch64-windows/rundll32.exe" \
+      setupapi,InstallHinfSection DefaultInstall 128 "Z:$(printf '%s' "$TZ_INF" | tr / '\\')" \
+  </dev/null >>"$BUILD/prefix-template.log" 2>&1 || die "time zone install failed; see $BUILD/prefix-template.log"
+rm -f "$WORK/drive_c/windows/system32/kernelbase.dll"
+[ "$(grep -c '^\[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Time Zones\\\\' "$WORK/system.reg")" -ge 100 ] \
+  || die "prefix has no time zone table"
+[ -f "$WORK/drive_c/windows/system32/tzres.dll" ] || die "prefix has no tzres.dll for the zone names"
 
 # Register mmdevapi's MMDeviceEnumerator class. This wineboot --init does not
 # apply wine.inf's [AddReg] sections, and wine.inf does not register mmdevapi,
@@ -114,12 +134,13 @@ grep -q '^\[SoftwareMicrosoft' "$WORK/user.reg" && die "Shell Folders written un
 grep -q '"Personal"' "$WORK/user.reg" \
   || die "failed to populate shell folders in prefix template"
 
-# Create the directories those values point to.
+# Create the directories those values point to, and LocalLow, which Unity games
+# save under; without it Unity recurses on a relative path until its stack overflows.
 for u in "$WORK/drive_c/users"/*; do
   [ -d "$u" ] || continue
   case "${u##*/}" in Public) continue;; esac
   mkdir -p "$u/Desktop" "$u/Documents" "$u/Pictures" "$u/Music" "$u/Videos" \
-           "$u/Downloads" "$u/Favorites" "$u/Saved Games" \
+           "$u/Downloads" "$u/Favorites" "$u/Saved Games" "$u/AppData/LocalLow" \
            "$u/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/StartUp" \
            "$u/AppData/Local/Microsoft/Windows/INetCache"
 done

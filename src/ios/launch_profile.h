@@ -65,7 +65,9 @@ static inline NSString *KitsuneDXMTConfig(KitsuneTextureMode textures, int frame
 /* The request for steam.exe, launching `appID` (nil: just the client). */
 static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLaunchOptions o) {
   NSMutableArray<NSString *> *args = [NSMutableArray array];
-  if (o.console) [args addObject:@"-console"];
+  /* -console makes this Steam start with its window hidden (seen with Full
+   * diagnostics on a plain client launch), so it only goes with -silent. */
+  if (o.console && (appID.length || !o.steamVisible)) [args addObject:@"-console"];
   /* A game starts Steam without its window, which spares the memory and GPU
    * time its UI takes; the setting is for opening Steam itself. */
   if (appID.length || !o.steamVisible) [args addObject:@"-silent"];
@@ -91,6 +93,9 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
   /* A game runs without Steam's web helper, its UI and biggest process: the
    * port ends it when the game starts and lets it back when the game exits. */
   if (appID.length) env[@"KITSUNE_STEAM_LEAN"] = @"1";
+  /* Large sampled RGBA8 textures stored as ETC2 (winemetal): Unity games ship
+   * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit). */
+  env[@"KITSUNE_RGBA_ETC2"] = @"1";
   env[@"DXMT_CONFIG"] = KitsuneDXMTConfig(o.textures, o.frameCap);
   if (o.textures == KitsuneTexturesNative) env[@"KITSUNE_BC_NATIVE"] = @"1";
   else env[@"KITSUNE_BC_16BIT"] = @"1";

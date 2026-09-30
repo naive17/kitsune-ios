@@ -165,4 +165,49 @@ static inline BOOL KitsuneDuplicateBottle(NSString *docs, NSString *from, NSStri
   return YES;
 }
 
+/* Bring a bottle made from an older template up to the current one, before
+ * Wine runs. Without AppData\LocalLow a Unity game recurses on a relative save
+ * path until its stack overflows; without the Time Zones table and tzres.dll
+ * (the file the zone names are loaded from) GetTimeZoneInformation returns no
+ * name and Mono throws. The template's zone sections are appended to
+ * system.reg, and Wine merges them into the empty key it already has. */
+static inline void KitsuneRepairBottle(NSString *prefix, NSString *treeRoot) {
+  NSFileManager *fm = NSFileManager.defaultManager;
+  NSString *tmpl = [treeRoot stringByAppendingPathComponent:@"prefix-template"];
+
+  NSString *users = [prefix stringByAppendingPathComponent:@"drive_c/users"];
+  for (NSString *user in [fm contentsOfDirectoryAtPath:users error:nil]) {
+    NSString *appData = [[users stringByAppendingPathComponent:user] stringByAppendingPathComponent:@"AppData"];
+    BOOL dir = NO;
+    if (![user isEqualToString:@"Public"] && [fm fileExistsAtPath:appData isDirectory:&dir] && dir)
+      [fm createDirectoryAtPath:[appData stringByAppendingPathComponent:@"LocalLow"]
+    withIntermediateDirectories:YES attributes:nil error:nil];
+  }
+
+  NSString *tzres = @"drive_c/windows/system32/tzres.dll";
+  NSString *have = [prefix stringByAppendingPathComponent:tzres];
+  NSString *want = [tmpl stringByAppendingPathComponent:tzres];
+  if (![fm fileExistsAtPath:have] && [fm fileExistsAtPath:want]) {
+    [fm createDirectoryAtPath:have.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm copyItemAtPath:want toPath:have error:nil];
+  }
+
+  NSString *zones = @"[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Time Zones\\\\";
+  NSString *regPath = [prefix stringByAppendingPathComponent:@"system.reg"];
+  NSString *reg = [NSString stringWithContentsOfFile:regPath encoding:NSUTF8StringEncoding error:nil];
+  NSString *source = [NSString stringWithContentsOfFile:[tmpl stringByAppendingPathComponent:@"system.reg"]
+                                              encoding:NSUTF8StringEncoding error:nil];
+  if (!reg || [reg containsString:zones] || ![source containsString:zones]) return;
+  NSMutableString *add = [NSMutableString stringWithString:@"\n"];
+  BOOL copying = NO;
+  for (NSString *line in [source componentsSeparatedByString:@"\n"]) {
+    if ([line hasPrefix:@"["]) copying = [line hasPrefix:zones];
+    if (copying) [add appendFormat:@"%@\n", line];
+  }
+  NSFileHandle *h = [NSFileHandle fileHandleForWritingAtPath:regPath];
+  [h seekToEndOfFile];
+  [h writeData:[add dataUsingEncoding:NSUTF8StringEncoding]];
+  [h closeFile];
+}
+
 #endif

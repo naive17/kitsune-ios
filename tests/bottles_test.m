@@ -60,7 +60,35 @@ int main(void) {
     assert(!KitsuneDuplicateBottle(docs, @"missing", @"copy2", &error) && [error containsString:@"no bottle"]);
     assert(KitsuneDuplicateBottle(docs, @"Steam", @"steam-copy", &error));
     assert(([KitsuneBottleNames(docs) isEqual:@[ @"default", @"arcade", @"copy", @"Steam", @"steam-copy" ]]));
+
+    /* Repair of a bottle made before the template had LocalLow, zones and tzres. */
+    NSString *tmpl = [tree stringByAppendingPathComponent:@"prefix-template"];
+    NSString *zoneKey = @"[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Time Zones\\\\W. Europe Standard Time] 1\n";
+    assert([fm createDirectoryAtPath:[tmpl stringByAppendingPathComponent:@"drive_c/windows/system32"] withIntermediateDirectories:YES attributes:nil error:nil]);
+    assert([@"MZtz" writeToFile:[tmpl stringByAppendingPathComponent:@"drive_c/windows/system32/tzres.dll"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+    NSString *tmplReg = [NSString stringWithFormat:@"WINE REGISTRY Version 2\n\n"
+        "[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Time Zones] 1\n\n"
+        "%@\"Std\"=\"@tzres.dll,-4896\"\n\"TZI\"=hex:c4,ff,ff,ff,\\\n  00,00\n\n"
+        "[Software\\\\Other] 1\n\"x\"=\"y\"\n", zoneKey];
+    assert([tmplReg writeToFile:[tmpl stringByAppendingPathComponent:@"system.reg"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+    NSString *old = [base stringByAppendingPathComponent:@"old"];
+    assert([fm createDirectoryAtPath:[old stringByAppendingPathComponent:@"drive_c/users/wine/AppData/Local"] withIntermediateDirectories:YES attributes:nil error:nil]);
+    assert([fm createDirectoryAtPath:[old stringByAppendingPathComponent:@"drive_c/users/Public"] withIntermediateDirectories:YES attributes:nil error:nil]);
+    NSString *oldReg = @"WINE REGISTRY Version 2\n\n[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Time Zones] 1\n";
+    assert([oldReg writeToFile:[old stringByAppendingPathComponent:@"system.reg"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+    KitsuneRepairBottle(old, tree);
+    BOOL isDir = NO;
+    assert([fm fileExistsAtPath:[old stringByAppendingPathComponent:@"drive_c/users/wine/AppData/LocalLow"] isDirectory:&isDir] && isDir);
+    assert(![fm fileExistsAtPath:[old stringByAppendingPathComponent:@"drive_c/users/Public/AppData"]]);
+    assert([fm fileExistsAtPath:[old stringByAppendingPathComponent:@"drive_c/windows/system32/tzres.dll"]]);
+    NSString *repaired = [NSString stringWithContentsOfFile:[old stringByAppendingPathComponent:@"system.reg"] encoding:NSUTF8StringEncoding error:nil];
+    assert([repaired hasPrefix:oldReg] && [repaired containsString:zoneKey]);
+    assert([repaired containsString:@"\"TZI\"=hex:c4,ff,ff,ff,\\\n  00,00\n"]);   /* continuation lines kept */
+    assert(![repaired containsString:@"Software\\\\Other"]);                    /* only the zone sections */
+    KitsuneRepairBottle(old, tree);                                             /* idempotent */
+    assert([[NSString stringWithContentsOfFile:[old stringByAppendingPathComponent:@"system.reg"] encoding:NSUTF8StringEncoding error:nil] isEqualToString:repaired]);
+
     assert([fm removeItemAtPath:base error:nil]);
-    puts("BOTTLES PASS: names validated, template copy with drive links and stamp, listing, protected bottles, rename, duplicate");
+    puts("BOTTLES PASS: names validated, template copy with drive links and stamp, listing, protected bottles, rename, duplicate, repair of old bottles");
   }
 }

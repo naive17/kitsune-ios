@@ -1,0 +1,43 @@
+diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+index c1a3aa7..d676142 100644
+--- a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
++++ b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
+@@ -45,16 +45,19 @@ size_t WriteAliasSize = 0;   // 0 disables the translation entirely
+  * second delta silently corrupting one of two code buffers is the kind of bug
+  * that would surface as an impossible crash much later.
+  */
++/*
++ * Kitsune: called directly, not through GetModuleHandleW/GetProcAddress. Those
++ * take Wine's loader lock, and this runs from StartLargerCodeBuffer with the
++ * CodeInvalidationMutex held; a thread mapping a DLL holds the loader lock and
++ * waits for that mutex in ImageTracker::HandleImageMap, so the two deadlocked
++ * (Steam's web helper wedged with no window). The DLL imports only ntdll.dll
++ * already, and NtQueryVirtualMemory exists on real Windows, where class 1100
++ * just fails.
++ */
++extern "C" int32_t __stdcall NtQueryVirtualMemory(void*, const void*, uint32_t, void*, size_t, size_t*);
++
+ void InstallWriteAlias(void* Ptr) {
+-  using QueryFn = int32_t(__stdcall*)(void*, const void*, uint32_t, void*, size_t, size_t*);
+-  auto NtDll = ::GetModuleHandleW(L"ntdll.dll");
+-  if (!NtDll) {
+-    return;
+-  }
+-  auto Query = reinterpret_cast<QueryFn>(::GetProcAddress(NtDll, "NtQueryVirtualMemory"));
+-  if (!Query) {
+-    return;
+-  }
++  auto* const Query = &NtQueryVirtualMemory;
+ 
+   // Matches WINE_IOS_JIT_ALIAS in wine/include/winternl.h. Declared locally
+   // rather than included: FEX builds against mingw-w64's headers and has to
+@@ -66,7 +69,8 @@ void InstallWriteAlias(void* Ptr) {
+   } Alias {};
+ 
+   constexpr uint32_t MemoryWineIosJitWriteDelta = 1100;
+-  if (Query(::GetCurrentProcess(), Ptr, MemoryWineIosJitWriteDelta, &Alias, sizeof(Alias), nullptr) < 0) {
++  void* const CurrentProcess = reinterpret_cast<void*>(static_cast<intptr_t>(-1));
++  if (Query(CurrentProcess, Ptr, MemoryWineIosJitWriteDelta, &Alias, sizeof(Alias), nullptr) < 0) {
+     return;
+   }
+   if (!Alias.Size || !Alias.WriteDelta) {

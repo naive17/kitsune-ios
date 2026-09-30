@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <Metal/Metal.h>
 #import "diagnostics.h"
 #import "wine_boot.h"
 #import "wine_surface.h"
@@ -26,6 +27,26 @@ unsigned long long KitsunePhysFootprintMB(void) {
   mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
   if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return 0;
   return (unsigned long long)(info.phys_footprint >> 20);
+}
+
+/* What the footprint is made of, from the kernel's ledgers: anonymous memory,
+ * compressed memory, and the graphics (Metal) and media tags. The graphics
+ * ledger is where DXMT's textures and buffers are charged. */
+static NSString *KitsuneMemBreakdown(void) {
+  task_vm_info_data_t info;
+  mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return @"mem{?}";
+  BOOL tags = count >= TASK_VM_INFO_REV6_COUNT;
+  /* Everything Metal holds for the process: DXMT shares this device. */
+  static id<MTLDevice> device;
+  if (!device) device = MTLCreateSystemDefaultDevice();
+  return [NSString stringWithFormat:@"mem{mtl=%llu anon=%llu cmp=%llu gfx=%lld media=%lld purg=%lld+%lld}",
+          (unsigned long long)(device.currentAllocatedSize >> 20),
+          (unsigned long long)(info.internal >> 20), (unsigned long long)(info.compressed >> 20),
+          tags ? (long long)(info.ledger_tag_graphics_footprint >> 20) : -1LL,
+          tags ? (long long)(info.ledger_tag_media_footprint >> 20) : -1LL,
+          tags ? (long long)(info.ledger_purgeable_nonvolatile >> 20) : -1LL,
+          tags ? (long long)(info.ledger_purgeable_novolatile_compressed >> 20) : -1LL];
 }
 
 NSString *KitsuneMemLine(NSString *where) {
@@ -134,8 +155,8 @@ void KitsuneHeartbeatStart(KitsuneDiagPolicy policy, const char *wineLogPath, vo
                  wine_input_resolved, wine_input_last_x, wine_input_last_y;
       extern const char *wine_input_status;
       KitsuneLog([NSString stringWithFormat:
-          @"HB %u log=%ld avail=%lluMB footprint=%lluMB in{ov=%d drv=%#x g=%d sent=%d unmapped=%d last=%d,%d} srv{%s}",
-          tick, sz, (unsigned long long)(os_proc_available_memory() >> 20), KitsunePhysFootprintMB(),
+          @"HB %u log=%ld avail=%lluMB footprint=%lluMB %@ in{ov=%d drv=%#x g=%d sent=%d unmapped=%d last=%d,%d} srv{%s}",
+          tick, sz, (unsigned long long)(os_proc_available_memory() >> 20), KitsunePhysFootprintMB(), KitsuneMemBreakdown(),
           wine_input_overlay_alive, wine_input_resolved, wine_input_gestures, wine_input_sent, wine_input_unmapped,
           wine_input_last_x, wine_input_last_y, wine_input_status ? wine_input_status : "-"]);
       if (status) {

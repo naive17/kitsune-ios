@@ -43,8 +43,17 @@ int main(void) {
     assert([env[@"KITSUNE_GAME_INPUT"] isEqualToString:@"1"] && [env[@"WINEDLLOVERRIDES"] containsString:@"xinput1_4"]);
     assert([env[@"KITSUNE_LANDSCAPE"] isEqualToString:@"1"] && !env[@"KITSUNE_SCREEN_MAX"]);
     assert([env[@"KITSUNE_STEAM_LEAN"] isEqualToString:@"1"]);
+    assert([env[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"]);   /* large RGBA8 atlases stored as ETC2 */
     assert(!env[@"KITSUNE_THREAD_DUMP"] && !env[@"WINEIOS_METAL_DEBUG"] && !env[@"KITSUNE_XINPUT_TRACE"] && !env[@"KITSUNE_TRACE_BIGALLOC"]);
 
+    /* The client alone, visible, with full diagnostics: no -console, which
+     * starts this Steam with its window hidden. */
+    {
+      KitsuneLaunchOptions v = KitsuneDefaultLaunchOptions();
+      v.console = YES; v.diag = KitsuneDiagFull;
+      NSDictionary *visible = KitsuneSteamLaunchRequest(nil, v);
+      assert([visible[@"args"] isEqual:@[]]);
+    }
     /* The client alone, hidden, with the console and full diagnostics. */
     o.steamVisible = NO; o.console = YES; o.diag = KitsuneDiagFull; o.frameCap = 30;
     o.textures = KitsuneTexturesNative;

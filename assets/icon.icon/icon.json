@@ -7,7 +7,14 @@
       "layers" : [
         {
           "image-name" : "kitsune bg-2.svg",
-          "name" : "kitsune bg-2"
+          "name" : "kitsune bg-2",
+          "position" : {
+            "scale" : 1.24,
+            "translation-in-points" : [
+              22,
+              0
+            ]
+          }
         }
       ],
       "shadow" : {
@@ -23,9 +30,23 @@
       "layers" : [
         {
           "image-name" : "kitsune bg-1.svg",
-          "name" : "kitsune bg-1"
+          "name" : "kitsune bg-1",
+          "position" : {
+            "scale" : 1.24,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
         }
       ],
+      "position" : {
+        "scale" : 1,
+        "translation-in-points" : [
+          22,
+          0
+        ]
+      },
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.5

@@ -748,6 +748,7 @@ static void PublishJITScript(void) {
     }
   }
   if (havePrefix) {
+    KitsuneRepairBottle(WineBootPrefix(), WineTreeRoot());
     NSString *dd = [WineBootPrefix() stringByAppendingPathComponent:@"dosdevices"];
     NSDictionary *want = @{ @"c:": @"../drive_c", @"z:": @"/" };
     [NSFileManager.defaultManager createDirectoryAtPath:dd withIntermediateDirectories:YES attributes:nil error:nil];

@@ -1,0 +1,84 @@
+diff --git a/Source/Windows/Common/InvalidationTracker.cpp b/Source/Windows/Common/InvalidationTracker.cpp
+index 223d8bb..370bfac 100644
+--- a/Source/Windows/Common/InvalidationTracker.cpp
++++ b/Source/Windows/Common/InvalidationTracker.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <FEXCore/Utils/LogManager.h>
+ #include <FEXCore/Utils/TypeDefines.h>
++#include <FEXCore/fextl/vector.h>
+ #include <FEXCore/Utils/SignalScopeGuards.h>
+ #include <FEXCore/Core/Context.h>
+ #include <FEXCore/Config/Config.h>
+@@ -11,6 +12,18 @@
+ #include <winternl.h>
+ 
+ namespace FEX::Windows {
++#ifdef FEX_IOS
++// Kitsune: host pages are 16K, and Wine can enforce only one protection per
++// host page, the most permissive of its four 4K pages. Trapping one 4K page of
++// translated code therefore left the host page writable whenever a neighbour
++// was RWX, the write never faulted, and a JIT that patches its own code (Mono)
++// kept running the stale translation. Trap, untrap and invalidate whole host
++// pages instead.
++static constexpr uint64_t TrapPageSize = 0x4000;
++#else
++static constexpr uint64_t TrapPageSize = FEXCore::Utils::FEX_PAGE_SIZE;
++#endif
++
+ InvalidationTracker::InvalidationTracker(FEXCore::Context::Context& CTX, const std::unordered_map<DWORD, FEXCore::Core::InternalThreadState*>& Threads)
+   : CTX {CTX}
+   , Threads {Threads} {
+@@ -230,13 +243,36 @@ bool InvalidationTracker::HandleRWXAccessViolation(FEXCore::Core::InternalThread
+     {
+       std::scoped_lock Lock(CTX.GetCodeInvalidationMutex());
+ 
+-      InvalidateIntervalInternalLocked(FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE);
++      const uint64_t Page = FaultAddress & ~(TrapPageSize - 1);
++      InvalidateIntervalInternalLocked(Page, TrapPageSize);
+ 
+       // Invalidate, then unprotect the faulting page with the compilation lock held to ensure that any racing invalidations are not dropped.
+-      ULONG TmpProt;
+-      void* TmpAddress = reinterpret_cast<void*>(FaultAddress);
+-      SIZE_T TmpSize = 1;
+-      NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, UntrapProt, &TmpProt);
++      // Every RWX part of the host page is untrapped: its protection is shared, so a part left trapped would not fault anyway.
++      fextl::vector<std::pair<uint64_t, uint64_t>> Parts;
++      {
++        std::shared_lock IntervalLock(IntervalsLock);
++        for (uint64_t Address = Page; Address < Page + TrapPageSize;) {
++          const auto Query = RWXIntervals.Query(Address);
++          if (!Query.Size) {
++            break;
++          }
++          const uint64_t Next = std::min(Page + TrapPageSize, Address + Query.Size);
++          if (Query.Enclosed) {
++            Parts.emplace_back(Address, Next - Address);
++          }
++          Address = Next;
++        }
++      }
++      if (Parts.empty()) {
++        Parts.emplace_back(FaultAddress, 1);
++      }
++      for (const auto& [PartAddress, PartSize] : Parts) {
++        ULONG TmpProt;
++        void* TmpAddress = reinterpret_cast<void*>(PartAddress);
++        SIZE_T TmpSize = static_cast<SIZE_T>(PartSize);
++        NtProtectVirtualMemory(NtCurrentProcess(), &TmpAddress, &TmpSize, GetUntrapProt(PartAddress), &TmpProt);
++      }
++      (void)UntrapProt;
+     }
+     DetectMonoBackpatcherBlock(Thread, HostPc);
+     return true;
+@@ -360,7 +396,9 @@ void InvalidationTracker::InvalidateIntervalInternalLocked(uint64_t Address, uin
+ }
+ 
+ bool InvalidationTracker::ProtectRWXIntervalsInternal(uint64_t Address, uint64_t Size, bool ForWriteLocked) {
+-  const auto End = Address + Size;
++  const auto End = (Address + Size + TrapPageSize - 1) & ~(TrapPageSize - 1);
++  Address &= ~(TrapPageSize - 1);
++  Size = End - Address;
+   std::shared_lock Lock(IntervalsLock);
+ 
+   if (SMCDetectionDisabled) {

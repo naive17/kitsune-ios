@@ -3,6 +3,9 @@
 # phone is contacted.
 set -euo pipefail
 source "$(dirname "$0")/../scripts/common.sh"
+# common.sh loads local.env, whose UDID or LIVECONTAINER would override the
+# fake device lists below.
+unset UDID LIVECONTAINER
 devices_json=""
 apps_json=""
 xcrun() {
