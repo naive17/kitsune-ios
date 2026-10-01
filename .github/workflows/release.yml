@@ -55,15 +55,12 @@ jobs:
       - if: steps.cache.outputs.cache-hit != 'true'
         run: bash .github/free-disk.sh
       - if: steps.cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: mkdir -p build && scripts/setup.sh --toolchain 2>&1 | tee build/ci-setup.log
+        run: scripts/setup.sh --toolchain
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           key: ${{ steps.key.outputs.key }}
           path: ${{ env.TOOLCHAIN_CACHE }}
-      - if: failure()
-        run: .github/report-failure.sh build/ci-setup.log "setup.sh --toolchain failed"
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -82,8 +79,7 @@ jobs:
           key: ${{ needs.toolchain.outputs.key }}
           path: ${{ env.TOOLCHAIN_CACHE }}
           fail-on-cache-miss: true
-      - shell: bash
-        run: mkdir -p build && scripts/setup.sh 2>&1 | tee build/ci-setup.log
+      - run: scripts/setup.sh
       - name: Package
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -106,8 +102,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" "$IPA" --title "$GITHUB_REF_NAME" --generate-notes
-      - if: failure()
-        run: .github/report-failure.sh build/ci-setup.log "setup.sh failed"
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
