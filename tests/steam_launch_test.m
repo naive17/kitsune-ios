@@ -43,7 +43,8 @@ int main(void) {
     assert([env[@"KITSUNE_GAME_INPUT"] isEqualToString:@"1"] && [env[@"WINEDLLOVERRIDES"] containsString:@"xinput1_4"]);
     assert([env[@"KITSUNE_LANDSCAPE"] isEqualToString:@"1"] && !env[@"KITSUNE_SCREEN_MAX"]);
     assert(!env[@"KITSUNE_STEAM_LEAN"]);   /* the web helper stays, hidden by -silent */
-    assert([env[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"]);   /* large RGBA8 atlases stored as ETC2 */
+    /* Not a Unity title: program code in the arena and no ETC2 re-encoding. */
+    assert([env[@"KITSUNE_APP_EXEC_IN_ARENA"] isEqualToString:@"1"] && !env[@"KITSUNE_RGBA_ETC2"]);
     assert(!env[@"KITSUNE_THREAD_DUMP"] && !env[@"WINEIOS_METAL_DEBUG"] && !env[@"KITSUNE_XINPUT_TRACE"] && !env[@"KITSUNE_TRACE_BIGALLOC"]);
 
     /* The client alone, hidden, with the console and full diagnostics. */
@@ -56,11 +57,31 @@ int main(void) {
     assert([env[@"KITSUNE_BC_NATIVE"] isEqualToString:@"1"] && !env[@"KITSUNE_BC_16BIT"]);
     assert([env[@"KITSUNE_THREAD_DUMP"] isEqualToString:@"5"] && [env[@"WINEIOS_METAL_DEBUG"] isEqualToString:@"1"]);
     assert(!env[@"KITSUNE_STEAM_LEAN"]);   /* the client alone keeps its UI */
+    assert([env[@"KITSUNE_APP_EXEC_IN_ARENA"] isEqualToString:@"1"] && !env[@"KITSUNE_RGBA_ETC2"]);
+
+    /* A Unity title: Mono's code outside the arena, large RGBA8 atlases as ETC2. */
+    {
+      NSString *bdir = [apps stringByAppendingPathComponent:@"common/Blasphemous"];
+      assert([fm createDirectoryAtPath:bdir withIntermediateDirectories:YES attributes:nil error:nil]);
+      assert([@"stub" writeToFile:[bdir stringByAppendingPathComponent:@"UnityPlayer.dll"]
+          atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+      NSString *bacf = @"\"AppState\"\n{\n\"appid\" \"774361\"\n\"name\" \"Blasphemous\"\n\"StateFlags\" \"4\"\n\"installdir\" \"Blasphemous\"\n}\n";
+      assert([bacf writeToFile:[apps stringByAppendingPathComponent:@"appmanifest_774361.acf"] atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+      NSDictionary *unity = KitsuneSteamRequest(@"774361", KitsuneDefaultLaunchOptions(), docs, &error)[@"env"];
+      assert(unity && [unity[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"] && !unity[@"KITSUNE_APP_EXEC_IN_ARENA"]);
+      /* The JSON the restart path writes decides the same way. */
+      NSDictionary *written = [NSJSONSerialization JSONObjectWithData:
+          KitsuneSteamRequestData(@"774361", KitsuneDefaultLaunchOptions(), docs) options:0 error:nil];
+      assert([written[@"env"][@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"] && !written[@"env"][@"KITSUNE_APP_EXEC_IN_ARENA"]);
+      written = [NSJSONSerialization JSONObjectWithData:
+          KitsuneSteamRequestData(@"570940", KitsuneDefaultLaunchOptions(), docs) options:0 error:nil];
+      assert([written[@"env"][@"KITSUNE_APP_EXEC_IN_ARENA"] isEqualToString:@"1"] && !written[@"env"][@"KITSUNE_RGBA_ETC2"]);
+    }
     o.textures = KitsuneTexturesDownscaled1024; o.frameCap = 0;
     assert([KitsuneDXMTConfig(o.textures, o.frameCap) isEqualToString:@"d3d11.mipClampBC = 4; d3d11.bcMaxDim = 1024"]);
 
     /* The JSON written to Documents parses back into a valid request. */
-    NSData *data = KitsuneSteamRequestData(@"570940", KitsuneDefaultLaunchOptions());
+    NSData *data = KitsuneSteamRequestData(@"570940", KitsuneDefaultLaunchOptions(), docs);
     id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     assert(KitsuneValidateLaunchRequest(json, docs, &error) && !error);
 
@@ -81,6 +102,10 @@ int main(void) {
     [ud setInteger:99 forKey:KITSUNE_KEY_TEXTURES];
     assert(KitsuneTextureModeStored(ud) == KitsuneTexturesDownscaled512);
     assert(KitsuneSafeAreaStored(ud));
+    /* Battery mode: on in Low Power Mode until switched off, never for heat until chosen. */
+    assert(KitsuneLowPowerAutoStored(ud) && !KitsuneHotAutoStored(ud));
+    [ud setBool:YES forKey:KITSUNE_KEY_HOT_AUTO];
+    assert(KitsuneHotAutoStored(ud));
     /* Pointer mode: trackpad until one is chosen; a choice, touch included, is kept. */
     assert(KitsunePointerModeStored(ud) == 1);
     [ud setInteger:0 forKey:KITSUNE_KEY_POINTER_MODE];

@@ -21,6 +21,7 @@
 #define KITSUNE_KEY_TEXTURES       @"KitsuneTextureMode"     /* KitsuneTextureMode */
 #define KITSUNE_KEY_STEAM_VISIBLE  @"KitsuneSteamVisible"
 #define KITSUNE_KEY_LOW_POWER_AUTO @"KitsuneLowPowerAuto"    /* Battery mode while Low Power Mode is on */
+#define KITSUNE_KEY_HOT_AUTO       @"KitsuneHotAuto"         /* Battery mode while the phone is hot */
 #define KITSUNE_KEY_FILL_SCREEN    @"KitsuneFillScreen"      /* set known games to the desktop resolution */
 #define KITSUNE_KEY_PERF_HUD       @"KitsunePerfHUD"         /* fps and memory readout in session */
 #define KITSUNE_KEY_POINTER_MODE   @"KitsunePointerMode"     /* WinePointerMode last used */
@@ -69,6 +70,12 @@ static inline BOOL KitsuneSteamVisibleStored(NSUserDefaults *ud) {
 
 static inline BOOL KitsuneLowPowerAutoStored(NSUserDefaults *ud) {
   return [ud objectForKey:KITSUNE_KEY_LOW_POWER_AUTO] ? [ud boolForKey:KITSUNE_KEY_LOW_POWER_AUTO] : YES;
+}
+
+/* Off until chosen: Dark Souls: Remastered played in slow motion once a hot
+ * phone switched it to Battery's 30 fps and utility QoS. */
+static inline BOOL KitsuneHotAutoStored(NSUserDefaults *ud) {
+  return [ud boolForKey:KITSUNE_KEY_HOT_AUTO];
 }
 
 static inline int KitsuneFrameCapStored(NSUserDefaults *ud) {

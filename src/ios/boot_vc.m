@@ -914,7 +914,7 @@ static void PublishJITScript(void) {
     return;
   }
   NSError *error = nil;
-  if (![KitsuneSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error]) {
+  if (![KitsuneSteamRequestData(appID, options, KitsunePersistentDocuments()) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error]) {
     [vc report:NSLocalizedString(@"Can't Launch", nil) message:error.localizedDescription];
     return;
   }
@@ -946,7 +946,7 @@ static void PublishJITScript(void) {
   }
   [self restartToOpen:name ?: NSLocalizedString(@"Steam", nil) bottle:@"Steam" from:vc saving:^NSString *{
     NSError *error = nil;
-    if (![KitsuneSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error])
+    if (![KitsuneSteamRequestData(appID, options, KitsunePersistentDocuments()) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error])
       return error.localizedDescription;
     [NSFileManager.defaultManager removeItemAtPath:
         [KitsunePersistentDocuments() stringByAppendingPathComponent:@"dxmt-gpu-debug.txt"] error:nil];
@@ -1304,8 +1304,7 @@ static void PublishJITScript(void) {
                  "KitsunePointerModeStored returns these values");
   _input.pointerMode = (WinePointerMode)KitsunePointerModeStored(ud);
   [self updateModeButton];
-  /* Shown whenever logging is on, which it announces, even with the HUD off. */
-  [_hud setVisible:KitsunePerfHUDStored(ud) || KitsuneDiagLevelFromEnv() != KitsuneDiagOff];
+  [self updateHUD];
   [self updatePowerButton];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePowerButton)
                                              name:WinePowerDidChangeNotification object:nil];
@@ -1375,11 +1374,19 @@ static void PublishJITScript(void) {
 
 - (void)updatePowerButton {
   _powerButton.tintColor = WinePower.shared.effectiveMode == WinePowerBattery ? UIColor.systemGreenColor : UIColor.whiteColor;
+  [self updateHUD];
 }
 
-/* The overlay's switch is in Settings, which the Library shows over a program. */
+/* The overlay's switch is in Settings, which the Library shows over a program.
+ * It is shown whenever logging or Battery is on or iOS is throttling a hot
+ * phone, which it announces, even with the switch off. setVisible restarts the
+ * frame count, so only on a change. Thermal changes arrive through
+ * WinePowerDidChangeNotification. */
 - (void)updateHUD {
-  [_hud setVisible:KitsunePerfHUDStored(NSUserDefaults.standardUserDefaults) || KitsuneDiagLevelFromEnv() != KitsuneDiagOff];
+  BOOL want = KitsunePerfHUDStored(NSUserDefaults.standardUserDefaults) || KitsuneDiagLevelFromEnv() != KitsuneDiagOff ||
+              WinePower.shared.effectiveMode == WinePowerBattery ||
+              NSProcessInfo.processInfo.thermalState >= NSProcessInfoThermalStateSerious;
+  if (_hud.hidden == want) [_hud setVisible:want];
 }
 
 - (void)updateModeButton {

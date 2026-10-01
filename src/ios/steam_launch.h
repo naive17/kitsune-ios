@@ -6,6 +6,22 @@
 #include "launch_profile.h"
 #include "steam_library.h"
 
+/* The installed title `appID` in docs' Steam library, or nil. */
+static inline NSDictionary *KitsuneSteamGame(NSString *appID, NSString *docs) {
+  NSString *root = appID.length ? KitsuneSteamRoot(docs) : nil;
+  if (!root) return nil;
+  for (NSDictionary *g in KitsuneSteamGames(root))
+    if ([g[@"appid"] isEqualToString:appID]) return g;
+  return nil;
+}
+
+/* The options with what the title itself decides filled in. */
+static inline KitsuneLaunchOptions KitsuneSteamOptionsForApp(NSString *appID, KitsuneLaunchOptions options,
+                                                           NSString *docs) {
+  options.unity = [KitsuneSteamGame(appID, docs)[@"unity"] boolValue];
+  return options;
+}
+
 /* Validate a Steam request against the installed tree. `appID` nil launches
  * the client alone; otherwise the title's directory must exist under
  * steamapps/common (from its manifest), so a half-installed game is refused
@@ -16,10 +32,9 @@ static inline NSDictionary *KitsuneSteamRequest(NSString *appID, KitsuneLaunchOp
     if (error) *error = NSLocalizedString(@"Steam is not installed in this app's library (Documents/Apps/Steam/steam.exe).", nil);
     return nil;
   }
+  options = KitsuneSteamOptionsForApp(appID, options, docs);
   if (appID.length) {
-    NSDictionary *found = nil;
-    for (NSDictionary *g in KitsuneSteamGames(KitsuneSteamRoot(docs)))
-      if ([g[@"appid"] isEqualToString:appID]) { found = g; break; }
+    NSDictionary *found = KitsuneSteamGame(appID, docs);
     if (!found) {
       if (error) *error = [NSString stringWithFormat:NSLocalizedString(@"Steam app %@ is not installed in this library.", nil), appID];
       return nil;
@@ -34,7 +49,8 @@ static inline NSDictionary *KitsuneSteamRequest(NSString *appID, KitsuneLaunchOp
 
 /* The JSON that goes into Documents/launch-request.json: the unvalidated
  * request (relative exe path), which the boot path validates again. */
-static inline NSData *KitsuneSteamRequestData(NSString *appID, KitsuneLaunchOptions options) {
+static inline NSData *KitsuneSteamRequestData(NSString *appID, KitsuneLaunchOptions options, NSString *docs) {
+  options = KitsuneSteamOptionsForApp(appID, options, docs);
   return [NSJSONSerialization dataWithJSONObject:KitsuneSteamLaunchRequest(appID, options)
                                          options:NSJSONWritingPrettyPrinted error:nil];
 }

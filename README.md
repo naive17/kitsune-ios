@@ -1,11 +1,13 @@
 # Kitsune
 
-A port of [Wine](https://www.winehq.org) that run on iOS through JIT to run Steam games and x86 apps.
+Kitsune is a port of [Wine](https://www.winehq.org) that run on iOS through JIT and let's you run Steam games and x86 apps.
+It's just WIP for now and more work has to be done.
 
 ## Currently booting
 
 - Steam, fully working login, install and launch
 - Dark Souls Remastered running in game, 60fps with dips here and there
+- Blasphemous, runs in game, 60fps with dips here and there
 
 ## Stack
 
@@ -58,3 +60,10 @@ release IPAs.
 - [Device](docs/device.md): JIT, launching, logs and test switches
 - [Status](docs/status.md): what works, the limits, what's next
 - [Contributing](CONTRIBUTING.md): setup, commit format, working on the ports, tests
+
+## Aknowledgements
+
+Thanks to obviously Wine, FEX and DXMT for their work.
+Thanks to Madeira from willfaust for some neat tricks.
+
+This project leveraged AI usage, this is a personal passion project.

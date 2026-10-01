@@ -1,0 +1,21 @@
+{
+  "search.followSymlinks": false,
+  "npm.autoDetect": "off",
+  "C_Cpp.files.exclude": {
+    "**/dosdevices": true,
+    "toolchains": true,
+    "build": true,
+    "out": true,
+    ".deploy": true,
+    "**/.vscode": true,
+    "**/.vs": true
+  },
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/src/**",
+    "${workspaceFolder}/third_party/**"
+  ],
+  "C_Cpp.default.browse.path": [
+    "${workspaceFolder}/src",
+    "${workspaceFolder}/third_party"
+  ]
+}

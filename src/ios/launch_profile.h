@@ -34,6 +34,7 @@ typedef struct {
   KitsuneTextureMode textures;
   int frameCap;               /* 0 = the display's refresh rate */
   BOOL landscape;
+  BOOL unity;                 /* the game is a Unity title (KitsuneGameDirIsUnity) */
 } KitsuneLaunchOptions;
 
 static inline KitsuneLaunchOptions KitsuneDefaultLaunchOptions(void) {
@@ -88,12 +89,19 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
     @"KITSUNE_SWAP": @"1",
     @"KITSUNE_SWAP_MASK": @"3",
   }];
-  /* No KITSUNE_STEAM_LEAN: -silent already keeps Steam's UI hidden, and ending
-   * its web helper while refusing the restarts Steam keeps asking for left
-   * games running worse than beside a hidden helper. A launch request can still set it. */
-  /* Large sampled RGBA8 textures stored as ETC2 (winemetal): Unity games ship
-   * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit). */
-  env[@"KITSUNE_RGBA_ETC2"] = @"1";
+  /* No KITSUNE_STEAM_LEAN: -silent already keeps Steam's UI hidden, and games
+   * ran worse with the web helper ended and its restarts refused than beside
+   * the hidden helper. A launch request can still set it. */
+  if (o.unity) {
+    /* Large sampled RGBA8 textures stored as ETC2 (winemetal): Unity games ship
+     * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit). */
+    env[@"KITSUNE_RGBA_ETC2"] = @"1";
+  } else {
+    /* Executable memory a program allocates stays in the JIT arena, as before
+     * the Unity work. Outside it FEX traps writes per 16K host page, which Mono
+     * needs; Dark Souls: Remastered has run in slow motion since it moved out. */
+    env[@"KITSUNE_APP_EXEC_IN_ARENA"] = @"1";
+  }
   env[@"DXMT_CONFIG"] = KitsuneDXMTConfig(o.textures, o.frameCap);
   if (o.textures == KitsuneTexturesNative) env[@"KITSUNE_BC_NATIVE"] = @"1";
   else env[@"KITSUNE_BC_16BIT"] = @"1";

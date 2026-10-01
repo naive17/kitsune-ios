@@ -52,17 +52,19 @@ __attribute__((visibility("default"))) volatile double kitsune_present_min_inter
     return;
   }
   NSProcessInfo *pi = NSProcessInfo.processInfo;
+  NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
   WinePowerMode mode = self.userMode;
-  NSString *reason = @"chosen in Settings";
-  if (pi.thermalState >= NSProcessInfoThermalStateSerious) {
+  NSString *reason = NSLocalizedString(@"chosen in Settings", nil);
+  if (pi.thermalState >= NSProcessInfoThermalStateSerious && KitsuneHotAutoStored(ud)) {
     mode = WinePowerBattery;
-    reason = @"the phone is hot";
-  } else if (pi.lowPowerModeEnabled && KitsuneLowPowerAutoStored(NSUserDefaults.standardUserDefaults)) {
+    reason = NSLocalizedString(@"the phone is hot", nil);
+  } else if (pi.lowPowerModeEnabled && KitsuneLowPowerAutoStored(ud)) {
     mode = WinePowerBattery;
-    reason = @"Low Power Mode is on";
+    reason = NSLocalizedString(@"Low Power Mode is on", nil);
   }
   BOOL changed = (mode != _effectiveMode) || !_generation;
   _effectiveMode = mode;
+  _batteryReason = mode == WinePowerBattery ? [reason copy] : nil;
 
   int cap = mode == WinePowerBattery ? 30 : 0;
   kitsune_present_min_interval = cap > 0 ? 1.0 / cap : 0.0;

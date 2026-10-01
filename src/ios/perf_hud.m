@@ -1,5 +1,6 @@
 #import "perf_hud.h"
 #import "diagnostics.h"
+#import "power.h"
 
 #include <dlfcn.h>
 #include <mach/mach.h>
@@ -39,6 +40,9 @@ static unsigned long long footprint_mb(void) {
   uint64_t _busy[SAMPLES];
   unsigned _head, _filled;
   BOOL _timing;
+  /* The log line every 10 s: frames since, and the worst 1 s rate seen. */
+  double _logTime, _logMin;
+  uint64_t _logCount;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -103,9 +107,22 @@ static unsigned long long footprint_mb(void) {
       unsigned idx = (_head + SAMPLES - i) % SAMPLES;
       double dt = now - _times[idx];
       if (dt < 1.0) continue;
-      fps = [NSString stringWithFormat:@"%.0f", (double)(n - _counts[idx]) / dt];
+      double rate = (double)(n - _counts[idx]) / dt;
+      fps = [NSString stringWithFormat:@"%.0f", rate];
+      if (rate < _logMin) _logMin = rate;
       if (_timing) gpu = [NSString stringWithFormat:NSLocalizedString(@" · GPU %.0f%%", nil), MIN(100.0, (double)(busy - _busy[idx]) / (dt * 1e7))];
       break;
+    }
+    /* Dips are what matter and the overlay shows only the current second, so
+     * the log gets the average and the worst second every 10 s, with the
+     * thermal state iOS throttles by. */
+    if (_logTime == 0) {
+      _logTime = now; _logCount = n; _logMin = 1e9;
+    } else if (now - _logTime >= 10.0) {
+      KitsuneLog([NSString stringWithFormat:@"FPS avg=%.0f worst1s=%.0f thermal=%ld power=%ld",
+                  (double)(n - _logCount) / (now - _logTime), _logMin < 1e9 ? _logMin : 0.0,
+                  (long)NSProcessInfo.processInfo.thermalState, (long)WinePower.shared.effectiveMode]);
+      _logTime = now; _logCount = n; _logMin = 1e9;
     }
   }
   unsigned long long used = footprint_mb(), avail = os_proc_available_memory() >> 20;
@@ -116,14 +133,28 @@ static unsigned long long footprint_mb(void) {
   KitsuneDiagLevel level = KitsuneDiagLevelFromEnv();
   NSString *note = level == KitsuneDiagFull ? NSLocalizedString(@"Logging Full · slower · ", nil)
                  : level == KitsuneDiagBasic ? NSLocalizedString(@"Logging Basic · ", nil) : nil;
-  if (!note) {
+  /* Battery caps frames and slows the threads, so it always says so, and why. */
+  NSString *battery = WinePower.shared.effectiveMode == WinePowerBattery
+      ? [NSString stringWithFormat:NSLocalizedString(@"Battery · 30 fps cap (%@) · ", nil), WinePower.shared.batteryReason ?: @""]
+      : nil;
+  /* From Serious on, iOS lowers CPU and GPU clocks: a hot phone halved Dark
+   * Souls: Remastered's frame rate on Balanced, which looked like a slow build. */
+  NSProcessInfoThermalState thermal = NSProcessInfo.processInfo.thermalState;
+  NSString *hot = thermal >= NSProcessInfoThermalStateSerious ? NSLocalizedString(@"Hot: iOS is slowing the phone · ", nil) : nil;
+  if (hot) note = note ? [hot stringByAppendingString:note] : hot;
+  if (!note && !battery) {
     _label.attributedText = nil;
     _label.text = line;
     _label.textColor = color;
     return;
   }
-  NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:note
-      attributes:@{ NSForegroundColorAttributeName: UIColor.systemOrangeColor, NSFontAttributeName: _label.font }];
+  NSMutableAttributedString *text = [[NSMutableAttributedString alloc] init];
+  if (battery)
+    [text appendAttributedString:[[NSAttributedString alloc] initWithString:battery
+        attributes:@{ NSForegroundColorAttributeName: UIColor.systemGreenColor, NSFontAttributeName: _label.font }]];
+  if (note)
+    [text appendAttributedString:[[NSAttributedString alloc] initWithString:note
+        attributes:@{ NSForegroundColorAttributeName: UIColor.systemOrangeColor, NSFontAttributeName: _label.font }]];
   [text appendAttributedString:[[NSAttributedString alloc] initWithString:line
       attributes:@{ NSForegroundColorAttributeName: color, NSFontAttributeName: _label.font }]];
   _label.attributedText = text;

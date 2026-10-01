@@ -219,7 +219,7 @@
 "Storage" = "Storage";
 "About" = "About";
 "Applies the next time a program starts." = "Applies the next time a program starts.";
-"Battery caps games at 30 fps and turns on by itself when the phone gets hot." = "Battery caps games at 30 fps and turns on by itself when the phone gets hot.";
+"Battery caps games at 30 fps and runs them on the efficiency cores. The overlay says when it is on." = "Battery caps games at 30 fps and runs them on the efficiency cores. The overlay says when it is on.";
 "Applies the next time Kitsune opens. Full logging slows programs down." = "Applies the next time Kitsune opens. Full logging slows programs down.";
 "Keeps the Wine runtime and your settings." = "Keeps the Wine runtime and your settings.";
 "Avoid the Notch" = "Avoid the Notch";
@@ -250,6 +250,8 @@
 /* texture size and logging level */
 "Full" = "Full";
 "Battery Mode in Low Power Mode" = "Battery Mode in Low Power Mode";
+"Battery Mode When Hot" = "Battery Mode When Hot";
+"Some games play in slow motion at 30 fps" = "Some games play in slow motion at 30 fps";
 "Performance Overlay" = "Performance Overlay";
 "Frame rate and memory while playing" = "Frame rate and memory while playing";
 "Camera Sensitivity" = "Camera Sensitivity";
@@ -440,5 +442,12 @@
 /* in-session readout, prefixed while logging is on */
 "Logging Full · slower · " = "Logging Full · slower · ";
 "Logging Basic · " = "Logging Basic · ";
+/* in-session readout while the phone is hot enough that iOS lowers its clocks */
+"Hot: iOS is slowing the phone · " = "Hot: iOS is slowing the phone · ";
+/* in-session readout while Battery mode is on; the reason follows */
+"Battery · 30 fps cap (%@) · " = "Battery · 30 fps cap (%@) · ";
+"chosen in Settings" = "chosen in Settings";
+"the phone is hot" = "the phone is hot";
+"Low Power Mode is on" = "Low Power Mode is on";
 /* added after fps when GPU timing is on */
 " · GPU %.0f%%" = " · GPU %.0f%%";

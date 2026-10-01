@@ -123,7 +123,7 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
 - (NSInteger)tableView:(UITableView *__unused)t numberOfRowsInSection:(NSInteger)s {
   switch (s) {
   case SecDisplay: return 4;
-  case SecPerformance: return 5;
+  case SecPerformance: return 6;
   case SecControls: return 2;
   case SecSteam: return 1;
   case SecDiagnostics: return 2;
@@ -151,7 +151,7 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
   case SecDisplay:
     return NSLocalizedString(@"Applies the next time a program starts.", nil);
   case SecPerformance:
-    return NSLocalizedString(@"Battery caps games at 30 fps and turns on by itself when the phone gets hot.", nil);
+    return NSLocalizedString(@"Battery caps games at 30 fps and runs them on the efficiency cores. The overlay says when it is on.", nil);
   case SecDiagnostics:
     return NSLocalizedString(@"Applies the next time Kitsune opens. Full logging slows programs down.", nil);
   case SecStorage:
@@ -189,6 +189,8 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
     case 2: return ChoiceRow(NSLocalizedString(@"Texture Size", nil), NSLocalizedString(@"Smaller uses less memory", nil),
                              @[ NSLocalizedString(@"Small", nil), NSLocalizedString(@"Medium", nil), NSLocalizedString(@"Full", nil) ], KitsuneTextureModeStored(ud), self, @selector(onTextures:));
     case 3: return SwitchRow(NSLocalizedString(@"Battery Mode in Low Power Mode", nil), nil, KitsuneLowPowerAutoStored(ud), self, @selector(onLowPower:));
+    case 4: return SwitchRow(NSLocalizedString(@"Battery Mode When Hot", nil), NSLocalizedString(@"Some games play in slow motion at 30 fps", nil),
+                             KitsuneHotAutoStored(ud), self, @selector(onHotAuto:));
     default: return SwitchRow(NSLocalizedString(@"Performance Overlay", nil), NSLocalizedString(@"Frame rate and memory while playing", nil),
                               KitsunePerfHUDStored(ud), self, @selector(onPerfHUD:));
     }
@@ -285,7 +287,14 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
 - (void)onOrientation:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setBool:seg.selectedSegmentIndex == 1 forKey:KITSUNE_KEY_OTHER_LANDSCAPE]; }
 - (void)onFrameCap:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setInteger:kFrameCaps[seg.selectedSegmentIndex] forKey:KITSUNE_KEY_FRAME_CAP]; }
 - (void)onTextures:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setInteger:seg.selectedSegmentIndex forKey:KITSUNE_KEY_TEXTURES]; }
-- (void)onLowPower:(UISwitch *)sw { [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_LOW_POWER_AUTO]; }
+- (void)onLowPower:(UISwitch *)sw {
+  [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_LOW_POWER_AUTO];
+  [WinePower.shared update];
+}
+- (void)onHotAuto:(UISwitch *)sw {
+  [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_HOT_AUTO];
+  [WinePower.shared update];
+}
 - (void)onSteamWindow:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setBool:seg.selectedSegmentIndex == 0 forKey:KITSUNE_KEY_STEAM_VISIBLE]; }
 - (void)onDiagnostics:(UISegmentedControl *)seg { KitsuneDiagStore(NSUserDefaults.standardUserDefaults, (KitsuneDiagLevel)seg.selectedSegmentIndex); }
 

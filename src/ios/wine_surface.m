@@ -149,9 +149,11 @@ void wine_surface_host_init( void *root_view )
     }
 }
 
-int wine_surface_expected_landscape_desktop( int *width, int *height )
+/* The landscape desktop for the current screen and settings, and its scale. */
+static int host_landscape_desktop( int *width, int *height, CGFloat *scale )
 {
     __block int w = 0, h = 0;
+    __block CGFloat sc = 0;
     dispatch_block_t work = ^{
         @autoreleasepool
         {
@@ -182,6 +184,7 @@ int wine_surface_expected_landscape_desktop( int *width, int *height )
             s = host_render_scale( screen, CGSizeMake( lw, lh ) );
             w = (int)lround( lw * s );
             h = (int)lround( lh * s );
+            sc = s;
         }
     };
     if ([NSThread isMainThread]) work();
@@ -189,7 +192,13 @@ int wine_surface_expected_landscape_desktop( int *width, int *height )
     if (w <= 0 || h <= 0) return 0;
     *width = w;
     *height = h;
+    if (scale) *scale = sc;
     return 1;
+}
+
+int wine_surface_expected_landscape_desktop( int *width, int *height )
+{
+    return host_landscape_desktop( width, height, NULL );
 }
 
 int wine_surface_host_screen( int *width, int *height )
@@ -228,6 +237,22 @@ static void host_sync_all_drawables( void )
 
 void wine_surface_host_set_landscape( int landscape )
 {
+    int w, h;
+    CGFloat sc;
+
+    /* The startup snapshot runs before the view has a size, so Auto could not
+     * pick the smallest scale an 800x600 game fits and took the 2x fallback
+     * (1688x780 on an iPhone 14); the resize on rotation needs the display
+     * driver, which is not loaded yet. Size the landscape desktop here, before
+     * Wine reads it: 1688x780 cost Dark Souls: Remastered its frame rate. */
+    if (landscape && host_landscape_desktop( &w, &h, &sc ))
+    {
+        host_screen_width  = w;
+        host_screen_height = h;
+        host_scale = sc;
+        NSLog( @"wine_surface: landscape desktop %dx%d px scale %.2f", w, h, (double)sc );
+        return;
+    }
     if (landscape ? host_screen_height > host_screen_width : host_screen_width > host_screen_height)
     {
         int t = host_screen_width;
