@@ -3,9 +3,9 @@
 # app's team (SIGN_TEAM, else KITSUNE_TEAM from local.env, else DEVELOPMENT_TEAM
 # in kitsune-device.yml; an empty SIGN_TEAM accepts any team), or explain on stderr why there is none. Revocation is checked over
 # OCSP because only Apple's answer agrees with what the phone accepts.
-# Usage: ID=$(bash scripts/signing-identity.sh) || exit 1
+# Usage: ID=$(bash scripts/dev/signing-identity.sh) || exit 1
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 # shellcheck source=/dev/null
 if [ -f local.env ]; then set -a; . ./local.env; set +a; fi
 

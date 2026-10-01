@@ -1,1 +1,1 @@
-node scripts/check-commit-msg.mjs "$1"
+node scripts/lib/check-commit-msg.mjs "$1"

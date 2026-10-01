@@ -2,9 +2,9 @@
 # Push input lines (syntax: remote_run_line in src/ios/input_overlay.m) to the
 # running app, then screenshot it. Coordinates are Wine screen pixels:
 # screenshot pixels * render scale / 3 on a 3x phone (2/3 by default).
-#   bash scripts/remote.sh [--wait MS] "click 186 480" "sleep 800" ...
-#   bash scripts/remote.sh --shot
-source "$(dirname "$0")/common.sh"
+#   bash scripts/dev/remote.sh [--wait MS] "click 186 480" "sleep 800" ...
+#   bash scripts/dev/remote.sh --shot
+source "$(dirname "$0")/../common.sh"
 UDID=$(phone_udid)
 APP=${APP:-$APP_ID}
 SHOT=${SHOT:-/tmp/kitsune-shot.png}

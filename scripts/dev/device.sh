@@ -2,13 +2,13 @@
 # Copy files between this Mac and the app on the paired iPhone, over USB or
 # Wi-Fi. UDID picks the phone and APP the app, as in the other device scripts.
 #
-#   scripts/device.sh logs [destination]
-#   scripts/device.sh sync-tree [out/wine-core]
-#   scripts/device.sh sync-fex [out/wine-core/lib/wine/aarch64-windows/libarm64ecfex.dll]
+#   scripts/dev/device.sh logs [destination]
+#   scripts/dev/device.sh sync-tree [out/wine-core]
+#   scripts/dev/device.sh sync-fex [out/wine-core/lib/wine/aarch64-windows/libarm64ecfex.dll]
 #
 # sync-tree replaces Documents/wine, the tree a thin install runs; sync-fex
 # replaces only the emulator in it. Relaunch the app afterwards.
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../common.sh"
 cd "$ROOT"
 
 APP="${APP:-$APP_ID}"

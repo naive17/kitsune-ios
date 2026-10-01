@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the NATIVE ARM64 guest programs that 21-regress.sh runs into
-# build/guests; 20-decoy-split.sh builds and stages them.
+# build/guests; 20-test-layout.sh builds and stages them.
 #
 #   inputprobe.exe  input-probe.c  reports the input a window received
 #   fpsprobe.exe    fps-probe.c    paints continuously and reports the rate

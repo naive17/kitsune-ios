@@ -18,7 +18,7 @@ copy_from_app() {
   fi
   printf 'complete %s\n' "$3" > "$4"
 }
-eval "$(sed -n '/^cmd_logs() {$/,/^}$/p' "$ROOT/scripts/device.sh")"
+eval "$(sed -n '/^cmd_logs() {$/,/^}$/p' "$ROOT/scripts/dev/device.sh")"
 
 cmd_logs "$capture_test_dir/capture"
 [ "$(head -n 1 "$capture_test_dir/order")" = Documents/hb.log ]

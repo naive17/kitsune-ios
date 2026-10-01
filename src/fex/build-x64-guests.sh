@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the x86-64 guest programs that 21-regress.sh runs under FEX into
-# build/x64-guests; 20-decoy-split.sh builds and stages them.
+# build/x64-guests; 20-test-layout.sh builds and stages them.
 #
 #   hello64.exe     x64-hello.c        prints a 64-bit product: x86-64 code was
 #                                      translated, written through the RW alias

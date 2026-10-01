@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { checkSubject, subjectOf, TYPES } from '../scripts/check-commit-msg.mjs';
+import { checkSubject, subjectOf, TYPES } from '../scripts/lib/check-commit-msg.mjs';
 
 for (const type of TYPES) assert.equal(checkSubject(`${type}: something small`), null);
 assert.equal(checkSubject('update: one two three four five six seven eight nine ten'), null);
@@ -24,7 +24,7 @@ assert.equal(subjectOf('\n\n'), '');
 
 // The hook's own exit status on a real message file.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-msg-'));
-const script = path.resolve(import.meta.dirname, '../scripts/check-commit-msg.mjs');
+const script = path.resolve(import.meta.dirname, '../scripts/lib/check-commit-msg.mjs');
 const hook = text => {
   fs.writeFileSync(path.join(dir, 'MSG'), text);
   return spawnSync(process.execPath, [script, path.join(dir, 'MSG')], { encoding: 'utf8' });

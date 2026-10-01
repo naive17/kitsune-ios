@@ -126,17 +126,17 @@ targets:
             /bin/cp "$SRCROOT/out/wine-core/lib/wine/aarch64-windows/ntdll.dll" "$PE_DIR/"
             /bin/cp "$SRCROOT/out/wine-core/lib/wine/aarch64-windows/apisetschema.dll" "$PE_DIR/"
             /bin/cp "$SRCROOT/out/wine-core/lib/wine/aarch64-windows/wineios.drv" "$PE_DIR/"
-            /bin/bash "$SRCROOT/scripts/build-session-host.sh" "$PE_DIR"
+            /bin/bash "$SRCROOT/scripts/lib/build-session-host.sh" "$PE_DIR"
             for dll in d3d11 dxgi d3d10core winemetal; do
               /bin/cp "$SRCROOT/out/dxmt-arm64ec/$dll.dll" "$PE_DIR/"
             done
             /bin/cp "$SRCROOT"/out/wine-tree/share/wine/nls/*.nls "$NLS_DIR/"
             /bin/cp "$SRCROOT/out/wine-tree/share/wine/wine.inf" "$APP/share/wine/wine.inf"
             /usr/bin/ditto "$SRCROOT/out/wine-core/share/wine/fonts" "$APP/share/wine/fonts"
-            /bin/bash "$SRCROOT/scripts/stage-xinput.sh" "$APP/lib/wine" "$SRCROOT/out/wine-tree/lib/wine/aarch64-windows"
+            /bin/bash "$SRCROOT/scripts/lib/stage-xinput.sh" "$APP/lib/wine" "$SRCROOT/out/wine-tree/lib/wine/aarch64-windows"
           fi
 
-          /bin/bash "$SRCROOT/scripts/stage-ca-bundle.sh" "$APP/share/wine"
+          /bin/bash "$SRCROOT/scripts/lib/stage-ca-bundle.sh" "$APP/share/wine"
           /usr/bin/ditto "$SRCROOT/LICENSES" "$APP/LICENSES"
 
           if test "$CODE_SIGNING_ALLOWED" = YES && test -n "$EXPANDED_CODE_SIGN_IDENTITY"; then

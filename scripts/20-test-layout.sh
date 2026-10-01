@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build the device-shaped split layout that 21-regress.sh runs at $DECOY_DIR
-# (default /tmp/decoy): build/host-tree with DXMT staged over it, the test
+# Build the device-shaped split layout that 21-regress.sh runs at $TEST_LAYOUT_DIR
+# (default /tmp/kitsune-test-layout): build/host-tree with DXMT staged over it, the test
 # programs 21 runs, and a prefix initialised by wineboot. Builds the test
 # programs first. Requires 16-host-harness.sh and 10-dxmt.sh. The layout is a
 # copy: rerun after every build.
@@ -136,7 +136,7 @@ for role in 0 1 2; do
     -lkernel32 -o "$out"
 done
 
-DEST="${DECOY_DIR:-/tmp/decoy}"
+DEST="${TEST_LAYOUT_DIR:-/tmp/kitsune-test-layout}"
 rm -rf "$DEST"
 mkdir -p "$DEST/bundle/lib/wine" "$DEST/tree/lib/wine"
 
@@ -150,7 +150,7 @@ mkdir -p "$DEST/bundle/lib/wine/aarch64-windows"
 for f in ntdll.dll apisetschema.dll wineios.drv; do
   cp "$HOST_TREE/lib/wine/aarch64-windows/$f" "$DEST/bundle/lib/wine/aarch64-windows/"
 done
-bash "$ROOT/scripts/build-session-host.sh" "$DEST/bundle/lib/wine/aarch64-windows"
+bash "$ROOT/scripts/lib/build-session-host.sh" "$DEST/bundle/lib/wine/aarch64-windows"
 
 # --- tree: the Wine tree in Documents ---------------------------------------
 # It carries the unix halves as the phone's tree does, but as text, so loading
@@ -182,7 +182,7 @@ cp_keys=$(grep -ac 'CP 40' "$DEST/tree/prefix/system.reg" 2>/dev/null || echo 0)
 [ "$cp_keys" -gt 0 ] || die "prefix has no CPU-feature keys; x86-64 will fail"
 log "  prefix: $(ls "$DEST"/tree/prefix/*.reg | wc -l | tr -d ' ') .reg, $cp_keys CPU-feature keys"
 
-log "decoy split at $DEST"
+log "test layout at $DEST"
 log "  bundle: $(ls "$DEST"/bundle/lib/wine/aarch64-unix/*.so | wc -l | tr -d ' ') loadable .so"
 log "  tree:   $(ls "$DEST"/tree/lib/wine/aarch64-unix/*.so | wc -l | tr -d ' ') decoys"
 log "  tests:  $(ls "$DEST"/tests/*.exe | wc -l | tr -d ' ') child-process programs"

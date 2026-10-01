@@ -6,7 +6,7 @@ import {execFileSync} from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
 const scratch = path.join(root, '.deploy/tests/jit-arena');
 fs.mkdirSync(scratch, {recursive: true});
-const source = fs.readFileSync(path.join(root, 'scripts/ensure-jit-run.sh'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'scripts/dev/ensure-jit-run.sh'), 'utf8');
 const begin = source.indexOf('      if [ "$MIN_ARENA_MB" -gt 0 ]; then');
 const end = source.indexOf('      echo "JIT-RUN-CONFIRMED', begin);
 assert(begin >= 0 && end > begin);

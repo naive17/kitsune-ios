@@ -72,8 +72,8 @@ Run these before sending a change:
 ```sh
 scripts/test.sh                                  # host unit tests
 scripts/16-host-harness.sh                       # the macOS harness
-DECOY_DIR=/tmp/decoy scripts/20-decoy-split.sh   # builds every test program
-DECOY_DIR=/tmp/decoy scripts/21-regress.sh       # the regression suite
+TEST_LAYOUT_DIR=/tmp/kitsune-test-layout scripts/20-test-layout.sh   # builds every test program
+TEST_LAYOUT_DIR=/tmp/kitsune-test-layout scripts/21-regress.sh       # the regression suite
 ```
 
 The harness runs the iOS-shaped Wine on the Mac: the in-process server,

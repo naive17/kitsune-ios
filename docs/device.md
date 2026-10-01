@@ -49,8 +49,8 @@ script.
 From a Mac:
 
 ```sh
-scripts/ensure-jit-run.sh assets/dsr-rendering-launch.json 4 1024   # launch a request under JIT
-scripts/remote.sh --wait 2000 "key 69"                              # send input; coordinates are Wine pixels
+scripts/dev/ensure-jit-run.sh assets/dsr-rendering-launch.json 4 1024   # launch a request under JIT
+scripts/dev/remote.sh --wait 2000 "key 69"                              # send input; coordinates are Wine pixels
 ```
 
 ## Logs
@@ -60,7 +60,7 @@ heartbeat; it is written with write(2), so it is the record that survives a
 kill. Steam's own logs are under `Documents/Apps/Steam/logs`.
 
 ```sh
-scripts/device.sh logs           # copies hb.log and wine-stderr.log to .deploy/device/logs/
+scripts/dev/device.sh logs           # copies hb.log and wine-stderr.log to .deploy/device/logs/
 ```
 
 Settings > About > Share logs exports the same files from the phone.
@@ -91,6 +91,6 @@ Settings > Diagnostics sets how much the app records:
 - **Documents also holds:** `Bottles/<name>`, `Apps/` (imported programs and Steam), and `render-scale`.
 - **Orientation** is decided when a program starts: from `KITSUNE_LANDSCAPE` in a launch request's environment, otherwise from the Other Programs setting.
 
-`scripts/device.sh sync-tree` replaces `Documents/wine` with `out/wine-core`.
-`scripts/device.sh sync-fex` replaces only the x86-64 emulator in it. Relaunch
+`scripts/dev/device.sh sync-tree` replaces `Documents/wine` with `out/wine-core`.
+`scripts/dev/device.sh sync-fex` replaces only the x86-64 emulator in it. Relaunch
 the app after either.

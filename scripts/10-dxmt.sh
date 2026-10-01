@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build DXMT (Direct3D 11 on Metal): the arm64ec PE modules d3d11, d3d10core,
 # dxgi and winemetal, stamped as Wine builtins, into out/dxmt-arm64ec, and the
-# macOS winemetal.so in build/dxmt-arm64ec, which 20-decoy-split.sh stages for
+# macOS winemetal.so in build/dxmt-arm64ec, which 20-test-layout.sh stages for
 # the host harness and 15-dxmt-ios.sh rebuilds for iOS.
 # Requires 02-fetch.sh, 03-llvm15.sh and 07-wine-macos.sh.
 source "$(dirname "$0")/common.sh"
@@ -48,7 +48,7 @@ if [ ! -f "$B/build.ninja" ]; then
 fi
 
 log "building dxmt"
-# The macOS winemetal.so (for the host harness, 20-decoy-split.sh) links against
+# The macOS winemetal.so (for the host harness, 20-test-layout.sh) links against
 # the macOS Wine unix libraries; if it fails to build, this script fails.
 ninja -C "$B" src/d3d11/d3d11.dll src/d3d10/d3d10core.dll src/dxgi/dxgi.dll src/winemetal/winemetal.dll \
   src/winemetal/unix/winemetal.so || die "DXMT build failed"
@@ -56,7 +56,7 @@ ninja -C "$B" src/d3d11/d3d11.dll src/d3d10/d3d10core.dll src/dxgi/dxgi.dll src/
 mkdir -p "$OUT/dxmt-arm64ec"
 found=0
 for f in src/d3d11/d3d11.dll src/d3d10/d3d10core.dll src/dxgi/dxgi.dll src/winemetal/winemetal.dll; do
-  python3 "$ROOT/scripts/stamp-builtin.py" "$B/$f" >/dev/null
+  python3 "$ROOT/scripts/lib/stamp-builtin.py" "$B/$f" >/dev/null
   cp "$B/$f" "$OUT/dxmt-arm64ec/"
   log "  $(basename "$f") machine=$("$MINGW_BIN/llvm-readobj" --file-headers "$B/$f" | awk '/Machine:/{print $NF}') stamped"
   found=$((found+1))

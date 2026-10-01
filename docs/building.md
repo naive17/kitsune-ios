@@ -104,7 +104,7 @@ build, and is not tracked. Signing is automatic. `-allowProvisioningUpdates`
 creates a new certificate when none is valid, and that revokes the previous
 one. If you build on more than one Mac, export the certificate as a .p12 and
 import it on the others instead of letting each Mac create its own. The first
-app build fetches the Mozilla CA bundle (`scripts/stage-ca-bundle.sh`).
+app build fetches the Mozilla CA bundle (`scripts/lib/stage-ca-bundle.sh`).
 
 A free (personal) Apple team can sign the app's entitlements
 (`src/ios/kitsune.entitlements`: get-task-allow and the increased memory
@@ -114,7 +114,7 @@ profile errors that look like certificate problems, and both need a paid
 Apple Developer Program membership.
 
 A phone that has never had a Wine tree needs one `--full` install, or
-`scripts/device.sh sync-tree`.
+`scripts/dev/device.sh sync-tree`.
 
 ## After a pull
 
@@ -149,9 +149,9 @@ rebuild incrementally.
 
 | You edited | Rebuild | Get it onto the phone |
 |---|---|---|
-| FEX | `scripts/setup.sh --from fex` | `scripts/device.sh sync-fex` |
+| FEX | `scripts/setup.sh --from fex` | `scripts/dev/device.sh sync-fex` |
 | Wine's unix side (`*/unix/*.c`) | `scripts/11-wine-ios.sh` | `scripts/app.sh install` |
-| Wine's PE modules | `scripts/setup.sh --from wine-macos` | `scripts/device.sh sync-tree`, or an `install --full` |
+| Wine's PE modules | `scripts/setup.sh --from wine-macos` | `scripts/dev/device.sh sync-tree`, or an `install --full` |
 | DXMT | `scripts/setup.sh --from dxmt` | `scripts/app.sh install` |
 | The app (`src/ios`) | `scripts/app.sh build` | `scripts/app.sh install` |
 
@@ -191,7 +191,7 @@ To try a FEX change before recording it, rebuild in place and push the result:
 
 ```sh
 cmake --build build/fex-arm64ec --target arm64ecfex -j4
-scripts/device.sh sync-fex build/fex-arm64ec/Bin/libarm64ecfex.dll
+scripts/dev/device.sh sync-fex build/fex-arm64ec/Bin/libarm64ecfex.dll
 ```
 
 This skips 06's checks (imports only ntdll, no x18 reads), so run 06 before
@@ -220,12 +220,12 @@ IPA. It builds in `build/xc-ipa`, which leaves the development build alone.
 ```sh
 scripts/test.sh                                  # host unit tests
 scripts/16-host-harness.sh                       # the macOS harness
-DECOY_DIR=/tmp/decoy scripts/20-decoy-split.sh   # device-shaped layout plus every test program
-DECOY_DIR=/tmp/decoy scripts/21-regress.sh       # the regression suite
+TEST_LAYOUT_DIR=/tmp/kitsune-test-layout scripts/20-test-layout.sh   # device-shaped layout plus every test program
+TEST_LAYOUT_DIR=/tmp/kitsune-test-layout scripts/21-regress.sh       # the regression suite
 ```
 
 The harness runs the iOS-shaped Wine inside one macOS process, as the app
-does, and is the gate for changes to the port. `20-decoy-split.sh` builds and
+does, and is the gate for changes to the port. `20-test-layout.sh` builds and
 stages every program the suite runs: the x86-64 guests, the native ARM64
 guests, the D3D11 tests and the process tests. `21-regress.sh` refuses to run
 when one of them is missing, so a pass means every check ran.

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Host regression suite: Win32, x86-64, D3D11, GUI, input and packaging checks
-# run under build/kitsune-host; exits non-zero if any fail. Requires DECOY_DIR
-# pointing at the layout from 20-decoy-split.sh, which builds the test programs,
+# run under build/kitsune-host; exits non-zero if any fail. Requires TEST_LAYOUT_DIR
+# pointing at the layout from 20-test-layout.sh, which builds the test programs,
 # and the prefix template from 17-prefix-template.sh.
 # REGRESS_{D3D,GUI,FPS}_SECONDS override run lengths.
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 
-DEST="${DECOY_DIR:?set DECOY_DIR}"
+DEST="${TEST_LAYOUT_DIR:?set TEST_LAYOUT_DIR}"
 PE="$DEST/tree/lib/wine/aarch64-windows"
 TESTS="$DEST/tests"
 HOST="$ROOT/build/kitsune-host"
@@ -17,13 +17,13 @@ EXPECT_SEH="OK checksum=94a514d4d6110800"
 fails=0
 
 for f in hello64 seh64 sehcross64 inputprobe fpsprobe d3d11_rb d3d11_swap d3d11_swap64 d3d11_texload xinput_reload64; do
-  [ -f "$PE/$f.exe" ] || die "no $f.exe in $PE; run 20-decoy-split.sh"
+  [ -f "$PE/$f.exe" ] || die "no $f.exe in $PE; run 20-test-layout.sh"
 done
 for f in process-parent-arm64 process-parent-x64 child-pool-x64; do
-  [ -f "$TESTS/$f.exe" ] || die "no $f.exe in $TESTS; run 20-decoy-split.sh"
+  [ -f "$TESTS/$f.exe" ] || die "no $f.exe in $TESTS; run 20-test-layout.sh"
 done
 [ -f "$DEST/bundle/lib/wine/aarch64-windows/kitsune-session.exe" ] \
-  || die "no session host in $DEST/bundle; run 20-decoy-split.sh"
+  || die "no session host in $DEST/bundle; run 20-test-layout.sh"
 [ -f "$TMPL/system.reg" ] || die "no prefix template; run 17-prefix-template.sh"
 
 run() {  # run <label> <env...> -- <argv...>

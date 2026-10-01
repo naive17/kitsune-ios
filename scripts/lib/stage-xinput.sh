@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copy the ARM64X XInput DLLs and sechost (hotplug notifications) into both
 # builtin dirs: native x64 DLLs load from x86_64-windows even under ARM64EC.
-# Usage: bash scripts/stage-xinput.sh APP/lib/wine [SOURCE/aarch64-windows]
+# Usage: bash scripts/lib/stage-xinput.sh APP/lib/wine [SOURCE/aarch64-windows]
 set -euo pipefail
 dest=${1:?expected destination lib/wine directory}
 src=${2:-$dest/aarch64-windows}

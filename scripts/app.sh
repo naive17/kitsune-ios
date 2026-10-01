@@ -95,7 +95,7 @@ install() {
 case "${1:-build}" in
   build) build "${2:-}";;
   install) install "${2:-}";;
-  sign-check) bash scripts/signing-identity.sh;;
+  sign-check) bash scripts/dev/signing-identity.sh;;
   ipa) ipa "${2:-}";;
   *) echo "usage: $0 build [--full] | install [--full] | sign-check | ipa [file.ipa]" >&2; exit 2;;
 esac

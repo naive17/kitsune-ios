@@ -2,12 +2,12 @@
 # Copy curl's Mozilla root store (MPL-2.0) and its notice into a directory,
 # fetching it into .deploy/trust first and checking it against a pinned SHA-256;
 # never fall back to an unverified bundle.
-# Usage: bash scripts/stage-ca-bundle.sh <existing destination directory>
+# Usage: bash scripts/lib/stage-ca-bundle.sh <existing destination directory>
 set -euo pipefail
 test "$#" = 1 && test -d "$1" || {
   echo 'usage: stage-ca-bundle.sh <existing destination directory>' >&2; exit 1;
 }
-trust_root="$(cd "$(dirname "$0")/.." && pwd)"
+trust_root="$(cd "$(dirname "$0")/../.." && pwd)"
 trust_cache="$trust_root/.deploy/trust"
 trust_bundle="$trust_cache/cacert.pem"
 trust_sha=f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9

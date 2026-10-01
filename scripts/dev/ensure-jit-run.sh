@@ -3,7 +3,7 @@
 # process's hb.log reaches __wine_main), retrying up to max-cycles times; a JIT
 # arena below minimum-arena-MB also fails the attempt.
 # Usage: ensure-jit-run.sh <request.json> [max-cycles] [minimum-arena-MB]
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../common.sh"
 set +e +o pipefail   # every device step below is checked and retried explicitly
 UDID=$(phone_udid) || exit 2
 APP=${APP:-$APP_ID}

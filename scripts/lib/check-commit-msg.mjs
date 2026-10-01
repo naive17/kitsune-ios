@@ -1,7 +1,7 @@
 // The commit-msg hook (.husky/commit-msg): the subject is "<type>: <message>",
 // with a type from TYPES and at most MAX_WORDS words of message. Subjects git
 // writes itself (merges, reverts, fixup!/squash!/amend!) pass unchanged.
-//   node scripts/check-commit-msg.mjs <message file>
+//   node scripts/lib/check-commit-msg.mjs <message file>
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 

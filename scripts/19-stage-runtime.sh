@@ -17,14 +17,14 @@ mkdir -p "$RT/lib/wine/aarch64-unix" "$RT/lib/wine/aarch64-windows" "$RT/share/w
 cp out/ios-unix/*.so out/ios-unix/libgnutls.30.dylib "$RT/lib/wine/aarch64-unix/"
 # The display driver's PE half pairs with wineios.so, so it ships beside it.
 cp "$PE/ntdll.dll" "$PE/apisetschema.dll" "$PE/wineios.drv" "$RT/lib/wine/aarch64-windows/"
-bash scripts/build-session-host.sh "$RT/lib/wine/aarch64-windows"
+bash scripts/lib/build-session-host.sh "$RT/lib/wine/aarch64-windows"
 cp out/dxmt-arm64ec/d3d11.dll out/dxmt-arm64ec/dxgi.dll out/dxmt-arm64ec/d3d10core.dll out/dxmt-arm64ec/winemetal.dll \
    "$RT/lib/wine/aarch64-windows/"
-bash scripts/stage-xinput.sh "$RT/lib/wine" "$PE" >/dev/null
+bash scripts/lib/stage-xinput.sh "$RT/lib/wine" "$PE" >/dev/null
 cp -R "$SHARE/nls" "$SHARE/fonts" "$RT/share/wine/"
 cp "$SHARE/wine.inf" "$RT/share/wine/"
 for dll in "$RT"/lib/wine/aarch64-windows/{d3d11,dxgi,d3d10core,winemetal}.dll; do
   n=$(grep -c "Wine builtin DLL" "$dll" || true)
-  [ "$n" -ge 1 ] || { echo "$dll is not stamped as a Wine builtin (scripts/stamp-builtin.py)" >&2; exit 1; }
+  [ "$n" -ge 1 ] || { echo "$dll is not stamped as a Wine builtin (scripts/lib/stamp-builtin.py)" >&2; exit 1; }
 done
 echo "runtime staged in $RT: $(ls "$RT/lib/wine/aarch64-unix" | wc -l | tr -d ' ') unix halves, $(ls "$RT/lib/wine/aarch64-windows" | wc -l | tr -d ' ') PE modules"
