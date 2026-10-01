@@ -89,9 +89,12 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
     @"KITSUNE_SWAP": @"1",
     @"KITSUNE_SWAP_MASK": @"3",
   }];
-  /* No KITSUNE_STEAM_LEAN: -silent already keeps Steam's UI hidden, and games
-   * ran worse with the web helper ended and its restarts refused than beside
-   * the hidden helper. A launch request can still set it. */
+  /* A game runs without Steam's web helper, its UI and biggest process: the
+   * port ends it when the game starts and lets it back when the game exits.
+   * Measured on Dark Souls: Remastered, 2026-10-01: with the helper alive the
+   * app reached 3.7 GB with 334 MB free and heavy compression; without it
+   * 2.9 GB with 1.1 GB free, and Steam retried the helper once per run. */
+  if (appID.length) env[@"KITSUNE_STEAM_LEAN"] = @"1";
   if (o.unity) {
     /* Large sampled RGBA8 textures stored as ETC2 (winemetal): Unity games ship
      * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit). */

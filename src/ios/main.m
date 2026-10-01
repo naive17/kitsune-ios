@@ -94,9 +94,17 @@ int main(int argc, char *argv[]) {
                                                   object:nil queue:nil usingBlock:^(NSNotification *n __unused) {
     KitsuneLog([NSString stringWithFormat:@"MEMORY-WARNING avail=%lluMB footprint=%lluMB",
                    (unsigned long long)(os_proc_available_memory() >> 20), KitsunePhysFootprintMB()]);
+    /* The report walks every VM region, one kernel call each: ~148,500 of them
+     * during Dark Souls: Remastered, where the warnings came in bursts and the
+     * walks lined up with its frame-rate dips (2026-10-01). It is a diagnostic,
+     * so only with logging on, at most once a minute, and off the main thread. */
     static void (*rss)(const char *);
+    static NSTimeInterval last;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (KitsuneDiagLevelFromEnv() == KitsuneDiagOff || (last && now - last < 60)) return;
+    last = now;
     if (!rss) rss = dlsym(RTLD_DEFAULT, "ios_rss_report");
-    if (rss) rss("MEMORY-WARNING");
+    if (rss) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ rss("MEMORY-WARNING"); });
   }];
   @autoreleasepool {
     /* Read by Metal when it initialises, so it has to be set first. */

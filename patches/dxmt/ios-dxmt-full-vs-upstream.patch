@@ -2360,23 +2360,34 @@ index 6356fae..e482cee 100644
 \ No newline at end of file
 +} // namespace dxmt
 diff --git a/src/dxmt/dxmt_dynamic.cpp b/src/dxmt/dxmt_dynamic.cpp
-index ce7941e..ea59bad 100644
+index ce7941e..0819926 100644
 --- a/src/dxmt/dxmt_dynamic.cpp
 +++ b/src/dxmt/dxmt_dynamic.cpp
-@@ -2,6 +2,12 @@
+@@ -2,6 +2,23 @@
  #include "dxmt_texture.hpp"
  
  namespace dxmt {
 +
 +/* Idle allocations kept for reuse per dynamic resource. A game that discards
 + * a buffer many times in one frame and then stops would otherwise keep every
-+ * allocation it ever made. */
++ * allocation it ever made. Only allocations idle for kStaleSeqs command
++ * buffers are dropped: one discarded more than 64 times per frame cycles that
++ * many through the queue, and dropping those as soon as there were 64 would
++ * create and destroy Metal buffers every frame. */
 +constexpr size_t kMaxIdleAllocations = 64;
++constexpr uint64_t kStaleSeqs = 120;
++
++template <typename Queue>
++static void
++drop_stale(Queue &fifo, uint64_t coherent_seq_id) {
++  while (fifo.size() > kMaxIdleAllocations && fifo.front().will_free_at + kStaleSeqs <= coherent_seq_id)
++    fifo.pop();
++}
 +
  DynamicBuffer::DynamicBuffer(Buffer *buffer, Flags<BufferAllocationFlag> flags) :
      buffer(buffer),
      flags_(flags),
-@@ -22,18 +28,12 @@ Rc<BufferAllocation>
+@@ -22,18 +39,11 @@ Rc<BufferAllocation>
  DynamicBuffer::allocate(uint64_t coherent_seq_id) {
    std::lock_guard<dxmt::mutex> lock(mutex_);
    Rc<BufferAllocation> ret;
@@ -2394,12 +2405,11 @@ index ce7941e..ea59bad 100644
      fifo.pop();
 -    break;
    }
-+  while (fifo.size() > kMaxIdleAllocations && fifo.front().will_free_at <= coherent_seq_id)
-+    fifo.pop();
++  drop_stale(fifo, coherent_seq_id);
    if (!ret.ptr())
      ret = buffer->allocate(flags_);
    return ret;
-@@ -90,18 +90,12 @@ Rc<TextureAllocation>
+@@ -90,18 +100,11 @@ Rc<TextureAllocation>
  DynamicLinearTexture::allocate(uint64_t coherent_seq_id) {
    std::lock_guard<dxmt::mutex> lock(mutex_);
    Rc<TextureAllocation> ret;
@@ -2417,8 +2427,7 @@ index ce7941e..ea59bad 100644
      fifo.pop();
 -    break;
    }
-+  while (fifo.size() > kMaxIdleAllocations && fifo.front().will_free_at <= coherent_seq_id)
-+    fifo.pop();
++  drop_stale(fifo, coherent_seq_id);
    if (!ret.ptr())
      ret = texture->allocate(flags_);
    return ret;

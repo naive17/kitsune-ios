@@ -1,0 +1,602 @@
+server, ntdll: Run requests directly in the in-process server.
+
+A client thread runs its own request handler under one lock shared with
+the server thread, which drops it while it sleeps in kevent, instead of
+writing the request to a pipe, waking the server thread and blocking on
+the reply. Waits that block still sleep on the wait pipe. Server calls
+from a signal handler keep the pipes. The server thread runs at the
+user-interactive QoS, and the request census has its own switch
+(KITSUNE_SERVER_CENSUS). KITSUNE_SERVER_PIPES=1 turns direct calls off.
+---
+diff --git a/dlls/ntdll/unix/server.c b/dlls/ntdll/unix/server.c
+index e96d953584ee4682d22bbed0faaf2910bd42c23b..f5f74def7d333c502162881ac051ce37e8cf90d0 100644
+--- a/dlls/ntdll/unix/server.c
++++ b/dlls/ntdll/unix/server.c
+@@ -27,6 +27,7 @@
+ #include <assert.h>
+ #include <ctype.h>
+ #include <errno.h>
++#include <dlfcn.h>
+ #include <fcntl.h>
+ #ifdef HAVE_LWP_H
+ #include <lwp.h>
+@@ -493,6 +494,76 @@ DECLSPEC_EXPORT unsigned int ios_server_req_in_flight = ~0u;
+ DECLSPEC_EXPORT unsigned int ios_server_call_count;
+ #endif
+ 
++#ifdef WINE_IOS_JIT_ARENA
++/* Direct server calls: the request runs on this thread under the in-process
++ * server's lock (server/request.c) instead of going through the request and
++ * reply pipes and the server thread. Set up per thread once the server knows
++ * it; KITSUNE_SERVER_PIPES=1 keeps the pipes. */
++static int get_unix_tid(void);
++static unsigned int (*p_wineserver_inproc_call)( void *thread, void *req, void *data,
++                                                 void **reply_data, int *dead );
++static void *(*p_wineserver_inproc_attach)( int unix_tid );
++static void (*p_wineserver_inproc_detach)( void *thread );
++static int ios_server_direct = -1;
++
++void ios_server_attach_thread( struct thread_data *data )
++{
++    if (ios_server_direct < 0)  /* first thread, nothing else runs yet */
++    {
++        p_wineserver_inproc_call = dlsym( RTLD_DEFAULT, "wineserver_inproc_call" );
++        p_wineserver_inproc_attach = dlsym( RTLD_DEFAULT, "wineserver_inproc_attach" );
++        p_wineserver_inproc_detach = dlsym( RTLD_DEFAULT, "wineserver_inproc_detach" );
++        ios_server_direct = !getenv( "KITSUNE_SERVER_PIPES" ) && p_wineserver_inproc_call &&
++                            p_wineserver_inproc_attach && p_wineserver_inproc_detach;
++        fprintf( stderr, "ios: server calls %s\n", ios_server_direct ? "direct" : "through pipes" );
++    }
++    if (ios_server_direct && !data->ios_server_thread)
++        data->ios_server_thread = p_wineserver_inproc_attach( get_unix_tid() );
++}
++
++void ios_server_detach_thread( struct thread_data *data )
++{
++    void *thread = data->ios_server_thread;
++
++    data->ios_server_thread = NULL;
++    if (thread) p_wineserver_inproc_detach( thread );
++}
++
++static unsigned int ios_server_call_direct( struct thread_data *data, struct __server_request_info *req )
++{
++    data_size_t size = req->u.req.request_header.request_size;
++    char stack_buf[1024], *buf = NULL;
++    void *reply_data;
++    unsigned int ret, i;
++    int dead;
++
++    /* Copy the request data, even a single piece, before taking the lock:
++     * it can be an application buffer, and a bad pointer must fault here,
++     * where the syscall fault handler returns an access violation, and not
++     * in server code holding the lock, which would never be released. */
++    if (size)
++    {
++        char *pos;
++        if (!(buf = size <= sizeof(stack_buf) ? stack_buf : malloc( size ))) return STATUS_NO_MEMORY;
++        for (i = 0, pos = buf; i < req->data_count; i++)
++        {
++            memcpy( pos, req->data[i].ptr, req->data[i].size );
++            pos += req->data[i].size;
++        }
++    }
++    ret = p_wineserver_inproc_call( data->ios_server_thread, &req->u, buf, &reply_data, &dead );
++    if (buf != stack_buf) free( buf );
++    if (dead) abort_thread( 0 );
++    if (reply_data)
++    {
++        memcpy( req->reply_data, reply_data, req->u.reply.reply_header.reply_size );
++        free( reply_data );
++    }
++    return ret;
++}
++#endif
++
++
+ /***********************************************************************
+  *           server_call_unlocked
+  */
+@@ -504,6 +575,17 @@ unsigned int server_call_unlocked( void *req_ptr )
+ 
+ #ifdef __APPLE__
+     ios_server_req_in_flight = (unsigned int)req->u.req.request_header.req;
++#endif
++#ifdef WINE_IOS_JIT_ARENA
++    /* A signal handler (SIGUSR1 suspends) keeps the pipes: server code mallocs,
++     * and the interrupted code may hold the malloc lock. */
++    if (data && data->ios_server_thread && !is_inside_signal_stack( data, __builtin_frame_address( 0 ) ))
++    {
++        ret = ios_server_call_direct( data, req );
++        ios_server_req_in_flight = ~0u;
++        ios_server_call_count++;
++        return ret;
++    }
+ #endif
+     if ((ret = send_request( data->request_fd, req )))
+     {
+@@ -2066,6 +2148,9 @@ size_t server_init_process(void)
+                 fatal_error( "Cannot assign process-owned Windows identity\n" );
+ #endif
+             data->tid         = reply->tid;
++#ifdef WINE_IOS_JIT_ARENA
++            ios_server_attach_thread( data );
++#endif
+             RtlGetCurrentPeb()->SessionId    = reply->session_id;
+             info_size         = reply->info_size;
+             server_start_time = reply->server_start;
+@@ -2165,6 +2250,7 @@ NTSTATUS ios_server_init_child( SIZE_T *startup_size )
+             obj_handle_t handle;
+             if (ios_proc_set_pid( data->ios_process, reply->pid )) status = STATUS_INVALID_PARAMETER;
+             data->tid = reply->tid;
++            ios_server_attach_thread( data );
+             data->teb->Peb->SessionId = reply->session_id;
+             *startup_size = reply->info_size;
+             if (reply->inproc_device)
+@@ -2271,6 +2357,9 @@ void server_init_thread( struct thread_data *data )
+     }
+     SERVER_END_REQ;
+     close( reply_pipe );
++#ifdef WINE_IOS_JIT_ARENA
++    ios_server_attach_thread( data );
++#endif
+ 
+     if (data->teb)
+     {
+diff --git a/dlls/ntdll/unix/thread.c b/dlls/ntdll/unix/thread.c
+index 68465a6abfa1b84496e90cb53c45f3efa1575822..f6330dc19cf1bb1c89d5f66f0694a353e856b937 100644
+--- a/dlls/ntdll/unix/thread.c
++++ b/dlls/ntdll/unix/thread.c
+@@ -1105,6 +1105,9 @@ static void contexts_from_server( CONTEXT *context, struct context_data server_c
+ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
+ {
+     struct thread_data *data = get_thread_data();
++#ifdef WINE_IOS_JIT_ARENA
++    ios_server_detach_thread( data );  /* before the pipes the server watches close */
++#endif
+     close( data->alert_fd );
+     close( data->wait_fd[0] );
+     close( data->wait_fd[1] );
+@@ -1594,6 +1597,7 @@ void exit_process( int status )
+             notify( status );
+             /* Finish transport ownership after the final Unix work on this
+              * thread. Siblings keep their own references until they exit. */
++            ios_server_detach_thread( get_thread_data() );
+             ios_process_release_thread( get_thread_data() );
+             pthread_exit( NULL );
+         }
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index ad6de2d595bd5675a2b9ba57c1a7b0bdcfa7b537..b5180d12c85493ab4bcf530c7e8359648fde9aa4 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -146,7 +146,7 @@ struct thread_data
+     char         debug_info[0x800]; /* debug_info structure */
+ #ifdef WINE_IOS_JIT_ARENA
+     struct ios_process_context *ios_process; /* retained; also for TEB-less workers */
+-    void        *ios_process_reserved;       /* preserve signal-stack alignment */
++    void        *ios_server_thread;          /* server's thread for direct calls (server.c) */
+ #endif
+     char         signal_stack[];    /* signal stack */
+     /* char kernel_stack[] */
+@@ -175,6 +175,8 @@ extern NTSTATUS ios_bind_child_context( struct thread_data *data, struct ios_pro
+                                         PEB *child_peb, int fd );
+ extern NTSTATUS ios_server_init_child( SIZE_T *startup_size );
+ extern NTSTATUS ios_server_start_child(void);
++extern void ios_server_attach_thread( struct thread_data *data );
++extern void ios_server_detach_thread( struct thread_data *data );
+ #endif
+ 
+ static inline struct thread_data *get_thread_data(void)
+diff --git a/server/fd.c b/server/fd.c
+index 68745a47ee3b8755d62dd7a59d295f4eb5de9866..ea429b266b89076704117d4d0afa5af5c3f4369f 100644
+--- a/server/fd.c
++++ b/server/fd.c
+@@ -579,9 +579,28 @@ static inline void main_loop_epoll(void)
+ 
+ static int kqueue_fd = -1;
+ 
++#ifdef WINE_IOS_JIT_ARENA
++/* Direct server calls (request.c) run while this thread sleeps in kevent. One
++ * that adds a timeout earlier than the one it sleeps until wakes it through
++ * this user event; one that removes a poll user can leave a stale event,
++ * which the dispatch below recognises by its fd. */
++#define IOS_WAKE_IDENT 0x4b5453  /* "KTS" */
++#define IOS_WAKE_UDATA ((void *)(long)-1)
++static int ios_server_sleeping;
++static timeout_t ios_sleep_deadline;   /* monotonic_time it sleeps until */
++#endif
++
+ static inline void init_epoll(void)
+ {
+     kqueue_fd = kqueue();
++#ifdef WINE_IOS_JIT_ARENA
++    if (kqueue_fd != -1)
++    {
++        struct kevent ev;
++        EV_SET( &ev, IOS_WAKE_IDENT, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, IOS_WAKE_UDATA );
++        if (kevent( kqueue_fd, &ev, 1, NULL, 0, NULL ) == -1) perror( "kevent EVFILT_USER" );
++    }
++#endif
+ }
+ 
+ static inline void set_fd_epoll_events( struct fd *fd, int user, int events )
+@@ -651,7 +670,25 @@ static inline void main_loop_epoll(void)
+         if (!active_users) break;  /* last user removed by a timeout */
+         if (kqueue_fd == -1) break;  /* an error occurred with kqueue */
+ 
++#ifdef WINE_IOS_JIT_ARENA
++        ios_sleep_deadline = timeout == -1 ? TIMEOUT_INFINITE
++                             : monotonic_time + (timeout_t)ts.tv_sec * TICKS_PER_SEC + ts.tv_nsec / 100;
++        ios_server_sleeping = 1;
++        ios_server_lock_release();
++#endif
+         ret = kevent( kqueue_fd, NULL, 0, events, ARRAY_SIZE( events ), timeout == -1 ? NULL : &ts );
++#ifdef WINE_IOS_JIT_ARENA
++        ios_server_lock_acquire();
++        ios_server_sleeping = 0;
++        /* drop the wake event and events for fds removed while unlocked */
++        for (i = 0; i < ret; i++)
++        {
++            long user = (long)events[i].udata;
++            if (events[i].udata == IOS_WAKE_UDATA || user < 0 || user >= nb_users ||
++                pollfd[user].fd != (int)events[i].ident)
++                events[i].udata = IOS_WAKE_UDATA;
++        }
++#endif
+ 
+         set_current_time();
+ 
+@@ -659,11 +696,17 @@ static inline void main_loop_epoll(void)
+         for (i = 0; i < ret; i++)
+         {
+             long user = (long)events[i].udata;
++#ifdef WINE_IOS_JIT_ARENA
++            if (events[i].udata == IOS_WAKE_UDATA) continue;
++#endif
+             pollfd[user].revents = 0;
+         }
+         for (i = 0; i < ret; i++)
+         {
+             long user = (long)events[i].udata;
++#ifdef WINE_IOS_JIT_ARENA
++            if (events[i].udata == IOS_WAKE_UDATA) continue;
++#endif
+             if (events[i].filter == EVFILT_READ) pollfd[user].revents |= POLLIN;
+             else if (events[i].filter == EVFILT_WRITE) pollfd[user].revents |= POLLOUT;
+             if (events[i].flags & EV_EOF) pollfd[user].revents |= POLLHUP;
+@@ -674,12 +717,42 @@ static inline void main_loop_epoll(void)
+         for (i = 0; i < ret; i++)
+         {
+             long user = (long)events[i].udata;
++#ifdef WINE_IOS_JIT_ARENA
++            if (events[i].udata == IOS_WAKE_UDATA) continue;
++#endif
+             if (pollfd[user].revents) fd_poll_event( poll_users[user], pollfd[user].revents );
+             pollfd[user].revents = 0;
+         }
+     }
+ }
+ 
++#ifdef WINE_IOS_JIT_ARENA
++/* Called with ios_server_lock held after a direct call: wake the server thread
++ * if the call added a timeout due before the one it is sleeping until. */
++void ios_server_wake_if_needed( void )
++{
++    timeout_t next = TIMEOUT_INFINITE;
++    struct list *ptr;
++    struct kevent ev;
++
++    if (!ios_server_sleeping || kqueue_fd == -1) return;
++    if ((ptr = list_head( &abs_timeout_list )))
++    {
++        struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
++        next = monotonic_time + (timeout->when - current_time);
++    }
++    if ((ptr = list_head( &rel_timeout_list )))
++    {
++        struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
++        if (-timeout->when < next) next = -timeout->when;
++    }
++    if (next >= ios_sleep_deadline) return;
++    EV_SET( &ev, IOS_WAKE_IDENT, EVFILT_USER, 0, NOTE_TRIGGER, 0, IOS_WAKE_UDATA );
++    kevent( kqueue_fd, &ev, 1, NULL, 0, NULL );
++    ios_sleep_deadline = next;  /* one trigger per earlier deadline */
++}
++#endif
++
+ #elif defined(USE_EVENT_PORTS)
+ 
+ static int port_fd = -1;
+@@ -933,7 +1006,13 @@ void main_loop(void)
+ 
+         if (!active_users) break;  /* last user removed by a timeout */
+ 
++#ifdef WINE_IOS_JIT_ARENA
++        ios_server_lock_release();  /* no timer wakeup here: kqueue failed */
++#endif
+         ret = poll( pollfd, nb_users, timeout );
++#ifdef WINE_IOS_JIT_ARENA
++        ios_server_lock_acquire();
++#endif
+         set_current_time();
+ 
+         if (ret > 0)
+diff --git a/server/ios_inproc.c b/server/ios_inproc.c
+index 92ca8f1277ce566f804cae2c861c0506637666b6..724484ba9b9120856614e993b1b7b44f53f0371f 100644
+--- a/server/ios_inproc.c
++++ b/server/ios_inproc.c
+@@ -3,6 +3,8 @@
+ 
+ #include <signal.h>
+ #include <stdio.h>
++#include <pthread.h>
++#include <pthread/qos.h>
+ 
+ #include "object.h"
+ #include "file.h"
+@@ -32,7 +34,11 @@ int wineserver_inproc_ready = 0;
+ __attribute__((visibility("default")))
+ void wineserver_inproc_flush( void )
+ {
+-    if (__atomic_load_n( &wineserver_inproc_ready, __ATOMIC_ACQUIRE )) flush_registry();
++    if (!__atomic_load_n( &wineserver_inproc_ready, __ATOMIC_ACQUIRE )) return;
++    /* called from the app's own threads: server code runs under the lock */
++    ios_server_lock_acquire();
++    flush_registry();
++    ios_server_lock_release();
+ }
+ 
+ /* Same supported settings as wineserver -f -p: this server belongs to the
+@@ -48,6 +54,13 @@ __attribute__((visibility("default")))
+ void *wineserver_inproc_main( void *arg )
+ {
+     (void)arg;
++    /* Every Win32 wait and signal in every process is a request to this
++     * thread; at the default QoS it ran on an efficiency core 46% of the time
++     * under Dark Souls: Remastered (2026-10-01), delaying all of them. */
++    pthread_set_qos_class_self_np( QOS_CLASS_USER_INTERACTIVE, 0 );
++    /* All server code runs under this lock; main_loop drops it only while it
++     * sleeps, which is when direct calls (request.c) run. */
++    ios_server_lock_acquire();
+     setvbuf( stderr, NULL, _IOLBF, 0 );
+     server_argv0 = "wineserver";
+ 
+@@ -68,6 +81,7 @@ void *wineserver_inproc_main( void *arg )
+     init_threading();
+     init_registry();
+     main_loop();
++    ios_server_lock_release();
+     return NULL;
+ }
+ 
+diff --git a/server/request.c b/server/request.c
+index ddf7b96cb32301d27d608e2be40fb1fc4a83cd67..687a57728518a8a928c64d8e27f7f76851319269 100644
+--- a/server/request.c
++++ b/server/request.c
+@@ -60,6 +60,9 @@
+ #include "security.h"
+ #include "handle.h"
+ #include "request_handlers.h"
++#ifdef WINE_IOS_JIT_ARENA
++#include <os/lock.h>
++#endif
+ 
+ /* Some versions of glibc don't define this */
+ #ifndef SCM_RIGHTS
+@@ -288,7 +291,7 @@ static void ios_census_tick( enum request req )
+     if (ios_census_on < 0)
+     {
+         const char *level = getenv( "KITSUNE_DIAG_LEVEL" );
+-        ios_census_on = level && atoi( level ) >= 2;
++        ios_census_on = (level && atoi( level ) >= 2) || getenv( "KITSUNE_SERVER_CENSUS" );
+         ios_census_since = monotonic_time;
+     }
+     if (!ios_census_on || req >= REQ_NB_REQUESTS) return;
+@@ -317,16 +320,15 @@ static void ios_census_tick( enum request req )
+ }
+ #endif
+ 
+-/* call a request handler */
+-static void call_req_handler( struct thread *thread )
++/* run the handler of thread's request; current is NULL afterwards if it killed the thread */
++static void run_req_handler( struct thread *thread, union generic_reply *reply )
+ {
+-    union generic_reply reply;
+     enum request req = thread->req.request_header.req;
+ 
+     current = thread;
+     current->reply_size = 0;
+     clear_error();
+-    memset( &reply, 0, sizeof(reply) );
++    memset( reply, 0, sizeof(*reply) );
+ 
+     if (debug_level) trace_request();
+ #ifdef WINE_IOS_JIT_ARENA
+@@ -334,9 +336,18 @@ static void call_req_handler( struct thread *thread )
+ #endif
+ 
+     if (req < REQ_NB_REQUESTS)
+-        req_handlers[req]( &current->req, &reply );
++        req_handlers[req]( &current->req, reply );
+     else
+         set_error( STATUS_NOT_IMPLEMENTED );
++}
++
++/* call a request handler */
++static void call_req_handler( struct thread *thread )
++{
++    union generic_reply reply;
++    enum request req = thread->req.request_header.req;
++
++    run_req_handler( thread, &reply );
+ 
+     if (current)
+     {
+@@ -405,6 +416,75 @@ error:
+         fatal_protocol_error( thread, "read: %s\n", strerror( errno ));
+ }
+ 
++#ifdef WINE_IOS_JIT_ARENA
++/* Kitsune: direct server calls. The server is a thread of the app, so a client
++ * thread can run its own request handler instead of writing it to a pipe,
++ * waking the server thread and blocking on the reply: in a 30 s profile of
++ * Dark Souls: Remastered (2026-10-01) the pipe traffic -- write, kevent, read
++ * on both sides -- was about two thirds of the 21% of CPU the server cost.
++ * Every piece of server code runs under ios_server_lock: the server thread
++ * holds it except while it sleeps in kevent (fd.c), and a direct call holds it
++ * for one request. Waits that block still sleep on the thread's wait pipe and
++ * are woken by the server as before. KITSUNE_SERVER_PIPES=1 turns it off. */
++static os_unfair_lock ios_server_lock = OS_UNFAIR_LOCK_INIT;
++
++void ios_server_lock_acquire( void ) { os_unfair_lock_lock( &ios_server_lock ); }
++void ios_server_lock_release( void ) { os_unfair_lock_unlock( &ios_server_lock ); }
++
++/* Run one request for thread. req holds the request on entry and the reply on
++ * return; data is the request's variable part, which the caller keeps owning.
++ * The reply data, if any, is returned malloced in *reply_data so the caller
++ * copies it into its own buffer after the lock is released: a bad pointer must
++ * never fault while ios_server_lock is held. *dead is set when the thread has
++ * been killed and must exit, which a pipe client learns from EPIPE. */
++__attribute__((visibility("default")))
++unsigned int wineserver_inproc_call( void *ptr, void *req, void *data, void **reply_data, int *dead )
++{
++    struct thread *thread = ptr;
++    union generic_reply reply;
++
++    *reply_data = NULL;
++    *dead = 0;
++    ios_server_lock_acquire();
++    if (thread->state == TERMINATED)
++    {
++        ios_server_lock_release();
++        *dead = 1;
++        return STATUS_THREAD_IS_TERMINATING;
++    }
++    set_current_time();
++    memcpy( &thread->req, req, sizeof(thread->req) );
++    thread->req_data = data;
++    thread->ios_direct_req = 1;
++
++    run_req_handler( thread, &reply );
++
++    thread->req_data = NULL;
++    thread->ios_direct_req = 0;
++    if (current)
++    {
++        reply.reply_header.error = current->error;
++        reply.reply_header.reply_size = current->reply_size;
++        if (debug_level) trace_reply( thread->req.request_header.req, &reply );
++        *reply_data = current->reply_size ? current->reply_data : NULL;
++        if (!*reply_data) free( current->reply_data );
++        current->reply_data = NULL;
++        current = NULL;
++    }
++    else
++    {
++        reply.reply_header.error = STATUS_THREAD_IS_TERMINATING;
++        reply.reply_header.reply_size = 0;
++        *dead = 1;
++    }
++    ios_server_wake_if_needed();
++    ios_server_lock_release();
++
++    memcpy( req, &reply, sizeof(reply) );
++    return reply.reply_header.error;
++}
++#endif
++
+ /* receive a file descriptor on the process socket */
+ int receive_fd( struct process *process )
+ {
+diff --git a/server/thread.c b/server/thread.c
+index 7308dec8ead4b19ecab2ee4e58ceba7d1a6d86a9..9798df74e0d1e84a5cfa288f546f079f8611ace8 100644
+--- a/server/thread.c
++++ b/server/thread.c
+@@ -350,6 +350,9 @@ static inline void init_thread_structure( struct thread *thread )
+     thread->alert_sync      = NULL;
+     thread->unix_pid        = -1;  /* not known yet */
+     thread->unix_tid        = -1;  /* not known yet */
++#ifdef WINE_IOS_JIT_ARENA
++    thread->ios_direct_req  = 0;
++#endif
+     thread->context         = NULL;
+     thread->teb             = 0;
+     thread->entry_point     = 0;
+@@ -570,7 +573,12 @@ static void cleanup_thread( struct thread *thread )
+     }
+     clear_apc_queue( &thread->system_apc );
+     clear_apc_queue( &thread->user_apc );
++#ifdef WINE_IOS_JIT_ARENA
++    /* a direct call's request data belongs to the calling client thread */
++    if (!thread->ios_direct_req)
++#endif
+     free( thread->req_data );
++    thread->req_data = NULL;
+     free( thread->reply_data );
+     if (thread->request_fd) release_object( thread->request_fd );
+     if (thread->reply_fd) release_object( thread->reply_fd );
+@@ -713,6 +721,38 @@ struct thread *get_thread_from_handle( obj_handle_t handle, unsigned int access
+                                             access, &thread_ops );
+ }
+ 
++#ifdef WINE_IOS_JIT_ARENA
++/* The server's record of the calling thread, referenced so it outlives the
++ * thread's death on the server side; NULL when there is none yet. */
++__attribute__((visibility("default")))
++void *wineserver_inproc_attach( int unix_tid )
++{
++    struct thread *thread, *found = NULL;
++
++    ios_server_lock_acquire();
++    LIST_FOR_EACH_ENTRY( thread, &thread_list, struct thread, entry )
++    {
++        /* a dead thread can keep a reused Mach port name */
++        if (thread->unix_tid == unix_tid && thread->state != TERMINATED)
++        {
++            found = (struct thread *)grab_object( thread );
++            break;
++        }
++    }
++    ios_server_lock_release();
++    return found;
++}
++
++__attribute__((visibility("default")))
++void wineserver_inproc_detach( void *ptr )
++{
++    ios_server_lock_acquire();
++    release_object( ptr );
++    ios_server_lock_release();
++}
++
++#endif
++
+ /* find a thread from a Unix tid */
+ struct thread *get_thread_from_tid( int tid )
+ {
+diff --git a/server/thread.h b/server/thread.h
+index 96c643c64f1ee7bb18bec7ed47fb6ae10e01a68c..4fd79450cda0cb0258973e3e381603405e828ada 100644
+--- a/server/thread.h
++++ b/server/thread.h
+@@ -79,6 +79,9 @@ struct thread
+     int                    exit_code;     /* thread exit code */
+     int                    unix_pid;      /* Unix pid of client */
+     int                    unix_tid;      /* Unix tid of client */
++#ifdef WINE_IOS_JIT_ARENA
++    int                    ios_direct_req; /* req_data is a direct call's, owned by the client */
++#endif
+     struct context        *context;       /* current context */
+     client_ptr_t           suspend_cookie;/* wait cookie of suspending select */
+     client_ptr_t           teb;           /* TEB address (in client address space) */
+@@ -111,6 +114,11 @@ extern struct thread *create_thread( int fd, struct process *process,
+ extern struct thread *get_thread_from_id( thread_id_t id );
+ extern struct thread *get_thread_from_handle( obj_handle_t handle, unsigned int access );
+ extern struct thread *get_thread_from_tid( int tid );
++#ifdef WINE_IOS_JIT_ARENA
++extern void ios_server_lock_acquire( void );
++extern void ios_server_lock_release( void );
++extern void ios_server_wake_if_needed( void );
++#endif
+ extern struct thread *get_thread_from_pid( int pid );
+ extern struct thread *get_wait_queue_thread( struct wait_queue_entry *entry );
+ extern enum select_opcode get_wait_queue_select_op( struct wait_queue_entry *entry );

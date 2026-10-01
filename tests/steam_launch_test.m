@@ -42,7 +42,7 @@ int main(void) {
     assert([env[@"WINE_IOS_CEF_LOWBAND"] isEqualToString:@"1"] && [env[@"KITSUNE_FORCE_SWRAST"] isEqualToString:@"1"]);
     assert([env[@"KITSUNE_GAME_INPUT"] isEqualToString:@"1"] && [env[@"WINEDLLOVERRIDES"] containsString:@"xinput1_4"]);
     assert([env[@"KITSUNE_LANDSCAPE"] isEqualToString:@"1"] && !env[@"KITSUNE_SCREEN_MAX"]);
-    assert(!env[@"KITSUNE_STEAM_LEAN"]);   /* the web helper stays, hidden by -silent */
+    assert([env[@"KITSUNE_STEAM_LEAN"] isEqualToString:@"1"]);   /* a game ends Steam's web helper */
     /* Not a Unity title: program code in the arena and no ETC2 re-encoding. */
     assert([env[@"KITSUNE_APP_EXEC_IN_ARENA"] isEqualToString:@"1"] && !env[@"KITSUNE_RGBA_ETC2"]);
     assert(!env[@"KITSUNE_THREAD_DUMP"] && !env[@"WINEIOS_METAL_DEBUG"] && !env[@"KITSUNE_XINPUT_TRACE"] && !env[@"KITSUNE_TRACE_BIGALLOC"]);

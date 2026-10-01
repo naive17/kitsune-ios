@@ -244,7 +244,7 @@ void wine_surface_host_set_landscape( int landscape )
      * pick the smallest scale an 800x600 game fits and took the 2x fallback
      * (1688x780 on an iPhone 14); the resize on rotation needs the display
      * driver, which is not loaded yet. Size the landscape desktop here, before
-     * Wine reads it: 1688x780 cost Dark Souls: Remastered its frame rate. */
+     * Wine reads it; 1688x780 is 56% more pixels per frame than 1350x624. */
     if (landscape && host_landscape_desktop( &w, &h, &sc ))
     {
         host_screen_width  = w;

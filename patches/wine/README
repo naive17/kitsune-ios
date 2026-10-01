@@ -42,6 +42,7 @@ Each file belongs to one patch. 0005, 0006 and 0008 only link together on iOS.
 0018  controllers from the app: XInput, device notifications
 0019  nsi and nsiproxy without routing sockets
 0020  trust roots from the app's CA bundle
+0021  requests run directly in the in-process server, not through pipes
 
 The unix side is built with -ffixed-x28 -DWINE_TEB_IN_X28 -DWINE_IOS_JIT_ARENA
 (scripts/11-wine-ios.sh).

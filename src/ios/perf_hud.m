@@ -42,7 +42,7 @@ static unsigned long long footprint_mb(void) {
   BOOL _timing;
   /* The log line every 10 s: frames since, and the worst 1 s rate seen. */
   double _logTime, _logMin;
-  uint64_t _logCount;
+  uint64_t _logCount, _logBusy;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -117,12 +117,15 @@ static unsigned long long footprint_mb(void) {
      * the log gets the average and the worst second every 10 s, with the
      * thermal state iOS throttles by. */
     if (_logTime == 0) {
-      _logTime = now; _logCount = n; _logMin = 1e9;
+      _logTime = now; _logCount = n; _logBusy = busy; _logMin = 1e9;
     } else if (now - _logTime >= 10.0) {
-      KitsuneLog([NSString stringWithFormat:@"FPS avg=%.0f worst1s=%.0f thermal=%ld power=%ld",
-                  (double)(n - _logCount) / (now - _logTime), _logMin < 1e9 ? _logMin : 0.0,
+      /* GPU busy share says whether the dips are the GPU's or the CPU's; -1
+       * when timing is off. */
+      double gpuPct = _timing ? MIN(100.0, (double)(busy - _logBusy) / ((now - _logTime) * 1e7)) : -1.0;
+      KitsuneLog([NSString stringWithFormat:@"FPS avg=%.0f worst1s=%.0f gpu=%.0f%% thermal=%ld power=%ld",
+                  (double)(n - _logCount) / (now - _logTime), _logMin < 1e9 ? _logMin : 0.0, gpuPct,
                   (long)NSProcessInfo.processInfo.thermalState, (long)WinePower.shared.effectiveMode]);
-      _logTime = now; _logCount = n; _logMin = 1e9;
+      _logTime = now; _logCount = n; _logBusy = busy; _logMin = 1e9;
     }
   }
   unsigned long long used = footprint_mb(), avail = os_proc_available_memory() >> 20;

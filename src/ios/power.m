@@ -18,6 +18,7 @@ __attribute__((visibility("default"))) volatile double kitsune_present_min_inter
 @implementation WinePower {
   unsigned _generation;
   BOOL _started;
+  NSInteger _thermal;   /* last thermal state logged, -1 before the first */
 }
 
 + (instancetype)shared {
@@ -61,6 +62,14 @@ __attribute__((visibility("default"))) volatile double kitsune_present_min_inter
   } else if (pi.lowPowerModeEnabled && KitsuneLowPowerAutoStored(ud)) {
     mode = WinePowerBattery;
     reason = NSLocalizedString(@"Low Power Mode is on", nil);
+  }
+  /* iOS lowers clocks from Serious on whatever the mode, so the log records
+   * every thermal change: a slow run is otherwise indistinguishable from a
+   * slow build. */
+  if (!_generation) _thermal = -1;
+  if (pi.thermalState != _thermal) {
+    _thermal = pi.thermalState;
+    KitsuneLog([NSString stringWithFormat:@"THERMAL %ld", (long)_thermal]);
   }
   BOOL changed = (mode != _effectiveMode) || !_generation;
   _effectiveMode = mode;

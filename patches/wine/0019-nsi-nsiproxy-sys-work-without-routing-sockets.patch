@@ -7,7 +7,7 @@ when there is no \\.\Nsi device; 11-wine-ios.sh installs nsiproxy.so
 as nsi.so for that.
 ---
 diff --git a/dlls/nsi/nsi.c b/dlls/nsi/nsi.c
-index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792bbc14b24 100644
+index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340f11e8edb 100644
 --- a/dlls/nsi/nsi.c
 +++ b/dlls/nsi/nsi.c
 @@ -17,6 +17,8 @@
@@ -19,7 +19,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792
  #include "winsock2.h"
  #include "winternl.h"
  #include "ws2ipdef.h"
-@@ -26,12 +28,32 @@
+@@ -26,11 +28,38 @@
  #include "netiodef.h"
  #include "wine/nsi.h"
  #include "wine/debug.h"
@@ -29,7 +29,14 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792
  
  static HANDLE nsi_device = INVALID_HANDLE_VALUE;
  static HANDLE nsi_device_async = INVALID_HANDLE_VALUE;
- 
++/* Kitsune: set once \\.\Nsi has been found missing. nsiproxy runs in
++ * process here (nsi_unix_fallback), so the device never appears, and
++ * retrying the open cost every NSI call a failing CreateFileW. */
++static LONG nsi_device_missing;
++/* Never signaled: what a change notification waits on when there is no
++ * device to report changes. */
++static HANDLE nsi_no_change_event;
++
 +enum { nsi_unix_enumerate_all_ex = 2, nsi_unix_get_all_parameters_ex = 3, nsi_unix_get_parameter_ex = 4 };
 +
 +static BOOL nsi_unix_fallback( void )
@@ -48,11 +55,50 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792
 +    if (status == STATUS_BUFFER_OVERFLOW) return ERROR_MORE_DATA;
 +    return RtlNtStatusToDosError( status );
 +}
-+
+ 
  BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
  {
-     switch (reason)
-@@ -168,7 +190,12 @@ DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *pa
+@@ -54,10 +83,21 @@ static inline HANDLE get_nsi_device( BOOL async )
+ 
+     if (*cached_device == INVALID_HANDLE_VALUE)
+     {
++        if (ReadAcquire( &nsi_device_missing ))
++        {
++            SetLastError( ERROR_FILE_NOT_FOUND );
++            return INVALID_HANDLE_VALUE;
++        }
+         device = CreateFileW( L"\\\\.\\Nsi", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                               async ? FILE_FLAG_OVERLAPPED : 0, NULL );
+-        if (device != INVALID_HANDLE_VALUE
+-            && InterlockedCompareExchangePointer( cached_device, device, INVALID_HANDLE_VALUE ) != INVALID_HANDLE_VALUE)
++        if (device == INVALID_HANDLE_VALUE)
++        {
++            DWORD err = GetLastError();
++            if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
++                WriteRelease( &nsi_device_missing, 1 );
++            SetLastError( err );
++        }
++        else if (InterlockedCompareExchangePointer( cached_device, device, INVALID_HANDLE_VALUE ) != INVALID_HANDLE_VALUE)
+             CloseHandle( device );
+     }
+     return *cached_device;
+@@ -123,6 +163,15 @@ DWORD WINAPI NsiCancelChangeNotification( OVERLAPPED *ovr )
+     TRACE( "%p.\n", ovr );
+ 
+     if (!ovr) return ERROR_NOT_FOUND;
++    if (ReadAcquire( &nsi_device_missing ))
++    {
++        /* A notification held by NsiRequestChangeNotificationEx below. */
++        if (ovr->Internal != STATUS_PENDING) return ERROR_NOT_FOUND;
++        ovr->Internal = STATUS_CANCELLED;
++        ovr->InternalHigh = 0;
++        if (ovr->hEvent) SetEvent( ovr->hEvent );
++        return ERROR_SUCCESS;
++    }
+     if (!CancelIoEx(  get_nsi_device( TRUE ), ovr ))
+         err = GetLastError();
+ 
+@@ -168,7 +217,12 @@ DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *pa
      struct nsiproxy_enumerate_all in;
      BYTE *out, *ptr;
  
@@ -66,7 +112,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792
  
      out_size = sizeof(DWORD) +
          (params->key_size + params->rw_size + params->dynamic_size + params->static_size) * params->count;
-@@ -251,7 +278,12 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
+@@ -251,7 +305,12 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
      DWORD err = ERROR_SUCCESS;
      BYTE *out, *ptr;
  
@@ -80,7 +126,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792
  
      in = malloc( in_size );
      out = malloc( out_size );
-@@ -318,7 +350,12 @@ DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
+@@ -318,7 +377,12 @@ DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
      ULONG in_size = FIELD_OFFSET( struct nsiproxy_get_parameter, key[params->key_size] ), received;
      DWORD err = ERROR_SUCCESS;
  
@@ -94,6 +140,34 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..9bbd0e684fb8ae4f0818c8cc0d893792
  
      in = malloc( in_size );
      if (!in) return ERROR_OUTOFMEMORY;
+@@ -365,6 +429,27 @@ DWORD WINAPI NsiRequestChangeNotificationEx( struct nsi_request_change_notificat
+ 
+     if (params->unk) FIXME( "unknown parameter %#lx.\n", params->unk );
+ 
++    if (device == INVALID_HANDLE_VALUE && ReadAcquire( &nsi_device_missing ))
++    {
++        /* No device, so no changes are ever reported: the request stays
++         * pending, as it does on Windows while the network does not change.
++         * Failing it instead made Steam re-enumerate the adapters and ask
++         * again in a tight loop (~224,000 times in a few minutes). */
++        if (!nsi_no_change_event)
++        {
++            HANDLE event = CreateEventW( NULL, TRUE, FALSE, NULL );
++            if (event && InterlockedCompareExchangePointer( &nsi_no_change_event, event, NULL )) CloseHandle( event );
++        }
++        if (!params->ovr)
++        {
++            WaitForSingleObject( nsi_no_change_event, INFINITE );
++            return ERROR_SUCCESS;
++        }
++        params->ovr->Internal = STATUS_PENDING;
++        params->ovr->InternalHigh = 0;
++        if (params->handle) *params->handle = nsi_no_change_event;
++        return ERROR_IO_PENDING;
++    }
+     if (device == INVALID_HANDLE_VALUE) return GetLastError();
+ 
+     in = malloc( in_size );
 diff --git a/dlls/nsiproxy.sys/ip.c b/dlls/nsiproxy.sys/ip.c
 index 6c4d5808be40d2f112b6205e419a309eb4f3dd74..b81b2640492e45b5ab4618ae6dd77c83b26d8612 100644
 --- a/dlls/nsiproxy.sys/ip.c

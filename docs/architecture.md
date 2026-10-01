@@ -86,11 +86,12 @@ created through its memory syscalls, its members of the shared mid-size
 bands and its CEF pools (`ios_reclaim_owner_arena_views` in `virtual.c`).
 What Wine's shared unix libraries allocate is never counted as a child's.
 
-A game started through Steam runs beside Steam's web helper, hidden by
-`-silent`. `KITSUNE_STEAM_LEAN=1`, which the app no longer sets, ends the helper
-when Steam starts the game, refuses its restarts while the game runs, and lets
-it back after it exits (`NtCreateUserProcess` in `process.c`). Games ran worse
-with it on.
+A game started through Steam runs without Steam's web helper, its UI and its
+largest process (`KITSUNE_STEAM_LEAN`, set for game launches): the helper is
+ended when Steam starts the game, refused while the game runs, and back after
+it exits (`NtCreateUserProcess` in `process.c`). With the helper alive, Dark
+Souls: Remastered left 334 MB free and the phone compressing memory; without
+it, 1.1 GB.
 
 The debugger-blessed JIT arena holds the code the CPU runs: Wine's ARM64 and
 ARM64EC modules and FEX's code buffers. For a Unity game, executable memory
