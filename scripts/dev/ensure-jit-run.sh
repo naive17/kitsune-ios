@@ -31,30 +31,42 @@ inner="stikjit://enable-jit?bundle-id=$APP&script-data=$script_data"
 encoded="$(printf '%s' "$inner" | base64 | tr -d '\n' | jq -Rr '@uri')"
 outer="livecontainer://open-url?url=$encoded"
 
+# Every wait polls for the state it needs, with a deadline: the old process
+# gone, the new one listed (StikDebug attaches before the app runs), then Wine
+# booted in it.
 for c in $(seq 1 "$CYCLES"); do
   echo "=== cycle $c/$CYCLES ==="
   P=$(pids) || exit 2
-  [ -n "$P" ] && { xcrun devicectl device process signal --signal SIGKILL --pid "$P" --device "$UDID" --timeout 30 >/dev/null 2>&1; echo "killed old pid $P"; sleep 3; }
+  if [ -n "$P" ]; then
+    xcrun devicectl device process signal --signal SIGKILL --pid "$P" --device "$UDID" --timeout 30 >/dev/null 2>&1
+    echo "killed old pid $P"
+    deadline=$((SECONDS + 15))
+    while [ -n "$P" ] && [ "$SECONDS" -lt "$deadline" ]; do
+      sleep 1
+      P=$(pids) || exit 2
+    done
+    [ -z "$P" ] || { echo "  old pid $P is still running"; continue; }
+  fi
   $U --source "$REQ" --destination Documents/launch-request.json --timeout 40 >/dev/null 2>&1 || { echo "request push failed"; continue; }
   ok=0
   for i in 1 2 3; do
     r=$(xcrun devicectl device process launch --device "$UDID" --terminate-existing --payload-url "$outer" "$LIVECONTAINER" --timeout 60 2>&1 | tail -1)
     echo "  launch try $i: $(echo "$r" | cut -c1-80)"
     echo "$r" | grep -q "Launched application" && { ok=1; break; }
-    sleep 8
+    sleep $((i * 3))   # back off before the next try
   done
   [ "$ok" = 1 ] || continue
-  # StikDebug may still be attaching; poll so a fresh app is not killed.
   NEWPID=
-  for i in 1 2 3; do
-    sleep 10
+  deadline=$((SECONDS + 45))
+  while [ -z "$NEWPID" ] && [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 2
     NEWPID=$(pids) || exit 2
-    echo "  app check $i pid: ${NEWPID:-none}"
-    [ -n "$NEWPID" ] && break
   done
+  echo "  app pid: ${NEWPID:-none}"
   [ -n "$NEWPID" ] || continue
-  for i in 1 2 3 4 5; do
-    sleep 15
+  deadline=$((SECONDS + 120))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    sleep 5
     rm -f "$SP/hbchk.log" "$SP/snapchk.log"
     $D --source Documents/hb.log --destination "$SP/hbchk.log" --timeout 40 >/dev/null 2>&1 || {
       echo "Log transport failed; leaving the app running instead of cycling blindly"
@@ -86,7 +98,7 @@ for c in $(seq 1 "$CYCLES"); do
       echo "$NEWPID" > "$SP/current-jit-pid"
       exit 0
     fi
-    echo "  boot check $i: Wine has not started yet"
+    echo "  boot check: Wine has not started yet"
     p2=$(pids) || exit 2
     [ -z "$p2" ] && { echo "  app died during verify"; break; }
   done
