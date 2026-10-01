@@ -103,7 +103,7 @@ cmake -S "$FEX_SRC" -B "$B" -G Ninja \
   -DMINGW_TRIPLE=arm64ec-w64-mingw32 \
   -DTUNE_CPU=apple-m1 \
   -DENABLE_LTO=False \
-  -DBUILD_TESTS=False \
+  -DBUILD_TESTING=False \
   -DCMAKE_SHARED_LINKER_FLAGS="$EXTRA_LDFLAGS" \
   -DCMAKE_CXX_FLAGS="$EXTRA_CXXFLAGS" \
   "${NO_HOST_PKGS[@]}" \
