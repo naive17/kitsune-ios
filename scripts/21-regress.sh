@@ -58,7 +58,7 @@ done
 # The forced pass routes every allocation through the iOS fallback that device
 # x86-64 depends on; the harness's own search always succeeds without it.
 for mode in normal forced; do
-  if [ "$mode" = forced ]; then export WINE_IOS_FORCE_KERNEL_MAP=1; else unset WINE_IOS_FORCE_KERNEL_MAP; fi
+  if [ "$mode" = forced ]; then export KITSUNE_FORCE_KERNEL_MAP=1; else unset KITSUNE_FORCE_KERNEL_MAP; fi
 
   out=$(run cmd env WINEDEBUG=-all "$HOST" "$PE/cmd.exe" /c ver)
   check "cmd.exe [$mode]" "Microsoft Windows" "$out"
@@ -76,7 +76,7 @@ for mode in normal forced; do
   out=$(run sehcross env WINEDEBUG=-all "$HOST" "$PE/sehcross64.exe")
   check "x86 handler across EC boundary [$mode]" "seh-cross: OK handler reached" "$out"
 done
-unset WINE_IOS_FORCE_KERNEL_MAP
+unset KITSUNE_FORCE_KERNEL_MAP
 
 # --- child processes, run as threads the way the app runs them ---------------
 # The child also loads an API set and a system directory path, which name no
@@ -91,7 +91,7 @@ done
 # Wine thread data, which used to kill the process.
 out=$(KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
       KITSUNE_PROCESS_CACHE_EXPERIMENT=1 KITSUNE_THREADED_PROCESS=1 \
-      WINE_IOS_BIGPOOL_MB=1 WINE_IOS_CEF_LOWBAND=1 \
+      KITSUNE_CEF_LOWBAND=1 \
       env WINEDEBUG=fixme-all "$HOST" "$TESTS/child-pool-x64.exe" </dev/null 2>&1 || true)
 check "the app outlives a child holding a soft pool" "CHILD-POOL PASS" "$out"
 # What a child allocated comes back when it exits: 256 MB (a mid-size band
@@ -184,7 +184,7 @@ done
 
 # --- the composited screen ---------------------------------------------------
 # KITSUNE_HOST_SURFACE=1 gives the driver its device-side host hooks and
-# composites the layers offscreen (see src/host/host_surface.m). WINEIOS_CAPTURE
+# composites the layers offscreen (see src/host/host_surface.m). KITSUNE_CAPTURE
 # cannot replace this: it sees only the GDI path, which DXMT's overlay bypasses.
 comp="$DEST/regress-composite.ppm"
 rm -f "$comp"
@@ -236,7 +236,7 @@ fi
 # --- GUI: window plus glyphs -------------------------------------------------
 cap="$DEST/regress-cap"
 rm -rf "$cap"; mkdir -p "$cap"
-WINEIOS_CAPTURE="$cap/np" WINE_DISPLAY_DRIVER=ios WINEDEBUG=-all \
+KITSUNE_CAPTURE="$cap/np" WINE_DISPLAY_DRIVER=ios WINEDEBUG=-all \
   KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
   "$HOST" "$PE/notepad.exe" </dev/null >"$cap/log" 2>&1 &
 gui_pid=$!
@@ -318,8 +318,8 @@ check "click reaches a child control" "OK child control took the click" "$ctl"
 check "GA_ROOT resolves for a child" "btn.GA_ROOT=65576" "$ctl"
 
 # A window's CAMetalLayer must go in pDestroyWindow, or a closed dialog stays
-# on screen. WINEIOS_METAL_DEBUG prints layer creation and destruction.
-dst=$(KITSUNE_PROBE_SECONDS=14 KITSUNE_PROBE_POPUP=1 KITSUNE_PROBE_DESTROY=1 WINEIOS_METAL_DEBUG=1 \
+# on screen. KITSUNE_METAL_DEBUG prints layer creation and destruction.
+dst=$(KITSUNE_PROBE_SECONDS=14 KITSUNE_PROBE_POPUP=1 KITSUNE_PROBE_DESTROY=1 KITSUNE_METAL_DEBUG=1 \
       WINE_DISPLAY_DRIVER=ios KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
       env WINEDEBUG=-all "$HOST" "$PE/inputprobe.exe" </dev/null 2>&1 || true)
 check "a destroyed window takes its layer with it" "destroy layer" "$dst"

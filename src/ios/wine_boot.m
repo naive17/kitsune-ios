@@ -154,7 +154,7 @@ static void configure_environment(NSString *root) {
 
   setenv("WINEBOOTSTRAPMODE", "1", 1);
   setenv("FEX_SILENTLOG", "0", 1);
-  setenv("WINE_IOS_WRITE_FORWARD", "1", 1);
+  setenv("KITSUNE_WRITE_FORWARD", "1", 1);
   /* wineios.drv is the display driver; the overrides below disable winemac.drv
    * and winex11.drv so Wine never tries them. */
   setenv("WINE_DISPLAY_DRIVER", "wineios.drv", 1);

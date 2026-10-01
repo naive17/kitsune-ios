@@ -825,7 +825,7 @@ index 0000000000000000000000000000000000000000..aecf876f2201b18a378458230296987e
 +}
 diff --git a/dlls/wineios.drv/metal.m b/dlls/wineios.drv/metal.m
 new file mode 100644
-index 0000000000000000000000000000000000000000..913fc02acd605b3526be119c1ef8dade1d039ed1
+index 0000000000000000000000000000000000000000..6abaa9a31a12c955a92dbaba3d6b888df965278c
 --- /dev/null
 +++ b/dlls/wineios.drv/metal.m
 @@ -0,0 +1,533 @@
@@ -958,7 +958,7 @@ index 0000000000000000000000000000000000000000..913fc02acd605b3526be119c1ef8dade
 +    if (done) return metal_device != nil;
 +    done = 1;
 +
-+    metal_debug = getenv( "WINEIOS_METAL_DEBUG" ) != NULL;
++    metal_debug = getenv( "KITSUNE_METAL_DEBUG" ) != NULL;
 +
 +    metal_device = MTLCreateSystemDefaultDevice();
 +    if (!metal_device)
@@ -1163,7 +1163,7 @@ index 0000000000000000000000000000000000000000..913fc02acd605b3526be119c1ef8dade
 +    if (!layer_registry_remove( ctx )) return;
 +
 +    /* Paired with the "layer ... for hwnd" line in wineios_layer_create: with
-+     * WINEIOS_METAL_DEBUG=1 the two together show a layer's whole life, which
++     * KITSUNE_METAL_DEBUG=1 the two together show a layer's whole life, which
 +     * is the only way to catch one outliving its window. */
 +    MLOG( "destroy layer %p for hwnd %p, host token %p\n", ctx, ctx->hwnd, ctx->host_token );
 +
@@ -1180,7 +1180,7 @@ index 0000000000000000000000000000000000000000..913fc02acd605b3526be119c1ef8dade
 +{
 +    static unsigned capture_seq;
 +
-+    const char *prefix = getenv( "WINEIOS_CAPTURE" );
++    const char *prefix = getenv( "KITSUNE_CAPTURE" );
 +    unsigned w = (unsigned)tex.width, h = (unsigned)tex.height;
 +    unsigned char *bgra, *rgb;
 +    char path[1024];
@@ -1324,7 +1324,7 @@ index 0000000000000000000000000000000000000000..913fc02acd605b3526be119c1ef8dade
 +            destinationOrigin:MTLOriginMake( 0, 0, 0 )];
 +        [blit endEncoding];
 +
-+        capture = getenv( "WINEIOS_CAPTURE" ) != NULL;
++        capture = getenv( "KITSUNE_CAPTURE" ) != NULL;
 +
 +        [cmd commit];
 +        if (!capture)

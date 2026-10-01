@@ -38,14 +38,14 @@ int main(void) {
     NSDictionary *env = request[@"env"];
     assert([env[@"DXMT_CONFIG"] isEqualToString:@"d3d11.mipClampBC = 4; d3d11.bcMaxDim = 512"]);
     assert([env[@"KITSUNE_BC_16BIT"] isEqualToString:@"1"] && !env[@"KITSUNE_BC_NATIVE"]);
-    assert([env[@"KITSUNE_ARENA_CODE_MB"] isEqualToString:@"384"] && [env[@"WINE_IOS_BIGPOOL_MB"] isEqualToString:@"1"]);
-    assert([env[@"WINE_IOS_CEF_LOWBAND"] isEqualToString:@"1"] && [env[@"KITSUNE_FORCE_SWRAST"] isEqualToString:@"1"]);
+    assert([env[@"KITSUNE_ARENA_CODE_MB"] isEqualToString:@"384"]);
+    assert([env[@"KITSUNE_CEF_LOWBAND"] isEqualToString:@"1"] && [env[@"KITSUNE_FORCE_SWRAST"] isEqualToString:@"1"]);
     assert([env[@"KITSUNE_GAME_INPUT"] isEqualToString:@"1"] && [env[@"WINEDLLOVERRIDES"] containsString:@"xinput1_4"]);
     assert([env[@"KITSUNE_LANDSCAPE"] isEqualToString:@"1"] && !env[@"KITSUNE_SCREEN_MAX"]);
     assert([env[@"KITSUNE_STEAM_LEAN"] isEqualToString:@"1"]);   /* a game ends Steam's web helper */
     /* The same for every title: program code outside the arena, large RGBA8 as ETC2. */
-    assert([env[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"] && !env[@"KITSUNE_APP_EXEC_IN_ARENA"]);
-    assert(!env[@"KITSUNE_THREAD_DUMP"] && !env[@"WINEIOS_METAL_DEBUG"] && !env[@"KITSUNE_XINPUT_TRACE"] && !env[@"KITSUNE_TRACE_BIGALLOC"]);
+    assert([env[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"]);
+    assert(!env[@"KITSUNE_THREAD_DUMP"] && !env[@"KITSUNE_METAL_DEBUG"] && !env[@"KITSUNE_XINPUT_TRACE"] && !env[@"KITSUNE_TRACE_BIGALLOC"]);
 
     /* The client alone always shows its window: no -silent. */
     assert([KitsuneSteamRequest(nil, KitsuneDefaultLaunchOptions(), docs, &error)[@"args"] isEqual:@[]]);
@@ -57,11 +57,11 @@ int main(void) {
     env = request[@"env"];
     assert([env[@"DXMT_CONFIG"] isEqualToString:@"d3d11.mipClampBC = 0; d3d11.preferredMaxFrameRate = 30"]);
     assert([env[@"KITSUNE_BC_NATIVE"] isEqualToString:@"1"] && !env[@"KITSUNE_BC_16BIT"]);
-    assert([env[@"KITSUNE_THREAD_DUMP"] isEqualToString:@"5"] && [env[@"WINEIOS_METAL_DEBUG"] isEqualToString:@"1"]);
+    assert([env[@"KITSUNE_THREAD_DUMP"] isEqualToString:@"5"] && [env[@"KITSUNE_METAL_DEBUG"] isEqualToString:@"1"]);
     /* Lean for the client alone too: a game started from Steam's window inherits it. */
     assert([env[@"KITSUNE_STEAM_LEAN"] isEqualToString:@"1"]);
     /* A game started from Steam's own window inherits the client's environment. */
-    assert([env[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"] && !env[@"KITSUNE_APP_EXEC_IN_ARENA"]);
+    assert([env[@"KITSUNE_RGBA_ETC2"] isEqualToString:@"1"]);
 
     o.textures = KitsuneTexturesDownscaled1024; o.frameCap = 0;
     assert([KitsuneDXMTConfig(o.textures, o.frameCap) isEqualToString:@"d3d11.mipClampBC = 4; d3d11.bcMaxDim = 1024"]);

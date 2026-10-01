@@ -51,7 +51,7 @@ static inline NSDictionary *KitsuneValidateLaunchRequest(id json, NSString *docs
   /* Optional per-launch environment, kept sane: names must look like env var
    * names (A-Z, 0-9, _), values are NUL-free and bounded. The host setenv's
    * each key before Wine starts, so any getenv() toggle in ntdll/wineios (e.g.
-   * KITSUNE_FORCE_SWRAST, WINE_IOS_STACKPOOL_MB) is reachable for this launch
+   * KITSUNE_FORCE_SWRAST, KITSUNE_STACKPOOL_MB) is reachable for this launch
    * only. */
   NSDictionary *env = nil;
   if (json[@"env"] && json[@"env"] != NSNull.null) {

@@ -101,8 +101,8 @@ static inline NSDictionary<NSString *, NSString *> *KitsuneDiagLaunchEnv(Kitsune
       @"KITSUNE_THREAD_DUMP": @"5",      /* all host threads + VM map to hb.log every 5 s */
       @"KITSUNE_TRACE_BIGALLOC": @"256", /* every >= 256 MB reservation, with a stack */
       @"KITSUNE_XINPUT_TRACE": @"1",     /* one line per controller state change */
-      @"WINEIOS_METAL_DEBUG": @"1",      /* layer lifecycle and frame markers to stderr */
-      @"WINE_IOS_VA_CENSUS": @"1",       /* address space left after startup */
+      @"KITSUNE_METAL_DEBUG": @"1",      /* layer lifecycle and frame markers to stderr */
+      @"KITSUNE_VA_CENSUS": @"1",       /* address space left after startup */
     };
   case KitsuneDiagBasic:
     return @{ @"KITSUNE_TRACE_BIGALLOC": @"1024" };

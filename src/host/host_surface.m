@@ -5,18 +5,18 @@
  *
  * Every automated check in this project stops one step short of the glass. The
  * back buffer is verified (d3d11_swap reads it before Present), the GDI
- * drawable is verified (WINEIOS_CAPTURE, which is what the notepad glyph check
+ * drawable is verified (KITSUNE_CAPTURE, which is what the notepad glyph check
  * reads) -- and the COMPOSITED result, the thing a person looking at the phone
  * sees, is verified by nobody. A bug lived in exactly that gap: on an A15,
  * d3d11_swap.exe presented 1182 frames at 120 fps with zero failures and a back
  * buffer that read back correct, while the screen stayed white for the whole
  * run. Every check passed. The screen was blank.
  *
- * WINEIOS_CAPTURE cannot close that gap, and it is worth being precise about
+ * KITSUNE_CAPTURE cannot close that gap, and it is worth being precise about
  * why: it lives inside wineios_layer_present(), which is only ever called from
  * wineios_surface_flush() -- the GDI path. DXMT renders into its overlay layer
  * and presents it itself, so no D3D frame ever passes through that function.
- * Run d3d11_swap.exe with WINEIOS_CAPTURE set and you get exactly one PPM: the
+ * Run d3d11_swap.exe with KITSUNE_CAPTURE set and you get exactly one PPM: the
  * window's GDI surface, 640x480, every pixel ffffff. It reports white for a run
  * whose D3D content is perfect, which is not a check, it is a coincidence that
  * happens to match the bug.

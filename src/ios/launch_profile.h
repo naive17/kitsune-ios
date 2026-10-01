@@ -78,11 +78,9 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
     @"KITSUNE_GAME_INPUT": @"1",
     @"WINEDLLOVERRIDES": @"xinput1_1,xinput1_2,xinput1_3,xinput1_4,xinput9_1_0,xinputuap=b",
     /* Steam's memory and address-space policy, measured one lever at a time. */
-    @"WINE_IOS_STACKPOOL_MB": @"512",
+    @"KITSUNE_STACKPOOL_MB": @"512",
     @"KITSUNE_FORCE_SWRAST": @"1",
-    /* Together these enable the band; BIGPOOL_MB counts by presence only. */
-    @"WINE_IOS_BIGPOOL_MB": @"1",
-    @"WINE_IOS_CEF_LOWBAND": @"1",
+    @"KITSUNE_CEF_LOWBAND": @"1",
     @"KITSUNE_FEX_CODE_MB": @"48",
     @"KITSUNE_ARENA_CODE_MB": @"384",
     @"KITSUNE_SWAP": @"1",
@@ -100,9 +98,8 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
    * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit).
    * Nothing here may depend on which game is launched: the environment is the
    * whole app's, and a game started from Steam's own window gets the client's.
-   * Keying program code's placement on the title (KITSUNE_APP_EXEC_IN_ARENA for
-   * non-Unity games) put Cuphead's Mono JIT in the arena that way, where it
-   * faulted in loops and crashed (2026-10-01). */
+   * Keying program code's placement on the title put Cuphead's Mono JIT in the
+   * arena that way, where it faulted in loops and crashed (2026-10-01). */
   env[@"KITSUNE_RGBA_ETC2"] = @"1";
   env[@"DXMT_CONFIG"] = KitsuneDXMTConfig(o.textures, o.frameCap);
   if (o.textures == KitsuneTexturesNative) env[@"KITSUNE_BC_NATIVE"] = @"1";

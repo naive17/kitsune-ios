@@ -20,7 +20,7 @@ int main(void) {
     assert(strstr(full.winedebug_other, "trace+seh"));
     NSDictionary *env = KitsuneDiagLaunchEnv(KitsuneDiagFull);
     assert([env[@"KITSUNE_THREAD_DUMP"] isEqualToString:@"5"]);
-    assert([env[@"WINEIOS_METAL_DEBUG"] isEqualToString:@"1"]);
+    assert([env[@"KITSUNE_METAL_DEBUG"] isEqualToString:@"1"]);
     assert([env[@"KITSUNE_XINPUT_TRACE"] isEqualToString:@"1"]);
 
     unsetenv("KITSUNE_DIAG_LEVEL");
