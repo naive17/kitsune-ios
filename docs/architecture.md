@@ -126,9 +126,10 @@ level pauses while they are encoded.
 
 ## The app
 
-`src/ios/boot_vc.m` owns a launch: it installs or checks the runtime tree,
-which needs no JIT, then waits for JIT, sets up the arena and the default
-bottle, and runs the chosen program. A bottle made from an older template is
+The boot screen owns a launch (`src/ios/boot_vc*.m`, one file per stage): it
+installs or checks the runtime tree, which needs no JIT, then waits for JIT,
+sets up the arena and the default bottle (`boot_vc_boot.m`), and runs the
+chosen program (`boot_vc_launch.m`). A bottle made from an older template is
 brought up to date before Wine starts (`KitsuneRepairBottle` in `bottles.h`). The launcher has three tabs: Library
 (Steam, imported programs, Wine's own tools), Bottles, and Settings.
 Diagnostics have three levels, and only Full pays for thread dumps, traces and

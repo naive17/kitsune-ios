@@ -20,6 +20,9 @@ targets:
     sources:
       - path: src/ios/main.m
       - path: src/ios/boot_vc.m
+      - path: src/ios/boot_vc_boot.m
+      - path: src/ios/boot_vc_launch.m
+      - path: src/ios/boot_vc_controls.m
       - path: src/ios/diagnostics.m
       - path: src/ios/wine_boot.m
       - path: src/ios/input_overlay.m
