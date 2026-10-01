@@ -81,7 +81,10 @@ if [ ! -f "$B/Makefile" ] || [ "${1:-}" = --reconfigure ] || [ "$STALE_PIPE2" = 
 fi
 
 # configure cannot tell iOS from macOS and links AudioUnit, which has no binary
-# on iOS; its symbols are in AudioToolbox.
+# on iOS; its symbols are in AudioToolbox. Bring the Makefile up to date first:
+# after a checkout touched configure.ac or a Makefile.in, make regenerated it
+# halfway through the build, put AudioUnit back and failed to link winecoreaudio.
+make -C "$B" Makefile >/dev/null || die "regenerating $B/Makefile failed"
 if grep -q -- '-framework AudioUnit ' "$B/Makefile"; then
   sed -i '' 's/-framework AudioUnit //g' "$B/Makefile"
 fi

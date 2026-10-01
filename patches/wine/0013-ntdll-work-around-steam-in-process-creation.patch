@@ -8,7 +8,7 @@ becomes threaded (0006), and ios_process_exit_state reports its exit.
 Fixes a leak in build_argv.
 ---
 diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
-index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c2f41421e 100644
+index 418f95b7735fbfc8b7bbc6f07536635166b41274..5241caebf4b3dcc9578ce60154b3785b97dd0a40 100644
 --- a/dlls/ntdll/unix/process.c
 +++ b/dlls/ntdll/unix/process.c
 @@ -75,20 +75,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(process);
@@ -96,7 +96,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
                  params->ConsoleHandle == CONSOLE_HANDLE_ALLOC ||
                  params->ConsoleHandle == CONSOLE_HANDLE_ALLOC_NO_WINDOW ||
                  params->ConsoleHandle == NULL)
-@@ -679,6 +699,104 @@ static NTSTATUS alloc_handle_list( const PS_ATTRIBUTE *handles_attr, obj_handle_
+@@ -679,6 +699,114 @@ static NTSTATUS alloc_handle_list( const PS_ATTRIBUTE *handles_attr, obj_handle_
  /**********************************************************************
   *           NtCreateUserProcess  (NTDLL.@)
   */
@@ -129,6 +129,14 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
 +enum ios_lean_kind { IOS_LEAN_NONE, IOS_LEAN_HELPER, IOS_LEAN_GAME };
 +static HANDLE ios_lean_helper;   /* Steam's running web helper */
 +static HANDLE ios_lean_game;     /* the game, while it runs */
++/* Set by the app when Steam is opened from its library while a game runs:
++ * the helper may start again until that game exits, so the window comes up. */
++static int ios_lean_ui_wanted;
++
++DECLSPEC_EXPORT void ios_lean_want_steam_ui( void )
++{
++    __atomic_store_n( &ios_lean_ui_wanted, 1, __ATOMIC_RELEASE );
++}
 +
 +static BOOL ios_lean_caller_is_steam(void)
 +{
@@ -176,6 +184,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
 +    if (NtWaitForSingleObject( ios_lean_game, FALSE, &zero ) == STATUS_TIMEOUT) return TRUE;
 +    NtClose( ios_lean_game );
 +    ios_lean_game = 0;
++    __atomic_store_n( &ios_lean_ui_wanted, 0, __ATOMIC_RELEASE );
 +    ERR( "ios-lean: the game has exited; Steam's web helper may start again\n" );
 +    return FALSE;
 +}
@@ -188,6 +197,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
 +    if (*slot) NtClose( *slot );
 +    *slot = 0;
 +    NtDuplicateObject( NtCurrentProcess(), process, NtCurrentProcess(), slot, 0, 0, DUPLICATE_SAME_ACCESS );
++    if (kind == IOS_LEAN_GAME) __atomic_store_n( &ios_lean_ui_wanted, 0, __ATOMIC_RELEASE );
 +    if (kind == IOS_LEAN_GAME && ios_lean_helper)
 +    {
 +        ERR( "ios-lean: the game started; ending Steam's web helper until it exits\n" );
@@ -201,7 +211,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
  NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_handle_ptr,
                                       ACCESS_MASK process_access, ACCESS_MASK thread_access,
                                       OBJECT_ATTRIBUTES *process_attr, OBJECT_ATTRIBUTES *thread_attr,
-@@ -689,6 +807,122 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+@@ -689,6 +817,123 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
      unsigned int status;
      BOOL success = FALSE;
      HANDLE file_handle, process_info = 0, process_handle = 0, thread_handle = 0;
@@ -249,7 +259,8 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
 +            return STATUS_NOT_SUPPORTED;
 +        }
 +        lean = ios_lean_classify( iname );
-+        if (lean == IOS_LEAN_HELPER && ios_lean_game_running())
++        if (lean == IOS_LEAN_HELPER && ios_lean_game_running() &&
++            !__atomic_load_n( &ios_lean_ui_wanted, __ATOMIC_ACQUIRE ))
 +        {
 +            static unsigned held;
 +            if (held++ < 8) ERR( "ios-lean: holding Steam's web helper while the game runs\n" );
@@ -324,7 +335,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
      struct object_attributes *objattr;
      data_size_t attr_len;
      char *winedebug = NULL;
-@@ -752,6 +986,32 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+@@ -752,6 +997,32 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
      }
      if (!process_attr) process_attr = &empty_attr;
  
@@ -357,7 +368,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
      TRACE( "%s image %s cmdline %s parent %p machine %x\n", debugstr_us( &path ),
             debugstr_us( &params->ImagePathName ), debugstr_us( &params->CommandLine ), parent, machine );
  
-@@ -774,7 +1034,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+@@ -774,7 +1045,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
      {
          machine = pe_info.machine;
          if (is_arm64ec() && pe_info.is_hybrid && machine == IMAGE_FILE_MACHINE_ARM64)
@@ -366,7 +377,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
      }
      if (!(startup_info = create_startup_info( attr.ObjectName, process_flags, params, &pe_info, &startup_info_size )))
          goto done;
-@@ -939,6 +1199,9 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
+@@ -939,6 +1210,9 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
              break;
          }
      }
@@ -376,7 +387,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
      *process_handle_ptr = process_handle;
      *thread_handle_ptr = thread_handle;
      process_handle = thread_handle = 0;
-@@ -977,8 +1240,15 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
+@@ -977,8 +1251,15 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
      SERVER_END_REQ;
      if (self)
      {
@@ -392,7 +403,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
          else abort_process( exit_code );
      }
      return ret;
-@@ -1343,8 +1613,8 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
+@@ -1343,8 +1624,8 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
          break;
  
      case ProcessDefaultHardErrorMode:
@@ -403,7 +414,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
          else ret = STATUS_INFO_LENGTH_MISMATCH;
          break;
  
-@@ -1425,7 +1695,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
+@@ -1425,7 +1706,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
          len = sizeof(ULONG_PTR);
          if (size != len) return STATUS_INFO_LENGTH_MISMATCH;
          if (handle == GetCurrentProcess())
@@ -412,7 +423,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
          else
          {
              ULONG_PTR val = 0;
-@@ -1509,7 +1779,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
+@@ -1509,7 +1790,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
          if (handle == NtCurrentProcess())
          {
              len = sizeof(ULONG);
@@ -421,7 +432,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
              else ret = STATUS_INFO_LENGTH_MISMATCH;
          }
          else ret = STATUS_INVALID_PARAMETER;
-@@ -1687,7 +1957,7 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class,
+@@ -1687,7 +1968,7 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class,
  
      case ProcessDefaultHardErrorMode:
          if (size != sizeof(UINT)) return STATUS_INVALID_PARAMETER;
@@ -430,7 +441,7 @@ index 418f95b7735fbfc8b7bbc6f07536635166b41274..473c9407e8ad953effaae6140da7321c
          break;
  
      case ProcessAffinityMask:
-@@ -1891,6 +2161,15 @@ NTSTATUS WINAPI NtOpenProcess( HANDLE *handle, ACCESS_MASK access,
+@@ -1891,6 +2172,15 @@ NTSTATUS WINAPI NtOpenProcess( HANDLE *handle, ACCESS_MASK access,
          if (!status) *handle = wine_server_ptr_handle( reply->handle );
      }
      SERVER_END_REQ;

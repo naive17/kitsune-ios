@@ -28,7 +28,6 @@ typedef NS_ENUM(NSInteger, KitsuneTextureMode) {
 };
 
 typedef struct {
-  BOOL steamVisible;          /* NO adds -silent to the client alone: Steam starts without its window */
   BOOL console;               /* -console: Steam's console tab and its stdout log */
   KitsuneDiagLevel diag;
   KitsuneTextureMode textures;
@@ -40,7 +39,6 @@ typedef struct {
 static inline KitsuneLaunchOptions KitsuneDefaultLaunchOptions(void) {
   KitsuneLaunchOptions o;
   memset(&o, 0, sizeof(o));
-  o.steamVisible = YES;
   o.textures = KitsuneTexturesDownscaled512;
   o.landscape = YES;
   return o;
@@ -68,8 +66,10 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
   NSMutableArray<NSString *> *args = [NSMutableArray array];
   if (o.console) [args addObject:@"-console"];   /* overrides -silent: Steam's UI shows */
   /* A game starts Steam without its window, which spares the memory and GPU
-   * time its UI takes; the setting is for opening Steam itself. */
-  if (appID.length || !o.steamVisible) [args addObject:@"-silent"];
+   * time its UI takes. Steam opened by itself always shows it: with -silent,
+   * and again when the library handed the running Steam another -silent, it
+   * stayed hidden however often it was opened. */
+  if (appID.length) [args addObject:@"-silent"];
   if (appID.length) {
     [args addObject:@"-applaunch"];
     [args addObject:appID];

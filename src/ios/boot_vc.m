@@ -881,7 +881,17 @@ static void PublishJITScript(void) {
     }
     [self fitSteamGameToScreen:appID];
     NSString *exe = request[@"exe"];
-    if ([self runInSession:[@[ @"wine", exe ] arrayByAddingObjectsFromArray:request[@"args"]]
+    NSArray<NSString *> *args = request[@"args"];
+    if (!appID.length) {
+      /* Steam runs here already, hidden if a game started it: ask it for its
+       * window, and let lean mode start the web helper (its UI) for that even
+       * while the game runs. */
+      static void (*want_ui)(void);
+      if (!want_ui) want_ui = (void (*)(void))dlsym(RTLD_DEFAULT, "ios_lean_want_steam_ui");
+      if (want_ui) want_ui();
+      args = [args arrayByAddingObject:@"steam://open/main"];
+    }
+    if ([self runInSession:[@[ @"wine", exe ] arrayByAddingObjectsFromArray:args]
                 workingDir:exe.stringByDeletingLastPathComponent bottle:request[@"bottle"] label:name ?: NSLocalizedString(@"Steam", nil) from:vc] &&
         appID.length && _input) {
       _padWanted = KitsuneTouchPadStored(NSUserDefaults.standardUserDefaults);
@@ -924,9 +934,8 @@ static void PublishJITScript(void) {
   _quickLaunchPending = YES;
   if (jitReady) [self setPhase:WineBootPhaseLaunching message:[NSString stringWithFormat:NSLocalizedString(@"Starting %@", nil), name ?: NSLocalizedString(@"Steam", nil)]];
   else [self setPhase:WineBootPhaseWaitingJIT message:NSLocalizedString(@"Enabling JIT…", nil)];
-  KitsuneLog([NSString stringWithFormat:@"PLAY app=%@ textures=%ld cap=%d steam=%@ diag=%ld",
-                 appID ?: @"client", (long)options.textures, options.frameCap,
-                 options.steamVisible ? @"visible" : @"hidden", (long)options.diag]);
+  KitsuneLog([NSString stringWithFormat:@"PLAY app=%@ textures=%ld cap=%d diag=%ld",
+                 appID ?: @"client", (long)options.textures, options.frameCap, (long)options.diag]);
   if (jitReady) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ [self finishRuntimeSetup]; });
   } else {

@@ -68,7 +68,11 @@ if [ -n "$edits" ]; then
   done
 fi
 
-if git -C "$W" log --format=%s "$base..HEAD" | grep -Eq '^(fixup|squash|amend)! '; then
+# Read the whole list: with pipefail, grep -q stopping at the first match --
+# the newest commit, so the first line -- left git log to die of SIGPIPE and
+# the test false, and the fixup was written out as a patch of its own.
+pending="$(git -C "$W" log --format=%s "$base..HEAD" | { grep -E '^(fixup|squash|amend)! ' || true; })"
+if [ -n "$pending" ]; then
   GIT_SEQUENCE_EDITOR=: GIT_EDITOR=: git -C "$W" -c commit.gpgsign=false rebase -q -i --autosquash "$base" \
     || die "the rebase that folds edits into the series stopped; finish it in third_party/wine (git status there), then rerun"
 fi

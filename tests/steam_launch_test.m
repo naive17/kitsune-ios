@@ -34,7 +34,7 @@ int main(void) {
     NSDictionary *request = KitsuneSteamRequest(@"570940", o, docs, &error);
     assert(request && !error);
     assert([request[@"bottle"] isEqualToString:@"Steam"]);
-    assert(o.steamVisible && ([request[@"args"] isEqual:@[@"-silent", @"-applaunch", @"570940"]]));
+    assert(([request[@"args"] isEqual:@[@"-silent", @"-applaunch", @"570940"]]));
     NSDictionary *env = request[@"env"];
     assert([env[@"DXMT_CONFIG"] isEqualToString:@"d3d11.mipClampBC = 4; d3d11.bcMaxDim = 512"]);
     assert([env[@"KITSUNE_BC_16BIT"] isEqualToString:@"1"] && !env[@"KITSUNE_BC_NATIVE"]);
@@ -47,11 +47,13 @@ int main(void) {
     assert([env[@"KITSUNE_APP_EXEC_IN_ARENA"] isEqualToString:@"1"] && !env[@"KITSUNE_RGBA_ETC2"]);
     assert(!env[@"KITSUNE_THREAD_DUMP"] && !env[@"WINEIOS_METAL_DEBUG"] && !env[@"KITSUNE_XINPUT_TRACE"] && !env[@"KITSUNE_TRACE_BIGALLOC"]);
 
-    /* The client alone, hidden, with the console and full diagnostics. */
-    o.steamVisible = NO; o.console = YES; o.diag = KitsuneDiagFull; o.frameCap = 30;
+    /* The client alone always shows its window: no -silent. */
+    assert([KitsuneSteamRequest(nil, KitsuneDefaultLaunchOptions(), docs, &error)[@"args"] isEqual:@[]]);
+    /* With the console and full diagnostics. */
+    o.console = YES; o.diag = KitsuneDiagFull; o.frameCap = 30;
     o.textures = KitsuneTexturesNative;
     request = KitsuneSteamRequest(nil, o, docs, &error);
-    assert(request && ([request[@"args"] isEqual:@[@"-console", @"-silent"]]));
+    assert(request && ([request[@"args"] isEqual:@[@"-console"]]));
     env = request[@"env"];
     assert([env[@"DXMT_CONFIG"] isEqualToString:@"d3d11.mipClampBC = 0; d3d11.preferredMaxFrameRate = 30"]);
     assert([env[@"KITSUNE_BC_NATIVE"] isEqualToString:@"1"] && !env[@"KITSUNE_BC_16BIT"]);
@@ -89,21 +91,20 @@ int main(void) {
     NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"kitsune-launch-test"];
     [ud removePersistentDomainForName:@"kitsune-launch-test"];
     KitsuneLaunchOptions s = KitsuneLaunchOptionsFromSettings(ud);
-    assert(s.steamVisible && !s.console && s.diag == KitsuneDiagOff && s.textures == KitsuneTexturesDownscaled512 && s.frameCap == 0 && s.landscape);
+    assert(!s.console && s.diag == KitsuneDiagOff && s.textures == KitsuneTexturesDownscaled512 && s.frameCap == 0 && s.landscape);
     [ud setInteger:60 forKey:KITSUNE_KEY_FRAME_CAP];
     [ud setInteger:KitsuneTexturesNative forKey:KITSUNE_KEY_TEXTURES];
-    [ud setBool:NO forKey:KITSUNE_KEY_STEAM_VISIBLE];
     KitsuneDiagStore(ud, KitsuneDiagFull);
     s = KitsuneLaunchOptionsFromSettings(ud);
     /* Full diagnostics no longer add -console: it overrides -silent and Steam's UI comes up over the game. */
-    assert(!s.steamVisible && !s.console && s.diag == KitsuneDiagFull && s.textures == KitsuneTexturesNative && s.frameCap == 60);
+    assert(!s.console && s.diag == KitsuneDiagFull && s.textures == KitsuneTexturesNative && s.frameCap == 60);
     [ud setInteger:45 forKey:KITSUNE_KEY_FRAME_CAP];
     assert(KitsuneFrameCapStored(ud) == 0);
     [ud setInteger:99 forKey:KITSUNE_KEY_TEXTURES];
     assert(KitsuneTextureModeStored(ud) == KitsuneTexturesDownscaled512);
     assert(KitsuneSafeAreaStored(ud));
-    /* Battery mode: on in Low Power Mode until switched off, never for heat until chosen. */
-    assert(KitsuneLowPowerAutoStored(ud) && !KitsuneHotAutoStored(ud));
+    /* Battery mode is never automatic until chosen, for Low Power Mode or heat. */
+    assert(!KitsuneLowPowerAutoStored(ud) && !KitsuneHotAutoStored(ud));
     [ud setBool:YES forKey:KITSUNE_KEY_HOT_AUTO];
     assert(KitsuneHotAutoStored(ud));
     /* Pointer mode: trackpad until one is chosen; a choice, touch included, is kept. */

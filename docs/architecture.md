@@ -91,7 +91,10 @@ largest process (`KITSUNE_STEAM_LEAN`, set for game launches): the helper is
 ended when Steam starts the game, refused while the game runs, and back after
 it exits (`NtCreateUserProcess` in `process.c`). With the helper alive, Dark
 Souls: Remastered left 334 MB free and the phone compressing memory; without
-it, 1.1 GB.
+it, 1.1 GB. Opening Steam from the library while a game runs
+lifts the hold until that game exits (`ios_lean_want_steam_ui`) and hands the
+running Steam `steam://open/main`; Steam opened from the library never gets
+`-silent`.
 
 The debugger-blessed JIT arena holds the code the CPU runs: Wine's ARM64 and
 ARM64EC modules and FEX's code buffers. For a Unity game, executable memory

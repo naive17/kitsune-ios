@@ -12,7 +12,7 @@
 #include "wine_boot.h"
 
 typedef NS_ENUM(NSInteger, SettingsSection) {
-  SecDisplay = 0, SecPerformance, SecControls, SecSteam, SecDiagnostics, SecStorage, SecAbout, SecCount
+  SecDisplay = 0, SecPerformance, SecControls, SecDiagnostics, SecStorage, SecAbout, SecCount
 };
 
 static const double kScales[] = { 0.0, 1.7, 2.0, 2.5, 3.0 };
@@ -125,7 +125,6 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
   case SecDisplay: return 4;
   case SecPerformance: return 6;
   case SecControls: return 2;
-  case SecSteam: return 1;
   case SecDiagnostics: return 2;
   case SecStorage: return 3;
   case SecAbout: return 4;
@@ -138,7 +137,6 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
   case SecDisplay: return NSLocalizedString(@"Display", nil);
   case SecPerformance: return NSLocalizedString(@"Performance", nil);
   case SecControls: return NSLocalizedString(@"Controls", nil);
-  case SecSteam: return NSLocalizedString(@"Steam", nil);
   case SecDiagnostics: return NSLocalizedString(@"Diagnostics", nil);
   case SecStorage: return NSLocalizedString(@"Storage", nil);
   case SecAbout: return NSLocalizedString(@"About", nil);
@@ -201,9 +199,6 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
                        self, @selector(onLookSens:));
     return SwitchRow(NSLocalizedString(@"On-Screen Controller", nil), NSLocalizedString(@"For Steam games without a controller", nil),
                      KitsuneTouchPadStored(ud), self, @selector(onTouchPad:));
-  case SecSteam:
-    return ChoiceRow(NSLocalizedString(@"Steam Window", nil), NSLocalizedString(@"When opening Steam; games always start it hidden", nil), @[ NSLocalizedString(@"Visible", nil), NSLocalizedString(@"Hidden", nil) ],
-                     KitsuneSteamVisibleStored(ud) ? 0 : 1, self, @selector(onSteamWindow:));
   case SecDiagnostics:
     if (ip.row == 0)
       return ChoiceRow(NSLocalizedString(@"Logging", nil), nil, @[ NSLocalizedString(@"Off", nil), NSLocalizedString(@"Basic", nil), NSLocalizedString(@"Full", nil) ], KitsuneDiagLevelStored(ud), self, @selector(onDiagnostics:));
@@ -295,7 +290,6 @@ static UITableViewCell *TextRow(NSString *title, NSString *detail, UIColor *colo
   [NSUserDefaults.standardUserDefaults setBool:sw.on forKey:KITSUNE_KEY_HOT_AUTO];
   [WinePower.shared update];
 }
-- (void)onSteamWindow:(UISegmentedControl *)seg { [NSUserDefaults.standardUserDefaults setBool:seg.selectedSegmentIndex == 0 forKey:KITSUNE_KEY_STEAM_VISIBLE]; }
 - (void)onDiagnostics:(UISegmentedControl *)seg { KitsuneDiagStore(NSUserDefaults.standardUserDefaults, (KitsuneDiagLevel)seg.selectedSegmentIndex); }
 
 @end

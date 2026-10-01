@@ -19,7 +19,6 @@
 #define KITSUNE_KEY_SAFE_AREA      @"KitsuneSafeArea"        /* keep the desktop off the notch */
 #define KITSUNE_KEY_FRAME_CAP      @"KitsuneFrameCap"        /* 0, 30, 40, 60 */
 #define KITSUNE_KEY_TEXTURES       @"KitsuneTextureMode"     /* KitsuneTextureMode */
-#define KITSUNE_KEY_STEAM_VISIBLE  @"KitsuneSteamVisible"
 #define KITSUNE_KEY_LOW_POWER_AUTO @"KitsuneLowPowerAuto"    /* Battery mode while Low Power Mode is on */
 #define KITSUNE_KEY_HOT_AUTO       @"KitsuneHotAuto"         /* Battery mode while the phone is hot */
 #define KITSUNE_KEY_FILL_SCREEN    @"KitsuneFillScreen"      /* set known games to the desktop resolution */
@@ -64,12 +63,8 @@ static inline BOOL KitsuneTouchPadStored(NSUserDefaults *ud) {
   return [ud objectForKey:KITSUNE_KEY_TOUCH_PAD] ? [ud boolForKey:KITSUNE_KEY_TOUCH_PAD] : YES;
 }
 
-static inline BOOL KitsuneSteamVisibleStored(NSUserDefaults *ud) {
-  return [ud objectForKey:KITSUNE_KEY_STEAM_VISIBLE] ? [ud boolForKey:KITSUNE_KEY_STEAM_VISIBLE] : YES;
-}
-
 static inline BOOL KitsuneLowPowerAutoStored(NSUserDefaults *ud) {
-  return [ud objectForKey:KITSUNE_KEY_LOW_POWER_AUTO] ? [ud boolForKey:KITSUNE_KEY_LOW_POWER_AUTO] : YES;
+  return [ud boolForKey:KITSUNE_KEY_LOW_POWER_AUTO];   /* off until chosen */
 }
 
 /* Off until chosen: Dark Souls: Remastered played in slow motion once a hot
@@ -109,7 +104,6 @@ static inline KitsuneLaunchOptions KitsuneLaunchOptionsFromSettings(NSUserDefaul
   /* Not tied to Full diagnostics: -console overrides -silent, so Steam's UI came
    * up over a game launched from the library. Steam writes console_log.txt anyway. */
   o.console = NO;
-  o.steamVisible = KitsuneSteamVisibleStored(ud);
   o.textures = KitsuneTextureModeStored(ud);
   o.frameCap = KitsuneFrameCapStored(ud);
   o.landscape = YES;   /* games need the long side wide; the client copes */
