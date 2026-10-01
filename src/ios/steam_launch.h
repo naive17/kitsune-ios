@@ -15,13 +15,6 @@ static inline NSDictionary *KitsuneSteamGame(NSString *appID, NSString *docs) {
   return nil;
 }
 
-/* The options with what the title itself decides filled in. */
-static inline KitsuneLaunchOptions KitsuneSteamOptionsForApp(NSString *appID, KitsuneLaunchOptions options,
-                                                           NSString *docs) {
-  options.unity = [KitsuneSteamGame(appID, docs)[@"unity"] boolValue];
-  return options;
-}
-
 /* Validate a Steam request against the installed tree. `appID` nil launches
  * the client alone; otherwise the title's directory must exist under
  * steamapps/common (from its manifest), so a half-installed game is refused
@@ -32,7 +25,6 @@ static inline NSDictionary *KitsuneSteamRequest(NSString *appID, KitsuneLaunchOp
     if (error) *error = NSLocalizedString(@"Steam is not installed in this app's library (Documents/Apps/Steam/steam.exe).", nil);
     return nil;
   }
-  options = KitsuneSteamOptionsForApp(appID, options, docs);
   if (appID.length) {
     NSDictionary *found = KitsuneSteamGame(appID, docs);
     if (!found) {
@@ -49,8 +41,7 @@ static inline NSDictionary *KitsuneSteamRequest(NSString *appID, KitsuneLaunchOp
 
 /* The JSON that goes into Documents/launch-request.json: the unvalidated
  * request (relative exe path), which the boot path validates again. */
-static inline NSData *KitsuneSteamRequestData(NSString *appID, KitsuneLaunchOptions options, NSString *docs) {
-  options = KitsuneSteamOptionsForApp(appID, options, docs);
+static inline NSData *KitsuneSteamRequestData(NSString *appID, KitsuneLaunchOptions options) {
   return [NSJSONSerialization dataWithJSONObject:KitsuneSteamLaunchRequest(appID, options)
                                          options:NSJSONWritingPrettyPrinted error:nil];
 }

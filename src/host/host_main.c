@@ -17,6 +17,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <libgen.h>
+#include <mach/mach.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -162,6 +163,54 @@ int wine_surface_host_take_launch( char *cmdline, size_t cmdline_size, char *cwd
     return 1;
 }
 
+/*
+ * KITSUNE_REPORT_PEAK: the app's peak footprint, the number iOS kills by,
+ * printed each time it grows by 32 MB. Wine may leave with _exit, so the last
+ * line printed is the peak.
+ */
+static void *peak_watch( void *arg __attribute__((unused)) )
+{
+    unsigned long long printed = 0;
+
+    for (;;)
+    {
+        task_vm_info_data_t info;
+        mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+
+        if (task_info( mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count ) == KERN_SUCCESS &&
+            count >= TASK_VM_INFO_REV4_COUNT && info.ledger_phys_footprint_peak >= printed + (32ull << 20))
+        {
+            printed = info.ledger_phys_footprint_peak;
+            fprintf( stderr, "harness: footprint peak %llu MB\n", printed >> 20 );
+        }
+        usleep( 20000 );
+    }
+    return NULL;
+}
+
+/* Same layout as KitsuneProcessInfo in src/ios/process_monitor.h. */
+struct process_info
+{
+    unsigned int pid, ppid, threads, flags;
+    unsigned long long cpu_us, age_ticks;
+    char name[64];
+};
+
+/* What the app's process monitor would list. */
+static void session_print_processes( void )
+{
+    int (*snapshot)( struct process_info *, int ) = dlsym( RTLD_DEFAULT, "wineserver_inproc_process_snapshot" );
+    struct process_info list[64];
+    int i, n;
+
+    if (!snapshot) { fprintf( stderr, "harness: no wineserver_inproc_process_snapshot\n" ); return; }
+    n = snapshot( list, 64 );
+    for (i = 0; i < n; i++)
+        fprintf( stderr, "harness: ps pid=%04x ppid=%04x threads=%u flags=%u cpu_us=%llu age_ms=%llu name=%s\n",
+                 list[i].pid, list[i].ppid, list[i].threads, list[i].flags, list[i].cpu_us,
+                 list[i].age_ticks / 10000, list[i].name );
+}
+
 static void *session_watch( void *arg __attribute__((unused)) )
 {
     int (*programs)( void ) = dlsym( RTLD_DEFAULT, "wineserver_inproc_user_processes" );
@@ -174,7 +223,11 @@ static void *session_watch( void *arg __attribute__((unused)) )
         int n = __atomic_load_n( &session_launch_taken, __ATOMIC_ACQUIRE ) ? programs() - 1 : 0;
 
         if (n > 0 && !seen) fprintf( stderr, "harness: session running %d program(s)\n", n );
-        if (n > 0) seen = 1;
+        if (n > 0)
+        {
+            /* A second in, the program has run long enough to have used CPU. */
+            if (++seen == 10) session_print_processes();
+        }
         else if (seen)
         {
             fprintf( stderr, "harness: session idle\n" );
@@ -255,6 +308,12 @@ int main(int argc, char **argv) {
   {
     pthread_t t;
     pthread_create( &t, NULL, session_watch, NULL );
+    pthread_detach( t );
+  }
+  if (getenv("KITSUNE_REPORT_PEAK"))
+  {
+    pthread_t t;
+    pthread_create( &t, NULL, peak_watch, NULL );
     pthread_detach( t );
   }
   if (!getenv("WINEDEBUG")) setenv("WINEDEBUG", "+loaddll,+process,+server", 1);

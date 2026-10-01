@@ -87,7 +87,8 @@ bands and its CEF pools (`ios_reclaim_owner_arena_views` in `virtual.c`).
 What Wine's shared unix libraries allocate is never counted as a child's.
 
 A game started through Steam runs without Steam's web helper, its UI and its
-largest process (`KITSUNE_STEAM_LEAN`, set for game launches): the helper is
+largest process (`KITSUNE_STEAM_LEAN`, set for every Steam launch, since a game
+started from Steam's own window inherits Steam's environment): the helper is
 ended when Steam starts the game, refused while the game runs, and back after
 it exits (`NtCreateUserProcess` in `process.c`). With the helper alive, Dark
 Souls: Remastered left 334 MB free and the phone compressing memory; without
@@ -97,21 +98,20 @@ running Steam `steam://open/main`; Steam opened from the library never gets
 `-silent`.
 
 The debugger-blessed JIT arena holds the code the CPU runs: Wine's ARM64 and
-ARM64EC modules and FEX's code buffers. For a Unity game, executable memory
-the program allocates holds x86-64 code, which FEX only reads, so it is
-ordinary memory (`ios_app_vm_call` in `virtual.c`). There its Windows protection applies, and
+ARM64EC modules and FEX's code buffers. Executable memory a program allocates
+holds x86-64 code, which FEX only reads, so it is ordinary memory
+(`ios_app_vm_call` in `virtual.c`). There its Windows protection applies, and
 that is what makes self-modifying code work: FEX write-protects code it has
 translated, one 16 KB host page at a time, and a JIT that patches its own code
 (Mono) faults and gets it retranslated. FEX's Mono hack, which stops that
 detection once it has hooked Mono's backpatcher, is off (`FEX_MONOHACKS=0`,
-`wine_boot.m`). Every other launch keeps that memory in the arena, as before
-the Unity work (`KITSUNE_APP_EXEC_IN_ARENA`, set by `launch_profile.h` when the
-game directory has no `UnityPlayer.dll` or `MonoBleedingEdge`): Dark Souls:
-Remastered has run in slow motion since it moved out.
+`wine_boot.m`). This holds for every game: the launch environment is the whole
+app's, so it cannot depend on the title (a game started from Steam's own window
+gets the client's).
 
-Unity games started through Steam store large RGBA8 textures they only sample
-as ETC2, a quarter of the size (`KITSUNE_RGBA_ETC2`, in winemetal): they ship
-uncompressed atlases that would not fit the app's 4 GB. The first load of a
+Games started through Steam store large RGBA8 textures they only sample as
+ETC2, a quarter of the size (`KITSUNE_RGBA_ETC2`, in winemetal): Unity games
+ship uncompressed atlases that would not fit the app's 4 GB. The first load of a
 level pauses while they are encoded.
 
 ## Storage on the phone
@@ -132,7 +132,11 @@ bottle, and runs the chosen program. A bottle made from an older template is
 brought up to date before Wine starts (`KitsuneRepairBottle` in `bottles.h`). The launcher has three tabs: Library
 (Steam, imported programs, Wine's own tools), Bottles, and Settings.
 Diagnostics have three levels, and only Full pays for thread dumps, traces and
-log snapshots (`src/ios/diagnostics.h`).
+log snapshots (`src/ios/diagnostics.h`). The in-session process monitor lists
+Wine's processes from the in-process server, with each one's CPU use, threads
+and windows, against the app's memory, CPU and thermal state
+(`src/ios/task_manager.m`); memory is not split by process, since all of them
+share the app's.
 
 ## Source and build
 

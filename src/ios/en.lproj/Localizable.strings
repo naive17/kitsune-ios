@@ -420,17 +420,45 @@
 "View" = "View";
 "Menu" = "Menu";
 
-/* Running programs */
+/* Process monitor */
+"Processes" = "Processes";
 "Quit all" = "Quit all";
-"No windows yet." = "No windows yet.";
-"Swipe left to close or force quit." = "Swipe left to close or force quit.";
-/* process id, then the window's handle */
-"pid %@ · window %#lx" = "pid %@ · window %#lx";
+"Wine" = "Wine";
+"CPU is per core: 100% is one core busy. Every program shares the app's memory, so it is counted once, here." = "CPU is per core: 100% is one core busy. Every program shares the app's memory, so it is counted once, here.";
+"Swipe a program to end it, or a window to close it." = "Swipe a program to end it, or a window to close it.";
+"Nothing is running." = "Nothing is running.";
+"Wine's own processes. Ending one can stop every program." = "Wine's own processes. Ending one can stop every program.";
+"Memory" = "Memory";
+/* memory the app uses, then what iOS still allows it */
+"%@ used · %@ free" = "%@ used · %@ free";
+"Graphics memory" = "Graphics memory";
+"CPU" = "CPU";
+/* the app's CPU use, then the most it can use (100% per core) */
+"%@ of %ld%%" = "%@ of %ld%%";
+/* CPU of the app's own threads, not of any Windows process */
+"Graphics, audio and server" = "Graphics, audio and server";
+"Temperature" = "Temperature";
+"Normal" = "Normal";
+"Warm" = "Warm";
+"Hot · iOS is slowing the phone" = "Hot · iOS is slowing the phone";
+"Very hot · iOS is slowing the phone" = "Very hot · iOS is slowing the phone";
+/* %@ is why Battery mode is on */
+"Battery · 30 fps cap (%@)" = "Battery · 30 fps cap (%@)";
+/* the window's handle */
+"window %#lx" = "window %#lx";
+/* process id, thread count, time since it started */
+"pid %@ · %@ threads · up %@" = "pid %@ · %@ threads · up %@";
+" · ending" = " · ending";
 "Close" = "Close";
 "Force Quit" = "Force Quit";
 /* %@ is the window's title */
 "Force Quit %@?" = "Force Quit %@?";
 "Unsaved progress is lost." = "Unsaved progress is lost.";
+"End" = "End";
+/* %@ is the process's exe name */
+"End %@?" = "End %@?";
+"Wine needs this process. Ending it can stop every program, and unsaved progress is lost." = "Wine needs this process. Ending it can stop every program, and unsaved progress is lost.";
+"Unsaved progress is lost. Processes it started keep running." = "Unsaved progress is lost. Processes it started keep running.";
 
 /* Performance overlay */
 /* frame rate, the GPU part below, memory used, memory free */

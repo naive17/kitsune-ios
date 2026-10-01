@@ -1,9 +1,10 @@
 /*
- * Running-program manager.
+ * The process monitor.
  *
- * The driver enumerates top-level windows on a Wine thread and reports them
- * here; close posts WM_CLOSE, kill terminates the owning process. Requests
- * are forwarded to entry points the driver registers at init.
+ * Processes come from the in-process wineserver (process_monitor.h). The
+ * driver enumerates top-level windows on a Wine thread and reports them here;
+ * close posts WM_CLOSE, kill terminates a process. Requests are forwarded to
+ * entry points the driver registers at init.
  */
 #ifndef KITSUNE_TASK_MANAGER_H
 #define KITSUNE_TASK_MANAGER_H

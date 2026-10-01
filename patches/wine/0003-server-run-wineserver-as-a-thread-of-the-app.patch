@@ -251,10 +251,10 @@ index 46419a09cb44cc3dcd7fa620f1e99a8b9a853da4..7bcde98e3b98a34c84cb518636b8e406
  }
 +#endif /* WINE_IOS_INPROC_SERVER */
 diff --git a/server/process.c b/server/process.c
-index 94adb19c1c0d681d53fc4fce1bdd4a922433ec8c..a900795581b723199bcedd3e5edc782f70cadd96 100644
+index 94adb19c1c0d681d53fc4fce1bdd4a922433ec8c..df3e5f8758b753a8760dee118117586d32a58ae3 100644
 --- a/server/process.c
 +++ b/server/process.c
-@@ -68,6 +68,15 @@
+@@ -68,6 +68,95 @@
  
  static struct list process_list = LIST_INIT(process_list);
  static int running_processes, user_processes;
@@ -267,10 +267,90 @@ index 94adb19c1c0d681d53fc4fce1bdd4a922433ec8c..a900795581b723199bcedd3e5edc782f
 +    return __atomic_load_n( &user_processes, __ATOMIC_RELAXED );
 +}
 +#endif
++
++#ifdef WINE_IOS_JIT_ARENA
++#include <mach/mach.h>
++
++/* For the app's process monitor; same layout as KitsuneProcessInfo in
++ * src/ios/process_monitor.h. */
++struct kitsune_process_info
++{
++    unsigned int       pid, ppid, threads;
++    unsigned int       flags;       /* 1: system process, 2: terminating */
++    unsigned long long cpu_us;      /* user + system time of its live threads */
++    unsigned long long age_ticks;   /* since it started, in 100 ns */
++    char               name[64];    /* exe file name, UTF-8 */
++};
++
++/* The file name of the process's exe, UTF-8, from its NT image path. */
++static void ios_image_file_name( const struct process *process, char *out, size_t size )
++{
++    const WCHAR *img = process->image;
++    data_size_t i, len = process->imagelen / sizeof(WCHAR), start = 0;
++    size_t pos = 0;
++
++    out[0] = 0;
++    if (!img) return;
++    for (i = 0; i < len; i++) if (img[i] == '\\' || img[i] == '/') start = i + 1;
++    for (i = start; i < len && pos + 4 < size; i++)
++    {
++        unsigned int c = img[i];
++
++        if (c >= 0xd800 && c < 0xdc00 && i + 1 < len && img[i + 1] >= 0xdc00 && img[i + 1] < 0xe000)
++            c = 0x10000 + ((c - 0xd800) << 10) + (img[++i] - 0xdc00);
++        if (c < 0x80) out[pos++] = c;
++        else if (c < 0x800) { out[pos++] = 0xc0 | (c >> 6); out[pos++] = 0x80 | (c & 0x3f); }
++        else if (c < 0x10000) { out[pos++] = 0xe0 | (c >> 12); out[pos++] = 0x80 | ((c >> 6) & 0x3f); out[pos++] = 0x80 | (c & 0x3f); }
++        else { out[pos++] = 0xf0 | (c >> 18); out[pos++] = 0x80 | ((c >> 12) & 0x3f); out[pos++] = 0x80 | ((c >> 6) & 0x3f); out[pos++] = 0x80 | (c & 0x3f); }
++    }
++    out[pos] = 0;
++}
++
++/* Every process with a live thread. Each Wine thread is a thread of this app,
++ * and unix_tid is its Mach port name here, so its CPU time is read directly. */
++__attribute__((visibility("default")))
++int wineserver_inproc_process_snapshot( struct kitsune_process_info *out, int max )
++{
++    struct process *process;
++    int n = 0;
++
++    ios_server_lock_acquire();
++    set_current_time();
++    LIST_FOR_EACH_ENTRY( process, &process_list, struct process, entry )
++    {
++        struct kitsune_process_info *info;
++        struct thread *thread;
++
++        if (n >= max) break;
++        if (!process->running_threads) continue;
++        info = &out[n++];
++        memset( info, 0, sizeof(*info) );
++        info->pid = process->id;
++        info->ppid = process->parent_id;
++        info->threads = process->running_threads;
++        info->flags = (process->is_system ? 1 : 0) | (process->is_terminating ? 2 : 0);
++        info->age_ticks = current_time > process->start_time ? current_time - process->start_time : 0;
++        LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
++        {
++            thread_basic_info_data_t tbi;
++            mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
++
++            if (thread->state == TERMINATED || thread->unix_tid == -1) continue;
++            if (thread_info( (thread_act_t)thread->unix_tid, THREAD_BASIC_INFO,
++                             (thread_info_t)&tbi, &count ) != KERN_SUCCESS) continue;
++            info->cpu_us += (unsigned long long)tbi.user_time.seconds * 1000000 + tbi.user_time.microseconds +
++                            (unsigned long long)tbi.system_time.seconds * 1000000 + tbi.system_time.microseconds;
++        }
++        ios_image_file_name( process, info->name, sizeof(info->name) );
++    }
++    ios_server_lock_release();
++    return n;
++}
++#endif
  static struct event *shutdown_event;           /* signaled when shutdown starts */
  static struct timeout_user *shutdown_timeout;  /* timeout for server shutdown */
  static int shutdown_stage;  /* current stage in the shutdown process */
-@@ -564,6 +573,15 @@ static void process_sigkill( void *private )
+@@ -564,6 +653,15 @@ static void process_sigkill( void *private )
      struct process *process = private;
      int signal = 0;
  
@@ -286,7 +366,7 @@ index 94adb19c1c0d681d53fc4fce1bdd4a922433ec8c..a900795581b723199bcedd3e5edc782f
      process->sigkill_delay *= 2;
      if (process->sigkill_delay >= TICKS_PER_SEC / 2)
          signal = SIGKILL;
-@@ -582,6 +600,13 @@ static void process_sigkill( void *private )
+@@ -582,6 +680,13 @@ static void process_sigkill( void *private )
  static void start_sigkill_timer( struct process *process )
  {
      grab_object( process );
@@ -300,7 +380,7 @@ index 94adb19c1c0d681d53fc4fce1bdd4a922433ec8c..a900795581b723199bcedd3e5edc782f
      if (process->unix_pid != -1)
          process->sigkill_timeout = add_timeout_user( -process->sigkill_delay, process_sigkill, process );
      else
-@@ -669,7 +694,15 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
+@@ -669,7 +774,15 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
      if (!parent)
      {
          process->handles = alloc_handle_table( process, 0 );

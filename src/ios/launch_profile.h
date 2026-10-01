@@ -33,7 +33,6 @@ typedef struct {
   KitsuneTextureMode textures;
   int frameCap;               /* 0 = the display's refresh rate */
   BOOL landscape;
-  BOOL unity;                 /* the game is a Unity title (KitsuneGameDirIsUnity) */
 } KitsuneLaunchOptions;
 
 static inline KitsuneLaunchOptions KitsuneDefaultLaunchOptions(void) {
@@ -93,18 +92,18 @@ static inline NSDictionary *KitsuneSteamLaunchRequest(NSString *appID, KitsuneLa
    * port ends it when the game starts and lets it back when the game exits.
    * Measured on Dark Souls: Remastered, 2026-10-01: with the helper alive the
    * app reached 3.7 GB with 334 MB free and heavy compression; without it
-   * 2.9 GB with 1.1 GB free, and Steam retried the helper once per run. */
-  if (appID.length) env[@"KITSUNE_STEAM_LEAN"] = @"1";
-  if (o.unity) {
-    /* Large sampled RGBA8 textures stored as ETC2 (winemetal): Unity games ship
-     * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit). */
-    env[@"KITSUNE_RGBA_ETC2"] = @"1";
-  } else {
-    /* Executable memory a program allocates stays in the JIT arena, as before
-     * the Unity work. Outside it FEX traps writes per 16K host page, which Mono
-     * needs; Dark Souls: Remastered has run in slow motion since it moved out. */
-    env[@"KITSUNE_APP_EXEC_IN_ARENA"] = @"1";
-  }
+   * 2.9 GB with 1.1 GB free, and Steam retried the helper once per run.
+   * Set for Steam alone too: a game started from Steam's own window inherits
+   * this environment, and lean mode acts only once a game starts. */
+  env[@"KITSUNE_STEAM_LEAN"] = @"1";
+  /* Large sampled RGBA8 textures stored as ETC2 (winemetal): Unity games ship
+   * uncompressed atlases (Blasphemous: 2.2 GB of them, past the 4 GB limit).
+   * Nothing here may depend on which game is launched: the environment is the
+   * whole app's, and a game started from Steam's own window gets the client's.
+   * Keying program code's placement on the title (KITSUNE_APP_EXEC_IN_ARENA for
+   * non-Unity games) put Cuphead's Mono JIT in the arena that way, where it
+   * faulted in loops and crashed (2026-10-01). */
+  env[@"KITSUNE_RGBA_ETC2"] = @"1";
   env[@"DXMT_CONFIG"] = KitsuneDXMTConfig(o.textures, o.frameCap);
   if (o.textures == KitsuneTexturesNative) env[@"KITSUNE_BC_NATIVE"] = @"1";
   else env[@"KITSUNE_BC_16BIT"] = @"1";

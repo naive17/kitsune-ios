@@ -16,7 +16,7 @@ EXPECT_HASH="2236d88fe5618cef"
 EXPECT_SEH="OK checksum=94a514d4d6110800"
 fails=0
 
-for f in hello64 seh64 sehcross64 inputprobe fpsprobe d3d11_rb d3d11_swap d3d11_swap64; do
+for f in hello64 seh64 sehcross64 inputprobe fpsprobe d3d11_rb d3d11_swap d3d11_swap64 d3d11_texload xinput_reload64; do
   [ -f "$PE/$f.exe" ] || die "no $f.exe in $PE; run 20-decoy-split.sh"
 done
 for f in process-parent-arm64 process-parent-x64 child-pool-x64; do
@@ -119,6 +119,10 @@ out=$(KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
       env WINEDEBUG=-all "$HOST" "$SESSION_HOST" </dev/null 2>&1 || true)
 check "the session host starts a queued program" "harness: session running" "$out"
 check "the session goes idle when the program exits" "harness: session idle" "$out"
+# The process monitor's list: the program, alive and using CPU, under the host.
+check "the server lists a running program with its CPU time" \
+  "harness: ps pid=[0-9a-f]* ppid=[0-9a-f]* threads=[1-9][0-9]* flags=0 cpu_us=[1-9][0-9]* age_ms=[1-9][0-9]* name=fpsprobe.exe" "$out"
+check "the server lists the session host" "harness: ps .* name=kitsune-session.exe" "$out"
 
 # A rotation sends WM_DISPLAYCHANGE to the desktop window and waits for the
 # session host, which owns it, to answer. The app rotates twice at a game's
@@ -132,12 +136,35 @@ out=$(KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" KITSUNE_HOST_SURFACE
 check "a second rotation reaches Wine" "screen changed to 1275x629" "$out"
 check "input arrives after rotations" "clip=0,0-1275,629" "$out"
 
+# --- a DLL a game loads and frees all the time ------------------------------
+# An unloaded image's arena range is never reused; Cuphead reloads XInput about
+# once a second, so XInput pins itself.
+out=$(KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
+      env WINEDEBUG=-all "$HOST" "$PE/xinput_reload64.exe" </dev/null 2>&1 || true)
+check "XInput stays loaded when a game frees it" "OK xinput stays loaded" "$out"
+
 # --- D3D11 through DXMT ------------------------------------------------------
 # Renders offscreen and checks its own pixels, so it needs no compositor.
 out=$(WINEDLLOVERRIDES='d3d11,dxgi,d3d10core=b' WINE_DISPLAY_DRIVER=ios \
       KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
       env WINEDEBUG=-all "$HOST" "$PE/d3d11_rb.exe" </dev/null 2>/dev/null || true)
 check "D3D11 triangle via DXMT" "OK triangle rendered" "$out"
+
+# A level load: large textures created with data, nothing drawn. Their contents
+# must arrive, and staging them must not hold every texture's data at once:
+# 40 textures of 4096x4096 peaked at 2.8 GB when it did (Cuphead died of it on
+# the phone) and at 1.0 GB when uploads are flushed as they are staged.
+out=$(WINEDLLOVERRIDES='d3d11,dxgi,d3d10core=b' WINE_DISPLAY_DRIVER=ios \
+      KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
+      env WINEDEBUG=-all "$HOST" "$PE/d3d11_texload.exe" 3 check </dev/null 2>&1 || true)
+check "textures created with data read back intact" "OK texload contents" "$out"
+out=$(WINEDLLOVERRIDES='d3d11,dxgi,d3d10core=b' WINE_DISPLAY_DRIVER=ios KITSUNE_RGBA_ETC2=1 \
+      KITSUNE_REPORT_PEAK=1 KITSUNE_UNIX="$DEST/bundle" KITSUNE_TREE="$DEST/tree" \
+      env WINEDEBUG=-all "$HOST" "$PE/d3d11_texload.exe" 40 </dev/null 2>&1 || true)
+check "a 40-texture level load completes" "OK texload" "$out"
+peak=$(printf '%s' "$out" | sed -nE 's/^harness: footprint peak ([0-9]+) MB$/\1/p' | tail -1)
+if [ -n "$peak" ] && [ "$peak" -lt 1600 ]; then check "a level load's staging stays bounded (peak ${peak} MB)" "OK texload" "$out"
+else check "a level load's staging stays bounded (peak ${peak:-?} MB, limit 1600)" "peak under the limit" "$out"; fi
 
 # --- D3D11 through a swapchain, as a game uses it ----------------------------
 # Covers the windowed path: IDXGISwapChain -> DXMT Presenter ->

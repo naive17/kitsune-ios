@@ -68,7 +68,24 @@ for arch in arm64ec x86_64; do
     || { tail -20 "$BUILD/dxmt-tests/build.log"; die "$out build failed"; }
   cp "$BUILD/dxmt-tests/$out" "$HOST_PE/$out"
 done
-log "built d3d11_rb.exe, d3d11_swap.exe and d3d11_swap64.exe"
+# d3d11_texload creates large textures with data and draws nothing, as a level
+# load does; the harness bounds the memory that takes.
+"$MINGW_BIN/arm64ec-w64-mingw32-clang" -O2 -o "$BUILD/dxmt-tests/d3d11_texload.exe" \
+  "$ROOT/src/fex/d3d11-texload.c" \
+  -Wl,--section-alignment=0x10000 \
+  -ld3d11 -ldxgi \
+  >> "$BUILD/dxmt-tests/build.log" 2>&1 \
+  || { tail -20 "$BUILD/dxmt-tests/build.log"; die "d3d11_texload build failed"; }
+cp "$BUILD/dxmt-tests/d3d11_texload.exe" "$HOST_PE/d3d11_texload.exe"
+log "built d3d11_rb.exe, d3d11_swap.exe, d3d11_swap64.exe and d3d11_texload.exe"
+
+# xinput_reload64 loads and frees XInput the way games poll it, under FEX.
+"$MINGW_BIN/x86_64-w64-mingw32-clang" -O2 -o "$BUILD/dxmt-tests/xinput_reload64.exe" \
+  "$ROOT/src/fex/xinput-reload.c" \
+  -Wl,--section-alignment=0x10000 \
+  >> "$BUILD/dxmt-tests/build.log" 2>&1 \
+  || { tail -20 "$BUILD/dxmt-tests/build.log"; die "xinput_reload64 build failed"; }
+cp "$BUILD/dxmt-tests/xinput_reload64.exe" "$HOST_PE/xinput_reload64.exe"
 
 bash "$ROOT/src/fex/build-x64-guests.sh"
 bash "$ROOT/src/guests/build-guests.sh"

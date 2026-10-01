@@ -99,18 +99,10 @@ static inline NSDictionary *KitsuneParseKeyValues(NSString *text) {
   return root;
 }
 
-/* Whether a game directory holds a Unity player: UnityPlayer.dll (Unity 2017.2
- * and later) or the Mono runtime Unity ships beside it. */
-static inline BOOL KitsuneGameDirIsUnity(NSString *path) {
-  NSFileManager *fm = NSFileManager.defaultManager;
-  return [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"UnityPlayer.dll"]] ||
-         [fm fileExistsAtPath:[path stringByAppendingPathComponent:@"MonoBleedingEdge"]];
-}
-
 /* One installed title. Keys: appid, name, installdir, path (unix path of the
  * game directory), manifest (unix path), installed (NSNumber BOOL), size
- * (NSNumber bytes), unity (NSNumber BOOL). Sorted by name. Titles whose
- * directory is missing are left out: a manifest without files cannot be launched. */
+ * (NSNumber bytes). Sorted by name. Titles whose directory is missing are left
+ * out: a manifest without files cannot be launched. */
 static inline NSArray<NSDictionary *> *KitsuneSteamGames(NSString *steamRoot) {
   NSFileManager *fm = NSFileManager.defaultManager;
   NSString *apps = [steamRoot stringByAppendingPathComponent:@"steamapps"];
@@ -142,7 +134,6 @@ static inline NSArray<NSDictionary *> *KitsuneSteamGames(NSString *steamRoot) {
       @"manifest": manifest,
       @"installed": @((flags & 4) != 0),
       @"size": @(size),
-      @"unity": @(KitsuneGameDirIsUnity(path)),
     }];
   }
   [games sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {

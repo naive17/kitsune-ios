@@ -924,7 +924,7 @@ static void PublishJITScript(void) {
     return;
   }
   NSError *error = nil;
-  if (![KitsuneSteamRequestData(appID, options, KitsunePersistentDocuments()) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error]) {
+  if (![KitsuneSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error]) {
     [vc report:NSLocalizedString(@"Can't Launch", nil) message:error.localizedDescription];
     return;
   }
@@ -955,7 +955,7 @@ static void PublishJITScript(void) {
   }
   [self restartToOpen:name ?: NSLocalizedString(@"Steam", nil) bottle:@"Steam" from:vc saving:^NSString *{
     NSError *error = nil;
-    if (![KitsuneSteamRequestData(appID, options, KitsunePersistentDocuments()) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error])
+    if (![KitsuneSteamRequestData(appID, options) writeToFile:RequestPath() options:NSDataWritingAtomic error:&error])
       return error.localizedDescription;
     [NSFileManager.defaultManager removeItemAtPath:
         [KitsunePersistentDocuments() stringByAppendingPathComponent:@"dxmt-gpu-debug.txt"] error:nil];
