@@ -1,0 +1,201 @@
+dxmt: Bound staging and dynamic-buffer memory.
+
+Idle dynamic buffers go once they have been idle for 120 command buffers.
+The resource initializer flushes once 64 MB of uploads are staged, and the
+staging ring frees a completed one-off block wherever it sits. A level load
+(Cuphead: 70 textures of 4096x4096) kept every upload's staging alive and
+ran the phone out of memory.
+---
+diff --git a/src/dxmt/dxmt_dynamic.cpp b/src/dxmt/dxmt_dynamic.cpp
+index ce7941eaa99b9cb48608e023200bed65a40fe99f..08199266f70b434effa24eee4c0c8608ed7c69d3 100644
+--- a/src/dxmt/dxmt_dynamic.cpp
++++ b/src/dxmt/dxmt_dynamic.cpp
+@@ -2,6 +2,23 @@
+ #include "dxmt_texture.hpp"
+ 
+ namespace dxmt {
++
++/* Idle allocations kept for reuse per dynamic resource. A game that discards
++ * a buffer many times in one frame and then stops would otherwise keep every
++ * allocation it ever made. Only allocations idle for kStaleSeqs command
++ * buffers are dropped: one discarded more than 64 times per frame cycles that
++ * many through the queue, and dropping those as soon as there were 64 would
++ * create and destroy Metal buffers every frame. */
++constexpr size_t kMaxIdleAllocations = 64;
++constexpr uint64_t kStaleSeqs = 120;
++
++template <typename Queue>
++static void
++drop_stale(Queue &fifo, uint64_t coherent_seq_id) {
++  while (fifo.size() > kMaxIdleAllocations && fifo.front().will_free_at + kStaleSeqs <= coherent_seq_id)
++    fifo.pop();
++}
++
+ DynamicBuffer::DynamicBuffer(Buffer *buffer, Flags<BufferAllocationFlag> flags) :
+     buffer(buffer),
+     flags_(flags),
+@@ -22,18 +39,11 @@ Rc<BufferAllocation>
+ DynamicBuffer::allocate(uint64_t coherent_seq_id) {
+   std::lock_guard<dxmt::mutex> lock(mutex_);
+   Rc<BufferAllocation> ret;
+-  for (;;) {
+-    if (fifo.empty()) {
+-      break;
+-    }
+-    auto entry = fifo.front();
+-    if (entry.will_free_at > coherent_seq_id) {
+-      break;
+-    }
+-    ret = std::move(entry.allocation);
++  if (!fifo.empty() && fifo.front().will_free_at <= coherent_seq_id) {
++    ret = std::move(fifo.front().allocation);
+     fifo.pop();
+-    break;
+   }
++  drop_stale(fifo, coherent_seq_id);
+   if (!ret.ptr())
+     ret = buffer->allocate(flags_);
+   return ret;
+@@ -90,18 +100,11 @@ Rc<TextureAllocation>
+ DynamicLinearTexture::allocate(uint64_t coherent_seq_id) {
+   std::lock_guard<dxmt::mutex> lock(mutex_);
+   Rc<TextureAllocation> ret;
+-  for (;;) {
+-    if (fifo.empty()) {
+-      break;
+-    }
+-    auto entry = fifo.front();
+-    if (entry.will_free_at > coherent_seq_id) {
+-      break;
+-    }
+-    ret = std::move(entry.allocation);
++  if (!fifo.empty() && fifo.front().will_free_at <= coherent_seq_id) {
++    ret = std::move(fifo.front().allocation);
+     fifo.pop();
+-    break;
+   }
++  drop_stale(fifo, coherent_seq_id);
+   if (!ret.ptr())
+     ret = texture->allocate(flags_);
+   return ret;
+diff --git a/src/dxmt/dxmt_resource_initializer.cpp b/src/dxmt/dxmt_resource_initializer.cpp
+index 58fd9266ab3aea40ddd53cd9f90ef980de54678a..53b26e3b6dfb1ad7ba811a198211cbcd0bfb598c 100644
+--- a/src/dxmt/dxmt_resource_initializer.cpp
++++ b/src/dxmt/dxmt_resource_initializer.cpp
+@@ -315,8 +315,11 @@ ResourceInitializer::initWithData(
+     copy->level = level;
+     copy->origin = {0, 0, 0};
+ 
++    staged_bytes_ += total_bytes_needed;
+   } while (0);
+ 
++  if (staged_bytes_ >= kResourceInitializerFlushBytes)
++    return flushInternal();
+   return current_seq_id_;
+ }
+ 
+@@ -355,6 +358,7 @@ ResourceInitializer::flushToWait() {
+ void
+ ResourceInitializer::reset() {
+   cpu_command_heap_offset = 0;
++  staged_bytes_ = 0;
+ 
+   clear_render_pass_head.next = nullptr;
+   clear_render_pass_tail = &clear_render_pass_head;
+diff --git a/src/dxmt/dxmt_resource_initializer.hpp b/src/dxmt/dxmt_resource_initializer.hpp
+index 3a51e7cf121d4f6816ae946ec4574fbbe4d8ac5c..d3276dd3d24ecbfc11b2657e7decba4b591f0f03 100644
+--- a/src/dxmt/dxmt_resource_initializer.hpp
++++ b/src/dxmt/dxmt_resource_initializer.hpp
+@@ -11,6 +11,10 @@ constexpr size_t kResourceInitializerCpuCommandHeapSize = 0x100000; // 1MB
+ constexpr size_t kResourceInitializerGpuUploadHeapSize = 0x2000000; // 32MB
+ constexpr size_t kResourceInitializerGpuUploadHeapAlignment = 256;
+ constexpr size_t kResourceInitializerChunks = 2;
++/* Kitsune: uploads are flushed once this much is staged. Nothing else flushes
++ * them while a game loads without drawing, so every staging buffer of a level
++ * was alive at once (Cuphead: 36 textures of 64 MB). */
++constexpr size_t kResourceInitializerFlushBytes = 0x4000000; // 64MB
+ 
+ static_assert(kResourceInitializerChunks > 1);
+ 
+@@ -123,6 +127,7 @@ private:
+   WMT::Reference<WMT::SharedEvent> upload_queue_event_;
+   WMT::Reference<WMT::Buffer> zero_buffer_;
+   size_t zero_buffer_size_ = 0;
++  size_t staged_bytes_ = 0;
+   dxmt::mutex mutex_;
+ 
+   void *cpu_command_heap;
+diff --git a/src/dxmt/dxmt_ring_bump_allocator.hpp b/src/dxmt/dxmt_ring_bump_allocator.hpp
+index 5c92d92fb128d2d50af56b921351a891ab425eb5..e0f034cfbe6b8ba2f3882b9d0329b26815bba023 100644
+--- a/src/dxmt/dxmt_ring_bump_allocator.hpp
++++ b/src/dxmt/dxmt_ring_bump_allocator.hpp
+@@ -4,8 +4,8 @@
+ #include "log/log.hpp"
+ #include "thread.hpp"
+ #include "util_math.hpp"
++#include <list>
+ #include <mutex>
+-#include <queue>
+ 
+ namespace dxmt {
+ 
+@@ -44,7 +44,9 @@ private:
+     return {allocation.block, offset};
+   };
+ 
+-  std::queue<Allocation> fifo;
++  /* A list, not a queue: free_blocks also frees blocks in the middle, and
++   * another thread may hold a reference to a block allocate() returned. */
++  std::list<Allocation> fifo;
+   mutex mutex_;
+   Allocator allocator_;
+ };
+@@ -197,12 +199,22 @@ RingBumpState<Allocator, BlockSize, mutex>::free_blocks(uint64_t coherent_id) {
+     auto adhoc = front.total_size != BlockSize;
+     if (expired || adhoc) {
+       // can be deallocated
+-      fifo.pop();
++      fifo.pop_front();
+       continue;
+     }
+     front.inc_time_to_live++;
+     break;
+   }
++  /* Kitsune: a block sized for one large upload goes as soon as the GPU is
++   * done with it, wherever it sits. Behind a live regular block it stayed
++   * until that block expired: Cuphead's level load kept 36 of them, 64 MB
++   * each, and ran the phone out of memory. */
++  for (auto it = fifo.begin(); it != fifo.end();) {
++    if (it->total_size != BlockSize && it->last_used_seq_id <= coherent_id && std::next(it) != fifo.end())
++      it = fifo.erase(it);
++    else
++      ++it;
++  }
+ };
+ 
+ template <typename Allocator, size_t BlockSize, class mutex>
+@@ -214,21 +226,20 @@ RingBumpState<Allocator, BlockSize, mutex>::allocate_or_reuse_block(
+     auto &front = fifo.front();
+     if (front.last_used_seq_id < coherent_id) {
+       if (front.total_size != BlockSize) {
+-        fifo.pop();
++        fifo.pop_front();
+         continue;
+       } else if (front.total_size >= block_size) {
+         front.last_used_seq_id = seq_id;
+         front.allocated_size = 0;
+         front.inc_time_to_live = 0;
+-        fifo.push(std::move(front));
+-        fifo.pop();
++        fifo.splice(fifo.end(), fifo, fifo.begin());
+         return fifo.back();
+       }
+       WARN("forced to allocate new block of size ", block_size);
+     }
+     break;
+   }
+-  fifo.push({
++  fifo.push_back({
+       .allocated_size = 0,
+       .total_size = block_size,
+       .last_used_seq_id = seq_id,

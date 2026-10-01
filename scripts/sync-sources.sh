@@ -10,8 +10,9 @@
 #
 # A checkout is reset only when its files are exactly its pin plus the patches
 # of some commit, or the bare pin, so nothing is lost that git does not have.
-# The stacks are read from the scripts that apply them (02-fetch.sh,
-# apply-dxmt-port.sh, 06, 08 and 09) as they were at each commit. A checkout
+# The stacks are read from the scripts that apply them (02-fetch.sh, 06, 08
+# and 09, and apply-dxmt-port.sh before DXMT's port became a series) as they
+# were at each commit. A checkout
 # with edits that no commit has is left alone unless --discard is given; the
 # edits are saved to build/source-backups/ first, and
 # `git -C <checkout> apply -3 <saved patch>` carries them onto the new patches.
@@ -71,8 +72,8 @@ stacks() {
         fi
       done
   done
-  # apply-dxmt-port.sh applies 0001 and 0002 (its base commit), then the full
-  # patch; the stack is the pin plus all three.
+  # Before DXMT's port was a series, apply-dxmt-port.sh applied 0001 and 0002
+  # (its base commit), then the full patch; the stack is the pin plus all three.
   show "$rev" scripts/apply-dxmt-port.sh | { grep -o '"\$P/[^"]*\.patch"' || true; } |
     sed 's|^"\$P/\(.*\)"$|third_party/dxmt patches/dxmt/\1|' | awk '!seen[$0]++'
 }
@@ -84,7 +85,7 @@ stack_of() { awk -v t="$1" '$1 == t { print $2 }' "$TMP/stack.$2"; }
 series_dir() { awk -v t="$1" '$1 == t { print $2 }' "$TMP/series.work"; }
 
 # The commit a checkout's stack applies to: under a series' commits, or under
-# the base commit that apply-dxmt-port.sh makes ("ios-wine base" before the
+# the base commit that apply-dxmt-port.sh used to make ("ios-wine base" before the
 # rename).
 base_of() {
   if [ "$1" = third_party/dxmt ] &&
@@ -256,6 +257,7 @@ fi
 
 # Commits over files that are already right: nothing to rebuild.
 for tree in $adopt; do
+  drop_legacy_base "$ROOT/$tree"
   apply_series "$ROOT/$tree" "$ROOT/$(series_dir "$tree")"
 done
 
@@ -280,8 +282,6 @@ for tree in $(printf '%s\n' $todo | sort); do
   series="$(series_dir "$tree")"
   if [ -n "$series" ]; then
     apply_series "$ROOT/$tree" "$ROOT/$series"
-  elif [ "$tree" = third_party/dxmt ]; then
-    bash "$ROOT/scripts/apply-dxmt-port.sh"
   else
     for p in $(stack_of "$tree" work); do apply_patch "$ROOT/$tree" "$ROOT/$p"; done
   fi

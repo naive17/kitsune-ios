@@ -1,0 +1,37 @@
+dxmt: Drop frames without a drawable.
+
+-nextDrawable returns nil while the app is inactive or every drawable is in
+flight, and presenting nil is a Metal assertion that aborts the process.
+---
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+index 7bc954f67df350627a6c86c81b8ff731dd624bda..35a7821e4ae6cbc4a9685a438414ee96aa27fbc1 100644
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -1030,7 +1030,9 @@ ArgumentEncodingContext::flushCommands(WMT::CommandBuffer cmdbuf, uint64_t seqId
+       );
+       auto t1 = clock::now();
+       currentFrameStatistics().drawable_blocking_interval += (t1 - t0);
+-      if (data->after > 0)
++      if (drawable == nullptr) {
++        /* nothing to show this frame */
++      } else if (data->after > 0)
+         cmdbuf.presentDrawableAfterMinimumDuration(drawable, data->after);
+       else
+         cmdbuf.presentDrawable(drawable);
+diff --git a/src/dxmt/dxmt_presenter.cpp b/src/dxmt/dxmt_presenter.cpp
+index 87624a89811154548dba0f25a1cd17751410107f..46abae437d44949934ca50b194f3731a41f1df0e 100644
+--- a/src/dxmt/dxmt_presenter.cpp
++++ b/src/dxmt/dxmt_presenter.cpp
+@@ -158,6 +158,12 @@ Presenter::encodeCommands(
+ ) {
+   auto drawable = layer_.nextDrawable();
+ 
++  /* -nextDrawable can return nil (on iOS routinely: the app is not active or
++   * every drawable is in flight). Presenting nil is a Metal assertion that
++   * aborts the process, so the frame is dropped; winemetal logs why. */
++  if (drawable == nullptr)
++    return drawable;
++
+   WMTRenderPassInfo info;
+   WMT::InitializeRenderPassInfo(info);
+   info.colors[0].load_action = WMTLoadActionDontCare;

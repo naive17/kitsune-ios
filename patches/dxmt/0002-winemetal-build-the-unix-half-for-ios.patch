@@ -1,5 +1,12 @@
+winemetal: Build the unix half for iOS.
+
+ColorSync and Cocoa are macOS-only, so their users are guarded. The AIR the
+converter generates at run time carries an iOS triple, since Metal on iOS
+refuses a metallib built for macOS, and the Metal shader cache lives inside
+the app's sandbox.
+---
 diff --git a/src/airconv/airconv_context.cpp b/src/airconv/airconv_context.cpp
-index ffa2596..4c74d68 100644
+index ffa25964f8508e452c9cecba1c2581db9688a894..4c74d68e7296e6e3f11872dddb03be37218f0fce 100644
 --- a/src/airconv/airconv_context.cpp
 +++ b/src/airconv/airconv_context.cpp
 @@ -1,3 +1,4 @@
@@ -43,7 +50,7 @@ index ffa2596..4c74d68 100644
    M.addModuleFlag(Module::ModFlagBehavior::Max, "frame-pointer", 2);
    M.addModuleFlag(Module::ModFlagBehavior::Max, "air.max_device_buffers", 31);
 diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
-index db5b795..19c317d 100644
+index db5b795f0f0f6a0111b89662c094e90e54f9d50b..19c317dd208e9e263736174a80c80f1b0c26f3a5 100644
 --- a/src/airconv/dxbc_converter.cpp
 +++ b/src/airconv/dxbc_converter.cpp
 @@ -1,3 +1,4 @@
@@ -65,7 +72,7 @@ index db5b795..19c317d 100644
    }
    default: {
 diff --git a/src/dxgi/dxgi.cpp b/src/dxgi/dxgi.cpp
-index cb1a6cf..cc27e54 100644
+index cb1a6cf0fc2d398982e24c846f6dc6c8744247f2..cc27e54f84ae88b0abe4040a6d1b1c96ad533338 100644
 --- a/src/dxgi/dxgi.cpp
 +++ b/src/dxgi/dxgi.cpp
 @@ -53,9 +53,30 @@ static void InitializeMetalCachePath() {
@@ -102,7 +109,7 @@ index cb1a6cf..cc27e54 100644
  }
  
 diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
-index 4744692..eaa97c5 100644
+index 4744692c14ffa544572c949b892499eaa8a1cd76..488fcb67e142c20ef0670423097f8bdb4ee7e4c9 100644
 --- a/src/winemetal/unix/winemetal_unix.c
 +++ b/src/winemetal/unix/winemetal_unix.c
 @@ -1,13 +1,52 @@

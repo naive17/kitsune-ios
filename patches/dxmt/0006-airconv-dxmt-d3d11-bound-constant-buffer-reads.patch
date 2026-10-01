@@ -1,0 +1,308 @@
+airconv, dxmt, d3d11: Bound constant-buffer reads.
+
+Games read past a constant buffer's declared size, which D3D11 allows and
+Apple GPUs fault on. Each buffer's bound length goes into the argument
+buffer beside its address and shaders clamp the index before loading, so an
+out-of-range read returns zero. D3D11.1 ranges are honoured. The shader
+cache version moves to 19 for the new argument layout.
+---
+diff --git a/src/airconv/airconv_public.h b/src/airconv/airconv_public.h
+index 517ff0af8a880c077bb281ae08ca0b9a2c12031b..1fb7b2dd4dd494a5bb10f1fb7dec588007447794 100644
+--- a/src/airconv/airconv_public.h
++++ b/src/airconv/airconv_public.h
+@@ -167,7 +167,7 @@ inline uint32_t
+ GetArgumentIndex(SM50BindingType Type, uint32_t SM50BindingSlot) {
+   switch (Type) {
+   case SM50BindingType::ConstantBuffer:
+-    return SM50BindingSlot;
++    return SM50BindingSlot * 2;
+   case SM50BindingType::Sampler:
+     return SM50BindingSlot + 32;
+   case SM50BindingType::SRV:
+diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
+index 19c317dd208e9e263736174a80c80f1b0c26f3a5..11286e0ba669e9ec7c0a9b178c1ff02df9e0a16d 100644
+--- a/src/airconv/dxbc_converter.cpp
++++ b/src/airconv/dxbc_converter.cpp
+@@ -164,6 +164,9 @@ void setup_binding_table(
+       // ignore index in SM 5.0
+       return get_item_in_argbuf_binding_table(cbuf_table_index, index);
+     };
++    resource_map.cb_length_map[range_id] = [=, index = cbv.arg_length_index](pvalue) {
++      return get_item_in_argbuf_binding_table(cbuf_table_index, index);
++    };
+   }
+   for (auto &[range_id, sampler] : shader_info->samplerMap) {
+     // TODO: abstract SM 5.0 binding
+@@ -1112,6 +1115,12 @@ AIRCONV_API int SM50Initialize(
+       MemoryAccess::read, msl_uint4,
+       GetArgumentIndex(SM50BindingType::ConstantBuffer, range_id)
+     );
++    // Adjacent qword: actual bound range in vec4 constants, not DXBC's
++    // declared size (games can legally read beyond the latter).
++    cbv.arg_length_index = binding_table_cbuffer.DefineInteger64(
++      "length_cb" + std::to_string(range_id),
++      GetArgumentIndex(SM50BindingType::ConstantBuffer, range_id) + 1
++    );
+     sm50_shader->args_reflection_cbuffer.push_back({
+       .Type = SM50BindingType::ConstantBuffer,
+       .SM50BindingSlot = range_id,
+diff --git a/src/airconv/dxbc_converter.hpp b/src/airconv/dxbc_converter.hpp
+index 0f3f0553e129f2e8931b0097d5cd95a7222b80ec..d9283657b9bca7538891a37677ba8d6d48219863 100644
+--- a/src/airconv/dxbc_converter.hpp
++++ b/src/airconv/dxbc_converter.hpp
+@@ -58,6 +58,7 @@ struct ConstantBufferInfo {
+   ResourceRange range;
+   uint32_t size_in_vec4;
+   uint32_t arg_index;
++  uint32_t arg_length_index;
+ };
+ struct SamplerInfo {
+   ResourceRange range;
+@@ -165,6 +166,7 @@ struct io_binding_map {
+   llvm::GlobalVariable *icb = nullptr;
+   llvm::Value *icb_float = nullptr;
+   std::unordered_map<uint32_t, IndexedIRValue> cb_range_map{};
++  std::unordered_map<uint32_t, IndexedIRValue> cb_length_map{};
+   std::unordered_map<uint32_t, sampler_descriptor> sampler_range_map{};
+   std::unordered_map<uint32_t, texture_descriptor> srv_range_map{};
+   std::unordered_map<uint32_t, buffer_descriptor> srv_buf_range_map{};
+diff --git a/src/airconv/nt/dxbc_converter_base.cpp b/src/airconv/nt/dxbc_converter_base.cpp
+index 0a39a13af231fbb0ffbce8f984127e3573611760..fd8574494fa59dec0fbd498ccd260fd2c4c12b9d 100644
+--- a/src/airconv/nt/dxbc_converter_base.cpp
++++ b/src/airconv/nt/dxbc_converter_base.cpp
+@@ -53,16 +53,28 @@ Converter::LoadOperand(const SrcOperandConstantBuffer &SrcOp, mask_t Mask) {
+   }
+   auto Handle = V.get();
+ 
++  auto Length = res.cb_length_map[RangeId](nullptr).build(ctx);
++  if (auto err = Length.takeError()) {
++    return ApplySrcModifier(SrcOp._, llvm::ConstantAggregateZero::get(air.getIntTy(4)), Mask);
++  }
++  auto Index = LoadOperandIndex(SrcOp.regindex);
++  auto InBounds = ir.CreateICmpULT(Index, ir.CreateTrunc(Length.get(), air.getIntTy()));
++  // Clamp BEFORE the load: selecting zero afterwards alone still performs
++  // an invalid GPU read. Empty/unbound ranges point at the zero dummy buffer.
++  auto SafeIndex = ir.CreateSelect(InBounds, Index, ir.getInt32(0));
++
+   if (auto Comp = ComponentFromScalarMask(Mask, SrcOp._.swizzle); Comp >= 0) {
+     auto TyInt = air.getIntTy();
+-    auto Ptr = ir.CreateGEP(air.getIntTy(4), Handle, {LoadOperandIndex(SrcOp.regindex), ir.getInt32(Comp)});
+-    auto ValueInt = ir.CreateLoad(TyInt, Ptr);
++    auto Ptr = ir.CreateGEP(air.getIntTy(4), Handle, {SafeIndex, ir.getInt32(Comp)});
++    llvm::Value *ValueInt = ir.CreateLoad(TyInt, Ptr);
++    ValueInt = ir.CreateSelect(InBounds, ValueInt, llvm::Constant::getNullValue(TyInt));
+     return ApplySrcModifier(SrcOp._, ValueInt, Mask);
+   }
+ 
+   auto TyIntVec4 = air.getIntTy(4);
+-  auto Ptr = ir.CreateGEP(TyIntVec4, Handle, {LoadOperandIndex(SrcOp.regindex)});
+-  auto ValueIntVec4 = ir.CreateLoad(TyIntVec4, Ptr);
++  auto Ptr = ir.CreateGEP(TyIntVec4, Handle, {SafeIndex});
++  llvm::Value *ValueIntVec4 = ir.CreateLoad(TyIntVec4, Ptr);
++  ValueIntVec4 = ir.CreateSelect(InBounds, ValueIntVec4, llvm::Constant::getNullValue(TyIntVec4));
+   return ApplySrcModifier(SrcOp._, ValueIntVec4, Mask);
+ }
+ 
+@@ -2969,4 +2981,4 @@ Converter::SupportsNonExecutionBarrier() const {
+   return ctx.metal_version >= SM50_SHADER_METAL_320;
+ }
+ 
+-} // namespace dxmt::dxbc
+\ No newline at end of file
++} // namespace dxmt::dxbc
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index d53be63a0642bbdf57cac990b2f9bd7bb9bfa5cb..a087dad4f0738d6ca99ce55ca24064918aa781d1 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -3252,7 +3252,7 @@ public:
+ 
+     if (reflection->NumConstantBuffers && dirty_cbuffer) {
+       auto ConstantBufferCount = reflection->NumConstantBuffers;
+-      auto offset = PreAllocateArgumentBuffer(ConstantBufferCount << 3, 32);
++      auto offset = PreAllocateArgumentBuffer(ConstantBufferCount << 4, 32);
+       EmitST([=, cb = managed_shader->constant_buffers_info()](ArgumentEncodingContext &enc) {
+         enc.encodeConstantBuffers<stage, kind>(reflection, cb, offset);
+       });
+@@ -3397,6 +3397,16 @@ public:
+   ) {
+     std::lock_guard<mutex_t> lock(mutex);
+ 
++    // D3D11.1 requires both range arrays or neither, and drops oversized
++    // windows without disturbing any existing bindings.
++    if (bool(pFirstConstant) != bool(pNumConstants))
++      return;
++    if (pNumConstants) {
++      for (UINT i = 0; i < NumBuffers; ++i)
++        if (pNumConstants[i] > 4096u)
++          return;
++    }
++
+     auto &ShaderStage = state_.ShaderStages[Stage];
+ 
+     for (unsigned slot = StartSlot; slot < StartSlot + NumBuffers; slot++) {
+@@ -3404,37 +3414,30 @@ public:
+       if (pConstantBuffer) {
+         bool replaced = false;
+         auto &entry = ShaderStage.ConstantBuffers.bind(slot, {pConstantBuffer}, replaced);
++        const UINT first = pFirstConstant ? pFirstConstant[slot - StartSlot] : 0;
++        // D3D11 exposes at most 4096 constants. The encoder additionally
++        // intersects this window with the resource's actual byte length.
++        const UINT count = pNumConstants ? pNumConstants[slot - StartSlot] : 4096u;
+         if (!replaced) {
+-          if (pFirstConstant &&
+-              pFirstConstant[slot - StartSlot] != entry.FirstConstant) {
++          if (first != entry.FirstConstant || count != entry.NumConstants) {
+             ShaderStage.ConstantBuffers.set_dirty(slot);
+-            entry.FirstConstant = pFirstConstant[slot - StartSlot];
+-            EmitST([=, offset = entry.FirstConstant
+-                                << 4](ArgumentEncodingContext &enc) mutable {
+-              enc.bindConstantBufferOffset<Stage>(slot, offset);
++            entry.FirstConstant = first;
++            entry.NumConstants = count;
++            EmitST([=, offset = uint64_t(first) << 4, length = count << 4](ArgumentEncodingContext &enc) {
++              enc.bindConstantBufferRange<Stage>(slot, offset, length);
+             });
+           }
+-          if (pNumConstants && pNumConstants[slot - StartSlot] != entry.NumConstants) {
+-            ShaderStage.ConstantBuffers.set_dirty(slot);
+-            entry.NumConstants = pNumConstants[slot - StartSlot];
+-          }
+           continue;
+         }
+-        entry.FirstConstant = pFirstConstant ? pFirstConstant[slot - StartSlot] : 0;
+-        if (pNumConstants) {
+-          entry.NumConstants = pNumConstants[slot - StartSlot];
+-        } else {
+-          D3D11_BUFFER_DESC desc;
+-          pConstantBuffer->GetDesc(&desc);
+-          entry.NumConstants = desc.ByteWidth >> 4;
+-        }
++        entry.FirstConstant = first;
++        entry.NumConstants = count;
+         entry.Buffer = GetResourceCommon(pConstantBuffer);
+-        EmitST([=, buffer = entry.Buffer->buffer(), offset = entry.FirstConstant << 4](ArgumentEncodingContext &enc
+-             ) mutable { enc.bindConstantBuffer<Stage>(slot, offset, forward_rc(buffer)); });
++        EmitST([=, buffer = entry.Buffer->buffer(), offset = uint64_t(first) << 4, length = count << 4](ArgumentEncodingContext &enc
++             ) mutable { enc.bindConstantBuffer<Stage>(slot, offset, length, forward_rc(buffer)); });
+       } else {
+         // BIND NULL
+         if (ShaderStage.ConstantBuffers.unbind(slot)) {
+-          EmitST([=](ArgumentEncodingContext &enc) { enc.bindConstantBuffer<Stage>(slot, 0, {}); });
++          EmitST([=](ArgumentEncodingContext &enc) { enc.bindConstantBuffer<Stage>(slot, 0, 0, {}); });
+         }
+       }
+     }
+@@ -5012,8 +5015,9 @@ public:
+   void RestoreEncodingContextStageState() {
+       auto &ShaderStage = state_.ShaderStages[Stage];
+       for (const auto &[slot, entry] : ShaderStage.ConstantBuffers) {
+-        EmitST([=, buffer = entry.Buffer->buffer(), offset = entry.FirstConstant << 4](ArgumentEncodingContext &enc
+-             ) mutable { enc.bindConstantBuffer<Stage>(slot, offset, forward_rc(buffer)); });
++        EmitST([=, buffer = entry.Buffer->buffer(), offset = uint64_t(entry.FirstConstant) << 4,
++                length = entry.NumConstants << 4](ArgumentEncodingContext &enc
++             ) mutable { enc.bindConstantBuffer<Stage>(slot, offset, length, forward_rc(buffer)); });
+       }
+       for (const auto &[slot, entry] : ShaderStage.Samplers) {
+         EmitST([=, sampler = entry.Sampler->sampler()](ArgumentEncodingContext &enc) mutable {
+@@ -5524,4 +5528,4 @@ private:
+ 
+ };
+ 
+-} // namespace dxmt
+\ No newline at end of file
++} // namespace dxmt
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+index 6181fe46a237ba1b88323184f92b533342b2efca..7bc954f67df350627a6c86c81b8ff731dd624bda 100644
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -153,13 +153,15 @@ ArgumentEncodingContext::encodeConstantBuffers(const MTL_SHADER_REFLECTION *refl
+     switch (arg.Type) {
+     case SM50BindingType::ConstantBuffer: {
+       auto &cbuf = cbuf_[slot];
+-      if (!cbuf.buffer.ptr()) {
++      auto valid_length = cbuf.buffer.ptr() && cbuf.buffer->length() > cbuf.offset
++                            ? std::min<uint64_t>(cbuf.buffer->length() - cbuf.offset, cbuf.length) : 0;
++      encoded_buffer[arg.StructurePtrOffset + 1] = valid_length >> 4;
++      if (!valid_length) {
+         encoded_buffer[arg.StructurePtrOffset] = dummy_cbuffer_info_.gpu_address;
+         makeResident<stage, kind>(dummy_cbuffer_, GetResidencyMask<kind>(stage, true, false));
+         continue;
+       }
+       auto argbuf = cbuf.buffer;
+-      auto valid_length = argbuf->length() > cbuf.offset ? argbuf->length() - cbuf.offset : 0;
+       auto [argbuf_alloc, argbuf_offset] = access<stage>(argbuf, cbuf.offset, valid_length, ResourceAccess::Read);
+       encoded_buffer[arg.StructurePtrOffset] = argbuf_alloc->gpuAddress() + argbuf_offset + cbuf.offset;
+       makeResident<stage, kind>(argbuf.ptr());
+@@ -1520,4 +1522,4 @@ ArgumentEncodingContext::isResolveSignatureMatched(RenderEncoderData *render, Re
+   return ret;
+ }
+ 
+-} // namespace dxmt
+\ No newline at end of file
++} // namespace dxmt
+diff --git a/src/dxmt/dxmt_context.hpp b/src/dxmt/dxmt_context.hpp
+index 6356fae53dbcfaa64ef5b768aa068b6a7425c1c7..e482cee386a9eb651688f891e7ddf9abdbe1c208 100644
+--- a/src/dxmt/dxmt_context.hpp
++++ b/src/dxmt/dxmt_context.hpp
+@@ -57,7 +57,8 @@ struct VertexBufferBinding {
+ 
+ struct ConstantBufferBinding {
+   Rc<Buffer> buffer;
+-  unsigned offset;
++  uint64_t offset;
++  unsigned length;
+ };
+ 
+ struct SamplerBinding {
+@@ -377,19 +378,21 @@ public:
+ 
+   template <PipelineStage stage>
+   void
+-  bindConstantBuffer(unsigned slot, unsigned offset, Rc<Buffer> &&buffer) {
++  bindConstantBuffer(unsigned slot, uint64_t offset, unsigned length, Rc<Buffer> &&buffer) {
+     unsigned idx = slot + 14 * unsigned(stage);
+     auto &entry = cbuf_[idx];
+     entry.offset = offset;
++    entry.length = length;
+     entry.buffer = std::move(buffer);
+   }
+ 
+   template <PipelineStage stage>
+   void
+-  bindConstantBufferOffset(unsigned slot, unsigned offset) {
++  bindConstantBufferRange(unsigned slot, uint64_t offset, unsigned length) {
+     unsigned idx = slot + 14 * unsigned(stage);
+     auto &entry = cbuf_[idx];
+     entry.offset = offset;
++    entry.length = length;
+   }
+ 
+   template <PipelineStage stage>
+@@ -939,4 +942,4 @@ ArgumentEncodingContext::track<PipelineStage::Pixel>(GenericAccessTracker &track
+   return;
+ }
+ 
+-} // namespace dxmt
+\ No newline at end of file
++} // namespace dxmt
+diff --git a/src/dxmt/dxmt_shader_cache.hpp b/src/dxmt/dxmt_shader_cache.hpp
+index d102112b3586473dbbbce3ddc7b1ee0d7b431146..8373344097d373781d6b0b785d7736bb2592bd38 100644
+--- a/src/dxmt/dxmt_shader_cache.hpp
++++ b/src/dxmt/dxmt_shader_cache.hpp
+@@ -4,7 +4,8 @@
+ 
+ namespace dxmt {
+ 
+-constexpr int kDXMTShaderCacheVersion = 18;
++// Kitsune: cbuffer argument ABI now includes the bound length and robust loads.
++constexpr int kDXMTShaderCacheVersion = 19;
+ 
+ class ShaderCache {
+ public:
+@@ -65,4 +66,4 @@ private:
+   dxmt::mutex scache_reader_mutex_;
+ };
+ 
+-} // namespace dxmt
+\ No newline at end of file
++} // namespace dxmt

@@ -1,0 +1,134 @@
+dxmt, d3d11, dxgi: Run on iOS.
+
+iOS Metal has no Managed storage, so it becomes Shared (DXMT_IOS). A
+swapchain's window may belong to another Wine process, since every process
+is a thread of the app. A sample count the GPU lacks drops to the largest it
+has (8x on the A15). DXGI's content-protection and budget notifications
+return unsupported instead of asserting.
+---
+diff --git a/meson.build b/meson.build
+index e10c90191f15e4871c7b703f1f9376241f8255a0..4129241b6bdfaadc6f0aafeebacf71c6878a94f3 100644
+--- a/meson.build
++++ b/meson.build
+@@ -139,6 +139,15 @@ endif
+ 
+ add_project_arguments('-DDXMT_PAGE_SIZE=4096', language: 'cpp')
+ 
++# On iOS all Metal storage modes that are Managed on macOS must become
++# Shared — iOS has unified memory and raises an assertion for storageMode 1
++# (Managed). The iOS target is the ARM64EC build (build-arm64ec.txt), whose
++# host machine is aarch64 windows.
++if host_machine.cpu_family() == 'aarch64' and host_machine.system() == 'windows'
++  add_project_arguments('-DDXMT_IOS=1', language: 'cpp')
++  add_project_arguments('-DDXMT_IOS=1', language: 'c')
++endif
++
+ dxmt_version = vcs_tag(
+   command: ['git', 'describe', '--always'],
+   input:  'version.h.in',
+diff --git a/src/d3d11/d3d11_resource_helper.cpp b/src/d3d11/d3d11_resource_helper.cpp
+index 6624ed6c9a0b516f66c9721c6ae623383a2e52a3..5b24526d6a87b8dfa380346058e136a240bc679d 100644
+--- a/src/d3d11/d3d11_resource_helper.cpp
++++ b/src/d3d11/d3d11_resource_helper.cpp
+@@ -433,9 +433,18 @@ CreateMTLTextureDescriptorInternal(
+     } else {
+       if (SampleCount > 1) {
+         if (!pDevice->GetMTLDevice().supportsTextureSampleCount(SampleCount)) {
+-          ERR("CreateMTLTextureDescriptorInternal: sample count ", SampleCount,
+-              " is not supported.");
+-          return E_INVALIDARG;
++          /* Games that ask for more samples than the GPU has (8x on A15) get
++           * the largest count it supports; views and pipelines take the count
++           * from the Metal texture, so attachments stay consistent. */
++          UINT requested = SampleCount;
++          do SampleCount >>= 1; while (SampleCount > 1 && !pDevice->GetMTLDevice().supportsTextureSampleCount(SampleCount));
++          if (SampleCount <= 1) {
++            ERR("CreateMTLTextureDescriptorInternal: sample count ", requested, " is not supported.");
++            return E_INVALIDARG;
++          }
++          static unsigned warned;
++          if (warned++ < 4)
++            WARN("CreateMTLTextureDescriptorInternal: sample count ", requested, " clamped to ", SampleCount);
+         }
+         if (ArraySize > 1) {
+           pDescOut->type = WMTTextureType2DMultisampleArray;
+diff --git a/src/d3d11/d3d11_swapchain.cpp b/src/d3d11/d3d11_swapchain.cpp
+index 5e9404d3fa549e722ef35131552ea2c14cc6e0a9..4c8a5a674410069013c53c6d3fe59d17a6f967c0 100644
+--- a/src/d3d11/d3d11_swapchain.cpp
++++ b/src/d3d11/d3d11_swapchain.cpp
+@@ -1096,12 +1096,9 @@ CreateSwapChain(
+     return DXGI_ERROR_INVALID_CALL;
+   InitReturnPtr(ppSwapChain);
+ 
+-  DWORD window_process_id;
+-  GetWindowThreadProcessId(hWnd, &window_process_id);
+-  if (GetProcessId(GetCurrentProcess()) != window_process_id) {
+-    ERR("CreateSwapChain: cross-process swapchain not supported yet");
+-    return E_FAIL;
+-  }
++  /* On iOS every Wine process runs as threads inside the app, so the HWND's
++   * owning process and GetCurrentProcess() can disagree without the swapchain
++   * being cross-process. Skip the check. */
+ 
+   Com<IMTLDXGIDevice> layer_factory;
+   if (FAILED(pDevice->QueryInterface(IID_PPV_ARGS(&layer_factory)))) {
+diff --git a/src/dxgi/dxgi_adapter.cpp b/src/dxgi/dxgi_adapter.cpp
+index 1b3d37cdbbc6ed91a7900fff1699d5f8d090c343..475edfed2dd77d2239db8054355d548645f01a0b 100644
+--- a/src/dxgi/dxgi_adapter.cpp
++++ b/src/dxgi/dxgi_adapter.cpp
+@@ -217,13 +217,12 @@ public:
+   HRESULT STDMETHODCALLTYPE
+   RegisterHardwareContentProtectionTeardownStatusEvent(HANDLE event,
+                                                        DWORD *cookie) override {
+-    assert(0 && "TODO");
++    if (cookie) *cookie = 0;
++    return DXGI_ERROR_UNSUPPORTED;
+   }
+ 
+   void STDMETHODCALLTYPE
+-  UnregisterHardwareContentProtectionTeardownStatus(DWORD cookie) override {
+-    assert(0 && "TODO");
+-  }
++  UnregisterHardwareContentProtectionTeardownStatus(DWORD cookie) override {}
+ 
+   HRESULT STDMETHODCALLTYPE QueryVideoMemoryInfo(
+       UINT NodeIndex, DXGI_MEMORY_SEGMENT_GROUP MemorySegmentGroup,
+@@ -258,15 +257,16 @@ public:
+     return S_OK;
+   }
+ 
++  /* The budget never changes here. Reporting success would leave callers
++   * waiting on an event nothing signals; unsupported makes them poll. */
+   HRESULT STDMETHODCALLTYPE RegisterVideoMemoryBudgetChangeNotificationEvent(
+       HANDLE event, DWORD *cookie) override {
+-    assert(0 && "TODO");
++    if (cookie) *cookie = 0;
++    return DXGI_ERROR_UNSUPPORTED;
+   }
+ 
+   void STDMETHODCALLTYPE
+-  UnregisterVideoMemoryBudgetChangeNotification(DWORD cookie) override {
+-    assert(0 && "TODO");
+-  }
++  UnregisterVideoMemoryBudgetChangeNotification(DWORD cookie) override {}
+ 
+   WMT::Device STDMETHODCALLTYPE GetMTLDevice() final { return device_; }
+   D3DKMT_HANDLE STDMETHODCALLTYPE GetLocalD3DKMT() final { return local_kmt_; }
+diff --git a/src/winemetal/winemetal.h b/src/winemetal/winemetal.h
+index 92740e355c5f633a422dfe21764f1a08aa598870..7e054061e4386f4794c8a4db5ae29cdd966832b0 100644
+--- a/src/winemetal/winemetal.h
++++ b/src/winemetal/winemetal.h
+@@ -122,6 +122,13 @@ enum WMTResourceOptions : uint64_t {
+   WMTResourceOptionCPUCacheModeWriteCombined = 1,
+ };
+ 
++#ifdef DXMT_IOS
++/* iOS Metal has no Managed storage mode — unified memory means Shared gives
++ * the same CPU+GPU read/write semantics without needing didModifyRange:.
++ * Remap at the symbol level so all existing DXMT call sites just work. */
++#define WMTResourceStorageModeManaged WMTResourceStorageModeShared
++#endif
++
+ struct WMTMemoryPointer {
+   void *ptr;
+ #if defined(__i386__)

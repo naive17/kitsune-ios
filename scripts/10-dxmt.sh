@@ -27,7 +27,8 @@ xcrun --sdk iphoneos metal --version >/dev/null 2>&1 \
 # The port is applied here rather than in 15-dxmt-ios.sh, which re-runs this
 # build's commands: the PE modules and winemetal.so share a shader cache ABI and
 # argument layouts, so every build must use the same patched sources.
-bash "$ROOT/scripts/apply-dxmt-port.sh"
+drop_legacy_base "$SRC"
+apply_series "$SRC" "$ROOT/patches/dxmt"
 
 if [ ! -f "$B/build.ninja" ]; then
   log "configuring dxmt (arm64ec cross build)"

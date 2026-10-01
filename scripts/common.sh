@@ -127,6 +127,16 @@ worktree_tree() {
   rm -f "$idx"
 }
 
+# drop_legacy_base <checkout>: DXMT's port used to be one patch over a base
+# commit ("Kitsune base", or "ios-wine base" before the rename) on the pin.
+# Uncommits it, keeping the files, so the checkout is its pin again and
+# apply_series can record the series over the same files.
+drop_legacy_base() {
+  [[ "$(git -C "$1" log -1 --format=%s 2>/dev/null)" =~ ^(Kitsune|ios-wine)\ base$ ]] || return 0
+  git -C "$1" reset -q HEAD^
+  log "$(basename "$1"): dropped its old base commit; the files are unchanged"
+}
+
 # apply_series <checkout> <dir>: idempotent. A checkout that already holds the
 # series is left as it is, unsaved edits included. One whose files are the
 # series without its commits (set up before the port was a series) gets the

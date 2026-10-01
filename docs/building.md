@@ -51,12 +51,10 @@ scripts/04-freetype.sh           # FreeType for macOS and iOS
 scripts/05-gnutls-ios.sh         # GnuTLS for iOS (schannel TLS, crypt32 PFX)
 ```
 
-`02-fetch.sh` applies the Wine port, the numbered series in `patches/wine`, as
-one commit per patch on the pin (`patches/wine/README`). It runs
-`scripts/apply-dxmt-port.sh`, which creates the DXMT base commit (v0.80 plus
-patches 0001 and 0002) and applies the full patch; see
-`patches/dxmt/ios-dxmt-full-vs-upstream.README`. The FEX patch stack in
-`patches/fex` is applied by FEX's build script.
+`02-fetch.sh` applies the Wine and DXMT ports, the numbered series in
+`patches/wine` and `patches/dxmt`, as one commit per patch on each pin (the
+README in each directory). The FEX patch stack in `patches/fex` is applied by
+FEX's build script.
 
 ## 2. Windows side (PE)
 

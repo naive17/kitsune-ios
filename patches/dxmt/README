@@ -1,0 +1,32 @@
+DXMT port
+=========
+
+Base: DXMT_SHA in pins.env (3Shain/dxmt v0.80). scripts/02-fetch.sh applies
+the patches here in order, each as a commit on the pin (apply_series in
+scripts/common.sh), so third_party/dxmt's history is the port: git log there
+lists these patches, git diff shows only what is not recorded yet, and git
+checkout of a file restores the port's version. Each file is its commit's
+message, a line "---", and the diff.
+
+To change the port, edit third_party/dxmt and run scripts/save-patches.sh. It
+folds each edit into the patch that changes that file (for a new file, the one
+patch that changes its directory) and writes the series out again. When no
+single patch owns a file, it says which commit to make by hand. A new commit
+in third_party/dxmt becomes a new patch in its place and wants a line here.
+
+d3d11.dll and winemetal.so change together: the shader cache ABI and the
+constant-buffer argument layout are shared. Ship both or neither.
+
+0001  build with Xcode 27's Metal compiler, current libc++, Homebrew's llvm@15
+0002  winemetal's unix half for iOS: macOS-only APIs guarded, the iOS AIR
+      triple, the shader cache inside the sandbox
+0003  bcdec v0.985 (MIT), unmodified
+0004  etcpak's encoder (BSD-3-Clause)
+0005  iOS: Managed storage as Shared, swapchains across the app's processes,
+      MSAA clamped to what the GPU has, DXGI notifications unsupported
+0006  constant-buffer reads bounded by the bound length (shader cache 19)
+0007  BC textures decoded on the CPU, mip capping with logical descriptors
+0008  frames without a drawable dropped instead of aborting
+0009  winemetal on iOS GPUs: ETC2/EAC storage, nil drawables, GPU debug mask,
+      frame cap, present count, GPU time and allocation totals for the app
+0010  staging and dynamic-buffer memory bounded during level loads
