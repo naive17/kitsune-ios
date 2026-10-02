@@ -4,7 +4,7 @@
 #   scripts/app.sh build [--full]     thin update (default) or full bundle with the Wine tree
 #   scripts/app.sh install [--full]   build, then install on the paired iPhone (UDID=... picks one)
 #   scripts/app.sh sign-check         report which Apple Development identity the phone accepts
-#   scripts/app.sh ipa [file.ipa]     full bundle packaged for sideloading (build/kitsune.ipa)
+#   scripts/app.sh ipa [file.ipa]     full bundle packaged for sideloading (build/Kitsune-<version>.ipa)
 #
 # The thin build reuses the staged runtime in .deploy/runtime; the full
 # build and the IPA need out/wine-core.
@@ -57,9 +57,9 @@ resign() {
 # the installing user's certificate. It is ad-hoc signed with the app's
 # entitlements so that they travel with it, and built in its own directory so
 # the development-signed app in build/xc-out stays as it is. KITSUNE_VERSION
-# sets CFBundleShortVersionString.
+# sets CFBundleShortVersionString, and the version names the file.
 ipa() {
-  local dest="${1:-build/kitsune.ipa}" OUT=build/xc-ipa APP=build/xc-ipa/Kitsune.app stage
+  local dest="${1:-}" OUT=build/xc-ipa APP=build/xc-ipa/Kitsune.app stage
   test -f out/wine-core/TREE_VERSION || { echo "no out/wine-core: run scripts/setup.sh" >&2; exit 1; }
   rm -rf "$APP"
   # Its own build database too: Xcode deletes another build directory's app as
@@ -70,6 +70,7 @@ ipa() {
   if [ -n "${KITSUNE_VERSION:-}" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $KITSUNE_VERSION" "$APP/Info.plist"
   fi
+  [ -n "$dest" ] || dest="build/Kitsune-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist").ipa"
   find "$APP" \( -name '*.so' -o -name '*.dylib' \) -exec codesign --force --sign - --timestamp=none {} \;
   codesign --force --sign - --timestamp=none --entitlements src/ios/kitsune.entitlements \
     --generate-entitlement-der "$APP"

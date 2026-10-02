@@ -83,9 +83,9 @@ jobs:
       - name: Package
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}" name="kitsune-$GITHUB_REF_NAME.ipa"
+            version="${GITHUB_REF_NAME#v}" name="Kitsune-$version.ipa"
           else
-            version="" name="kitsune-$(git rev-parse --short HEAD).ipa"
+            version="" name="Kitsune-$(git rev-parse --short HEAD).ipa"
           fi
           KITSUNE_VERSION="$version" scripts/app.sh ipa "build/$name"
           echo "IPA=build/$name" >> "$GITHUB_ENV"
