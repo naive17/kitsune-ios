@@ -1,8 +1,11 @@
 build: Build with Xcode 27's Metal compiler and current libc++.
 
 Xcode 27's Metal compiler takes a memory-flags argument in its atomic
-builtins, current libc++ no longer pulls in <iterator> and friends
-transitively, and the build finds Homebrew's llvm@15.
+builtins, so the tessellation shader calls the public
+atomic_fetch_add_explicit, which every toolchain forwards correctly; this
+is upstream DXMT 06065754af (Paweł Kołodziejski, MIT). Current libc++ no
+longer pulls in <iterator> and friends transitively, and the build finds
+Homebrew's llvm@15.
 ---
 diff --git a/include/ftl.hpp b/include/ftl.hpp
 index c20f48fa08a45d7c1735845ebe0da944faf5a853..63ecef2b160559b8a890033bc759e5879aab802c 100644
@@ -31,26 +34,15 @@ index f3e39ecd76157b910e9d6da3b311e3133e279296..5d3b914b04297c8a7099b7862064a07d
  
  airconv_lib_darwin = static_library('airconv', airconv_src,
 diff --git a/src/airconv/shaders/air_tessellation.metal b/src/airconv/shaders/air_tessellation.metal
-index 56ba86e93e4aa38777164a875d78c691111f89ab..aebb685adb5d6bc8e14fdeb41bc0add41e61eeef 100644
+index 56ba86e93e4aa38777164a875d78c691111f89ab..e6705d8f3c4fcc4ce0298b6da777d8ea2e6e995e 100644
 --- a/src/airconv/shaders/air_tessellation.metal
 +++ b/src/airconv/shaders/air_tessellation.metal
-@@ -150,7 +150,18 @@ struct TessMeshWorkload {
- 
+@@ -150,7 +150,7 @@ struct TessMeshWorkload {
+
  int
  get_next_index(threadgroup int *out_count) {
 -  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed), __METAL_MEMORY_SCOPE_THREADGROUP__);
-+  // The Xcode 27 Metal compiler (metalfe-32023.921) added a 5th memory-flags
-+  // parameter to this internal builtin; see the toolchain's <metal_atomic>,
-+  // which now calls it as (ptr, val, order, scope, flags).
-+  // __METAL_MEMORY_FLAGS_NONE__ is the neutral value the public wrappers pass.
-+#if defined(__METAL_MEMORY_FLAGS_NONE__)
-+  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed),
-+                                           __METAL_MEMORY_SCOPE_THREADGROUP__,
-+                                           __METAL_MEMORY_FLAGS_NONE__);
-+#else
-+  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed),
-+                                           __METAL_MEMORY_SCOPE_THREADGROUP__);
-+#endif
++  return atomic_fetch_add_explicit(reinterpret_cast<threadgroup atomic_int *>(out_count), 1, memory_order_relaxed);
  }
  
  template <partitioning partition>
