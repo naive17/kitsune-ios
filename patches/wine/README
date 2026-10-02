@@ -16,7 +16,8 @@ in third_party/wine becomes a new patch in its place and wants a line here.
 
 Each file belongs to one patch. 0005, 0006 and 0008 only link together on iOS.
 
-0001  build against the iOS SDK: configure, SDK shims, the container path's case
+0001  build against the iOS SDK: configure, SDK shims, the container path's case;
+      the TCPS numbering after Madeira's Wine fork (willfaust/wine d3d5a179a5)
 0002  interfaces shared with the app and FEX: the relocated shared data, the
       gamepad snapshot, the arena write alias query
 0003  wineserver as a thread of the app; the full administrator token; the
@@ -24,11 +25,12 @@ Each file belongs to one patch. 0005, 0006 and 0008 only link together on iOS.
 0004  the server's desktop window stands in for explorer's
 0005  per-process state behind accessors on ntdll's unix side
 0006  Windows child processes as threads: process context, private ntdll,
-      fd cache, reaper
+      fd cache, reaper; the fd cache after Madeira (willfaust/Madeira 9dc2324)
 0007  win32u's classes, GDI bindings and display keys per process
 0008  memory (virtual.c): the JIT arena, PE images through its write alias,
       the ARM64EC map, bigpool, stack pool, swap file, CEF soft pools,
-      mid-size bands, Win32 error codes, child exit reclaim, diagnostics
+      mid-size bands, Win32 error codes, child exit reclaim, diagnostics;
+      the soft pools after Madeira (willfaust/Madeira 69496fd)
 0009  the TEB in x28; stores replayed through the arena's write alias; fault
       reports
 0010  KUSER_SHARED_DATA at its iOS address on the Win32 side
@@ -40,9 +42,12 @@ Each file belongs to one patch. 0005, 0006 and 0008 only link together on iOS.
 0016  Steam's UI without explorer: hover menus, the tray
 0017  audio through RemoteIO
 0018  controllers from the app: XInput, device notifications
-0019  nsi and nsiproxy without routing sockets
+0019  nsi and nsiproxy without routing sockets; the in-process fallback after
+      Madeira's Wine fork (willfaust/wine d3d5a179a5, 5c4d1f7a6f)
 0020  trust roots from the app's CA bundle
 0021  requests run directly in the in-process server, not through pipes
+0022  QueryPerformanceCounter read in user mode from the generic timer;
+      after Madeira's Wine fork (willfaust/wine e828644329)
 
 The unix side is built with -ffixed-x28 -DWINE_TEB_IN_X28 -DWINE_IOS_JIT_ARENA
 (scripts/11-wine-ios.sh).

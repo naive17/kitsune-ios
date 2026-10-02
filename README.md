@@ -70,6 +70,9 @@ release IPAs.
 ## Acknowledgements
 
 Thanks to obviously Wine, FEX and DXMT for their work.
-Thanks to Madeira from willfaust for some neat tricks.
+Thanks to [Madeira](https://github.com/willfaust/Madeira) from willfaust: the
+soft pools for CEF, the per-process fd cache, the in-process NSI fallback and
+the BC texture fallback in DXMT are adapted from it
+([what and from where](LICENSES/README.md#code-adapted-from-madeira)).
 
 This project leveraged AI usage, this is a personal passion project.

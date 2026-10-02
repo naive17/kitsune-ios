@@ -1,0 +1,73 @@
+--- a/FEXCore/Source/Interface/Core/LookupCache.cpp
++++ b/FEXCore/Source/Interface/Core/LookupCache.cpp
+@@ -24,7 +24,13 @@
+ LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
+   : ctx {CTX} {
+ 
+-  TotalCacheSize = ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE + MAX_L1_SIZE;
++  // Kitsune: with the L2 cache disabled nothing reads the L2 table or its page
++  // backing, so they take no address space and the reservation is L1 alone.
++  if (!DisableL2Cache()) {
++    L2TableSize = ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8;
++    L2BackingSize = CODE_SIZE;
++  }
++  TotalCacheSize = L2TableSize + L2BackingSize + MAX_L1_SIZE;
+ 
+   VirtualMemSize = ctx->Config.VirtualMemSize;
+ 
+@@ -84,8 +90,9 @@
+   // Disable THP on the Lookup cache.
+   FEXCore::Allocator::VirtualTHPControl(reinterpret_cast<const void*>(PagePointer), TotalCacheSize, FEXCore::Allocator::THPControl::Disable);
+ 
+-  FEXCore::Allocator::VirtualName("FEXMem_Lookup", reinterpret_cast<void*>(PagePointer),
+-                                  ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE);
++  if (L2TableSize) {
++    FEXCore::Allocator::VirtualName("FEXMem_Lookup", reinterpret_cast<void*>(PagePointer), L2TableSize + L2BackingSize);
++  }
+   ctx->SyscallHandler->MarkOvercommitRange(PagePointer, TotalCacheSize);
+ 
+   // Allocate our memory backing our pages
+@@ -93,10 +100,10 @@
+   // XXX: We can drop down to 16KB if we store 4byte offsets from the code base
+   // We currently limit to 128MB of real memory for caching for the total cache size.
+   // Can end up being inefficient if we compile a small number of blocks per page
+-  PageMemory = PagePointer + ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8;
++  PageMemory = PagePointer + L2TableSize;
+ 
+   // L1 Cache
+-  L1Pointer = PageMemory + CODE_SIZE;
++  L1Pointer = PageMemory + L2BackingSize;
+   FEXCore::Allocator::VirtualName("FEXMem_Lookup_L1", reinterpret_cast<void*>(L1Pointer), MAX_L1_SIZE);
+ 
+   // Publish the newly valid pointers into the CPU state. Generated code reads
+@@ -125,7 +132,7 @@
+ }
+ 
+ void LookupCache::ClearL2Cache(const FEXCore::LookupCacheBaseLockToken& lk) {
+-  if (!PagePointer) {
++  if (!PagePointer || !L2TableSize) {
+     return;
+   }
+ 
+@@ -138,8 +145,7 @@
+   // remove the backing -- and with Recommit=false the pages are left
+   // PAGE_NOACCESS. Generated code reads L1/L2 through raw pointers with no
+   // validity check, so the next dispatch faults.
+-  FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer),
+-                                      ctx->Config.VirtualMemSize / FEXCore::Utils::FEX_PAGE_SIZE * 8 + CODE_SIZE, true);
++  FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), L2TableSize + L2BackingSize, true);
+   AllocateOffset = 0;
+ }
+ 
+--- a/FEXCore/Source/Interface/Core/LookupCache.h
++++ b/FEXCore/Source/Interface/Core/LookupCache.h
+@@ -483,6 +483,9 @@
+   uintptr_t L1PointerMask {};
+ 
+   size_t TotalCacheSize;
++  // Kitsune: both zero when the L2 cache is disabled.
++  size_t L2TableSize {};
++  size_t L2BackingSize {};
+ 
+   // Start with 8k entries in L1 to give 128KB of L1 cache to each thread.
+   // Max out at 1 million entries to give each thread 16MB of L1 cache maximum.

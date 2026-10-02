@@ -5,6 +5,10 @@ sampled RGBA8 textures (KITSUNE_RGBA_ETC2): etcpak encodes them at upload.
 Nil drawables are logged and can be injected (KITSUNE_NIL_DRAWABLE_EVERY).
 It adds a GPU debug mask, honours the app's frame cap, and gives the app the
 present count, GPU busy time and Metal allocation totals.
+
+The uncompressed fallback for BC formats, the BC support query and the
+upload pitch check are adapted from Madeira's DXMT fork
+(willfaust/dxmt ec30e12).
 ---
 diff --git a/src/winemetal/unix/bc_transcode.cpp b/src/winemetal/unix/bc_transcode.cpp
 new file mode 100644
@@ -83,7 +87,7 @@ index 3f20c2bb02352b31df595fadcaeca91bf601df38..fe220e094fc60000b4abec31d04e2c40
    native              : true,
    name_suffix         : 'so',
 diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
-index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36b71cbafc 100644
+index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..f8b0e6898986e97d20417ea1148c587952601f22 100644
 --- a/src/winemetal/unix/winemetal_unix.c
 +++ b/src/winemetal/unix/winemetal_unix.c
 @@ -26,6 +26,39 @@
@@ -290,7 +294,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
    return STATUS_SUCCESS;
  }
  
-@@ -324,8 +382,312 @@ _MTLDevice_newDepthStencilState(void *obj) {
+@@ -324,8 +382,316 @@ _MTLDevice_newDepthStencilState(void *obj) {
    return STATUS_SUCCESS;
  }
  
@@ -371,6 +375,10 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
 +  }
 +}
 +
++/* The uncompressed fallback for BC formats, query_bc_support and the upload
++ * pitch check (format_bytes_per_pixel, texture_upload_pitch_ok) are adapted
++ * from Madeira's DXMT fork (willfaust/dxmt ec30e12), Copyright (C) 2026
++ * Will Faust, GPL-3.0-or-later. */
 +static enum WMTPixelFormat remap_unsupported_bc(enum WMTPixelFormat fmt, bool bc_supported) {
 +  if (bc_supported)
 +    return fmt;
@@ -604,7 +612,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
  }
  
  void
-@@ -364,11 +726,22 @@ _MTLDevice_newTexture(void *obj) {
+@@ -364,11 +730,22 @@ _MTLDevice_newTexture(void *obj) {
    struct WMTTextureInfo *info = params->info.ptr;
    MTLTextureDescriptor *desc = [[MTLTextureDescriptor alloc] init];
    fill_texture_descriptor(desc, info);
@@ -627,7 +635,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
  
    [desc release];
    return STATUS_SUCCESS;
-@@ -425,8 +798,14 @@ _MTLTexture_newTextureView(void *obj) {
+@@ -425,8 +802,14 @@ _MTLTexture_newTextureView(void *obj) {
    struct unixcall_mtltexture_newtextureview *params = obj;
    id<MTLTexture> texture = (id<MTLTexture>)params->texture;
  
@@ -643,7 +651,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
                          textureType:(MTLTextureType)params->texture_type
                               levels:NSMakeRange(params->level_start, params->level_count)
                               slices:NSMakeRange(params->slice_start, params->slice_count)
-@@ -536,7 +915,7 @@ _MTLCommandBuffer_renderCommandEncoder(void *obj) {
+@@ -536,7 +919,7 @@ _MTLCommandBuffer_renderCommandEncoder(void *obj) {
      descriptor.colorAttachments[i].depthPlane = info->colors[i].depth_plane;
      descriptor.colorAttachments[i].texture = (id<MTLTexture>)info->colors[i].texture;
      descriptor.colorAttachments[i].loadAction = (MTLLoadAction)info->colors[i].load_action;
@@ -652,7 +660,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
      descriptor.colorAttachments[i].resolveTexture = (id<MTLTexture>)info->colors[i].resolve_texture;
      descriptor.colorAttachments[i].resolveLevel = info->colors[i].resolve_level;
      descriptor.colorAttachments[i].resolveSlice = info->colors[i].resolve_slice;
-@@ -550,7 +929,7 @@ _MTLCommandBuffer_renderCommandEncoder(void *obj) {
+@@ -550,7 +933,7 @@ _MTLCommandBuffer_renderCommandEncoder(void *obj) {
      descriptor.depthAttachment.slice = info->depth.slice;
      descriptor.depthAttachment.texture = (id<MTLTexture>)info->depth.texture;
      descriptor.depthAttachment.loadAction = (MTLLoadAction)info->depth.load_action;
@@ -661,7 +669,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
    }
  
    if (info->stencil.texture) {
-@@ -560,7 +939,7 @@ _MTLCommandBuffer_renderCommandEncoder(void *obj) {
+@@ -560,7 +943,7 @@ _MTLCommandBuffer_renderCommandEncoder(void *obj) {
      descriptor.stencilAttachment.slice = info->stencil.slice;
      descriptor.stencilAttachment.texture = (id<MTLTexture>)info->stencil.texture;
      descriptor.stencilAttachment.loadAction = (MTLLoadAction)info->stencil.load_action;
@@ -670,7 +678,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
    }
  
    descriptor.defaultRasterSampleCount = info->default_raster_sample_count;
-@@ -786,12 +1165,18 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
+@@ -786,12 +1169,18 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
      }
      case WMTBlitCommandCopyFromBufferToTexture: {
        struct wmtcmd_blit_copy_from_buffer_to_texture *body = (struct wmtcmd_blit_copy_from_buffer_to_texture *)next;
@@ -690,7 +698,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
               destinationSlice:body->slice
               destinationLevel:body->level
              destinationOrigin:MTLOriginMake(body->origin.x, body->origin.y, body->origin.z)];
-@@ -799,7 +1184,11 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
+@@ -799,7 +1188,11 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
      }
      case WMTBlitCommandCopyFromTextureToBuffer: {
        struct wmtcmd_blit_copy_from_texture_to_buffer *body = (struct wmtcmd_blit_copy_from_texture_to_buffer *)next;
@@ -703,7 +711,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
                         sourceSlice:body->slice
                         sourceLevel:body->level
                        sourceOrigin:MTLOriginMake(body->origin.x, body->origin.y, body->origin.z)
-@@ -812,6 +1201,13 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
+@@ -812,6 +1205,13 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
      }
      case WMTBlitCommandCopyFromTextureToTexture: {
        struct wmtcmd_blit_copy_from_texture_to_texture *body = (struct wmtcmd_blit_copy_from_texture_to_texture *)next;
@@ -717,7 +725,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
        [encoder copyFromTexture:(id<MTLTexture>)body->src
                     sourceSlice:body->src_slice
                     sourceLevel:body->src_level
-@@ -825,6 +1221,7 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
+@@ -825,6 +1225,7 @@ _MTLBlitCommandEncoder_encodeCommands(void *obj) {
      }
      case WMTBlitCommandGenerateMipmaps: {
        struct wmtcmd_blit_generate_mipmaps *body = (struct wmtcmd_blit_generate_mipmaps *)next;
@@ -725,7 +733,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
        [encoder generateMipmapsForTexture:(id<MTLTexture>)body->texture];
        break;
      }
-@@ -1294,15 +1691,19 @@ _MTLTexture_mipmapLevelCount(void *obj) {
+@@ -1294,15 +1695,19 @@ _MTLTexture_mipmapLevelCount(void *obj) {
  static NTSTATUS
  _MTLTexture_replaceRegion(void *obj) {
    struct unixcall_mtltexture_replaceregion *params = obj;
@@ -754,7 +762,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
    return STATUS_SUCCESS;
  }
  
-@@ -1321,18 +1722,61 @@ _MTLBuffer_didModifyRange(void *obj) {
+@@ -1321,18 +1726,61 @@ _MTLBuffer_didModifyRange(void *obj) {
    return STATUS_SUCCESS;
  }
  
@@ -818,7 +826,7 @@ index 488fcb67e142c20ef0670423097f8bdb4ee7e4c9..d6eea580fa48c78f0395e037974dff36
    return STATUS_SUCCESS;
  }
  
-@@ -1588,10 +2032,87 @@ _MetalDrawable_texture(void *obj) {
+@@ -1588,10 +2036,87 @@ _MetalDrawable_texture(void *obj) {
    return STATUS_SUCCESS;
  }
  

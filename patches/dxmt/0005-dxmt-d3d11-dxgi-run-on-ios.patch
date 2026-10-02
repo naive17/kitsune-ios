@@ -5,19 +5,23 @@ swapchain's window may belong to another Wine process, since every process
 is a thread of the app. A sample count the GPU lacks drops to the largest it
 has (8x on the A15). DXGI's content-protection and budget notifications
 return unsupported instead of asserting.
+
+The Managed-to-Shared remap is from Madeira's DXMT fork
+(willfaust/dxmt d7ffd08).
 ---
 diff --git a/meson.build b/meson.build
-index e10c90191f15e4871c7b703f1f9376241f8255a0..4129241b6bdfaadc6f0aafeebacf71c6878a94f3 100644
+index e10c90191f15e4871c7b703f1f9376241f8255a0..4d8776768f45fd17adb44523cf16670294402a5e 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -139,6 +139,15 @@ endif
+@@ -139,6 +139,16 @@ endif
  
  add_project_arguments('-DDXMT_PAGE_SIZE=4096', language: 'cpp')
  
 +# On iOS all Metal storage modes that are Managed on macOS must become
 +# Shared — iOS has unified memory and raises an assertion for storageMode 1
 +# (Managed). The iOS target is the ARM64EC build (build-arm64ec.txt), whose
-+# host machine is aarch64 windows.
++# host machine is aarch64 windows. The remap is from Madeira's DXMT fork
++# (willfaust/dxmt d7ffd08).
 +if host_machine.cpu_family() == 'aarch64' and host_machine.system() == 'windows'
 +  add_project_arguments('-DDXMT_IOS=1', language: 'cpp')
 +  add_project_arguments('-DDXMT_IOS=1', language: 'c')
@@ -115,17 +119,19 @@ index 1b3d37cdbbc6ed91a7900fff1699d5f8d090c343..475edfed2dd77d2239db8054355d5486
    WMT::Device STDMETHODCALLTYPE GetMTLDevice() final { return device_; }
    D3DKMT_HANDLE STDMETHODCALLTYPE GetLocalD3DKMT() final { return local_kmt_; }
 diff --git a/src/winemetal/winemetal.h b/src/winemetal/winemetal.h
-index 92740e355c5f633a422dfe21764f1a08aa598870..7e054061e4386f4794c8a4db5ae29cdd966832b0 100644
+index 92740e355c5f633a422dfe21764f1a08aa598870..77100f5058b72843c0bda6931e073677f02f3ca3 100644
 --- a/src/winemetal/winemetal.h
 +++ b/src/winemetal/winemetal.h
-@@ -122,6 +122,13 @@ enum WMTResourceOptions : uint64_t {
+@@ -122,6 +122,15 @@ enum WMTResourceOptions : uint64_t {
    WMTResourceOptionCPUCacheModeWriteCombined = 1,
  };
  
 +#ifdef DXMT_IOS
 +/* iOS Metal has no Managed storage mode — unified memory means Shared gives
 + * the same CPU+GPU read/write semantics without needing didModifyRange:.
-+ * Remap at the symbol level so all existing DXMT call sites just work. */
++ * Remap at the symbol level so all existing DXMT call sites just work.
++ * From Madeira's DXMT fork (willfaust/dxmt d7ffd08), Copyright (C) 2026
++ * Will Faust, GPL-3.0-or-later. */
 +#define WMTResourceStorageModeManaged WMTResourceStorageModeShared
 +#endif
 +

@@ -10,6 +10,9 @@ state. loader.c also starts the in-process server, loads unix libraries
 from the app bundle and logs the boot steps. debug.c writes output for
 host threads Wine did not create; thread.c dumps registers, stack and
 objects for an unhandled exception.
+
+The PEB-owned fd cache is adapted from Madeira (willfaust/Madeira
+9dc2324).
 ---
 diff --git a/dlls/ntdll/unix/debug.c b/dlls/ntdll/unix/debug.c
 index cfa57c50881645f1729c9586dbb78b4ca385cf06..ef81e0c69e339b15ab9677697c67186dc8468d58 100644
@@ -132,16 +135,19 @@ index cfa57c50881645f1729c9586dbb78b4ca385cf06..ef81e0c69e339b15ab9677697c67186d
      debug_options = options;
 diff --git a/dlls/ntdll/unix/ios_fd_cache.h b/dlls/ntdll/unix/ios_fd_cache.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..30bf3fe894c519c76b50680adae920876b32cc0d
+index 0000000000000000000000000000000000000000..ce5f8c9f057765d103aee1a6dc806bea68dd2304
 --- /dev/null
 +++ b/dlls/ntdll/unix/ios_fd_cache.h
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,78 @@
 +#ifndef KITSUNE_FD_CACHE_H
 +#define KITSUNE_FD_CACHE_H
 +
 +/* Included after Wine's union fd_cache_entry and FD_CACHE_* definitions.
 + * Every function requires fd_cache_mutex, with Wine signals blocked. The
-+ * pointer returned by lookup must not escape that critical section. */
++ * pointer returned by lookup must not escape that critical section.
++ * The per-process cache is adapted from Madeira (willfaust/Madeira 9dc2324,
++ * build/ntdll-unix/server_ios.c), Copyright (C) 2026 Will Faust,
++ * LGPL-2.1-or-later. */
 +struct ios_fd_cache
 +{
 +    union fd_cache_entry *blocks[FD_CACHE_ENTRIES];

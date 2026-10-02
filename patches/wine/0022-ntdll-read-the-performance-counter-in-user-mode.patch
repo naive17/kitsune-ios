@@ -1,0 +1,94 @@
+ntdll: Read the performance counter in user mode.
+
+RtlQueryPerformanceCounter reads the generic timer (cntvct_el0) instead
+of making a system call on every read, as Windows on ARM64 does. The
+offset to the system call's counter is measured once and checked again
+once per second of counter time; it only moves forward, and only by
+more than 1 ms, which is what a device sleep does to it.
+
+After Madeira's Wine fork (willfaust/wine e828644329, Will Faust,
+LGPL-2.1-or-later), which measured QueryPerformanceCounter at 5-13 % of
+running guest samples in one game. Its census counters are left out, and
+the offset is one word that racing first reads agree on.
+---
+diff --git a/dlls/ntdll/time.c b/dlls/ntdll/time.c
+index 5a96a1e2746f58999574fb60bdea3d3a46a235d2..aec19985a2fdfd85245ded9f7af26895b95ef525 100644
+--- a/dlls/ntdll/time.c
++++ b/dlls/ntdll/time.c
+@@ -376,11 +376,76 @@ LONGLONG WINAPI RtlGetSystemTimePrecise( void )
+     return ret;
+ }
+ 
++#if defined(__aarch64__) || defined(__arm64ec__)
++
++/* Kitsune: the counter is read in user mode, as Windows on ARM64 does, instead
++ * of through a system call on every read.  The generic timer runs at the rate
++ * of the system call's counter (mach_continuous_time) but from another origin,
++ * and that one also advances while the device sleeps, so their offset is
++ * measured against the system call and checked again once per second of
++ * counter time.  It only moves forward, and only by more than 1 ms, which
++ * keeps the counter monotonic.  Adapted from Madeira's Wine fork
++ * (willfaust/wine e828644329), Copyright (C) 2026 Will Faust,
++ * LGPL-2.1-or-later. */
++
++#define QPC_OFFSET_UNSET ((LONGLONG)1 << 63)
++
++static ULONGLONG qpc_freq, qpc_last_sync;
++static LONGLONG qpc_offset = QPC_OFFSET_UNSET;
++
++static inline ULONGLONG qpc_read_timer(void)
++{
++    ULONGLONG v;
++    __asm__ __volatile__( "isb\n\tmrs %0, cntvct_el0" : "=r"(v) :: "memory" );
++    return v;
++}
++
++static inline ULONGLONG qpc_timer_to_ticks( ULONGLONG c, ULONGLONG freq )
++{
++    return (c / freq) * TICKSPERSEC + (c % freq) * TICKSPERSEC / freq;
++}
++
++#endif
++
+ /******************************************************************************
+  *  RtlQueryPerformanceCounter   [NTDLL.@]
+  */
+ BOOL WINAPI DECLSPEC_HOTPATCH RtlQueryPerformanceCounter( LARGE_INTEGER *counter )
+ {
++#if defined(__aarch64__) || defined(__arm64ec__)
++    ULONGLONG c, freq = qpc_freq;
++    LONGLONG offset = qpc_offset;  /* one read: either unset or a measured offset */
++
++    if (!freq)
++    {
++        __asm__ __volatile__( "mrs %0, cntfrq_el0" : "=r"(freq) );
++        qpc_freq = freq;
++    }
++    if (freq)
++    {
++        c = qpc_read_timer();
++        if (offset == QPC_OFFSET_UNSET || c - qpc_last_sync >= freq)
++        {
++            LARGE_INTEGER sys;
++            ULONGLONG c0 = qpc_read_timer();
++            LONGLONG measured;
++
++            NtQueryPerformanceCounter( &sys, NULL );
++            c = qpc_read_timer();
++            measured = sys.QuadPart - (LONGLONG)qpc_timer_to_ticks( c0 + (c - c0) / 2, freq );
++            if (offset == QPC_OFFSET_UNSET)
++            {
++                /* threads racing through their first read agree on one offset */
++                offset = InterlockedCompareExchange64( &qpc_offset, measured, QPC_OFFSET_UNSET );
++                if (offset == QPC_OFFSET_UNSET) offset = measured;
++            }
++            else if (measured > offset + TICKSPERSEC / 1000) qpc_offset = offset = measured;
++            qpc_last_sync = c;
++        }
++        counter->QuadPart = (LONGLONG)qpc_timer_to_ticks( c, freq ) + offset;
++        return TRUE;
++    }
++#endif
+     NtQueryPerformanceCounter( counter, NULL );
+     return TRUE;
+ }

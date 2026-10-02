@@ -88,3 +88,8 @@ Kitsune's own code, including its changes to Wine, DXMT and FEX, is
 GPL-3.0-or-later. Upstream code keeps its own license: leave its headers in
 place, and add a component you bundle to [LICENSES/README.md](LICENSES/README.md)
 with its license text.
+
+Code adapted from another project is credited in three places: a comment
+where it sits, naming the project, commit, copyright holder and license; a
+line in its patch's message; and a row in
+[LICENSES/README.md](LICENSES/README.md#code-adapted-from-madeira).

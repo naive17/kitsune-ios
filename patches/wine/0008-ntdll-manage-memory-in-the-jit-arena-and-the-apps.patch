@@ -19,6 +19,8 @@ virtual.c, in dependency order:
 - diagnostics: address-space census, reports and the fault-loop
   detector
 kernelbase's GetPhysicallyInstalledSystemMemory rounds up to a whole GB.
+
+The soft pools are adapted from Madeira (willfaust/Madeira 69496fd).
 ---
 diff --git a/dlls/kernelbase/memory.c b/dlls/kernelbase/memory.c
 index 85e596f9d80b73fee6fd53484d44351681cace29..68f8c8a503fd66088b634bc477f65a6438568322 100644
@@ -127,7 +129,7 @@ index dea2cbb37277d921f313e72562b2008f138ae25f..a369ccc5b69e74ca7cb5dccd371ad4e7
  static void stub_syscall( const char *name )
  {
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3978182a3 100644
+index db820a89525ac4eb54134c675c5c1ee64592763d..cb7cfd3b8e86eb851dd39c93e253ec158539b92d 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
 @@ -59,14 +59,23 @@
@@ -587,7 +589,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (use_kernel_writewatch) vprot &= ~VPROT_WRITEWATCH;
      set_page_vprot( base, size, vprot );
  
-@@ -1882,11 +2157,2160 @@ static DWORD get_win32_prot( BYTE vprot, unsigned int map_prot )
+@@ -1882,11 +2157,2164 @@ static DWORD get_win32_prot( BYTE vprot, unsigned int map_prot )
  }
  
  
@@ -1469,6 +1471,10 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
 +    return NULL;
 +}
 +
++/* Soft pools, ranges granted to the guest without backing and mapped when it
++ * commits, are adapted from Madeira (willfaust/Madeira 69496fd,
++ * build/ntdll-unix/virtual_ios.c), Copyright (C) 2026 Will Faust,
++ * LGPL-2.1-or-later. */
 +struct ios_soft_pool { ULONG_PTR base, size, committed, guard; unsigned commits, collisions, decommits; void *owner;
 +                       unsigned char *map; /* one bit per host page: MATERIALISED (mapped RW) */
 +                       unsigned char *cmap;/* one bit per host page: COMMITTED (fault-materialise) */
@@ -2750,7 +2756,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  static NTSTATUS get_vprot_flags( DWORD protect, unsigned int *vprot, BOOL image )
  {
      switch(protect & 0xff)
-@@ -1929,13 +4353,43 @@ static NTSTATUS get_vprot_flags( DWORD protect, unsigned int *vprot, BOOL image
+@@ -1929,13 +4357,43 @@ static NTSTATUS get_vprot_flags( DWORD protect, unsigned int *vprot, BOOL image
  }
  
  
@@ -2799,7 +2805,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (force_exec_prot && (unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
      {
          TRACE( "forcing exec permission on %p-%p\n", base, (char *)base + size - 1 );
-@@ -1944,15 +4398,19 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
+@@ -1944,15 +4402,19 @@ static inline int mprotect_exec( void *base, size_t size, int unix_prot )
          if (!(unix_prot & PROT_WRITE)) return -1;
      }
  
@@ -2825,7 +2831,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
  {
      size_t i, count;
-@@ -1978,11 +4436,6 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
+@@ -1978,11 +4440,6 @@ static int mprotect_range( void *base, size_t size, BYTE set, BYTE clear )
  }
  
  
@@ -2837,7 +2843,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  static BOOL set_vprot( struct file_view *view, void *base, size_t size, BYTE vprot )
  {
      if (!use_kernel_writewatch && view->protect & VPROT_WRITEWATCH)
-@@ -1994,17 +4447,39 @@ static BOOL set_vprot( struct file_view *view, void *base, size_t size, BYTE vpr
+@@ -1994,17 +4451,39 @@ static BOOL set_vprot( struct file_view *view, void *base, size_t size, BYTE vpr
      {
          if (enable_write_exceptions && is_vprot_exec_write( vprot )) vprot |= VPROT_WRITEWATCH;
          else if (use_kernel_writewatch && view->protect & VPROT_WRITEWATCH) vprot &= ~VPROT_WRITEWATCH;
@@ -2882,7 +2888,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  static NTSTATUS set_protection( struct file_view *view, void *base, SIZE_T size, ULONG protect )
  {
      unsigned int vprot;
-@@ -2292,6 +4767,28 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
+@@ -2292,6 +4771,28 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
          if (is_beyond_limit( base, size, working_set_limit )) working_set_limit = address_space_limit;
          ptr = base;
      }
@@ -2911,7 +2917,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      else
      {
          void *start = address_space_start;
-@@ -2302,6 +4799,24 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
+@@ -2302,6 +4803,24 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
          if (limit_low && (void *)limit_low > start) start = (void *)limit_low;
          if (limit_high && (void *)limit_high < end) end = (char *)limit_high + 1;
  
@@ -2936,7 +2942,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
          if ((ptr = map_reserved_area( start, end, host_size, top_down, unix_prot, align_mask )))
          {
              TRACE( "got mem in reserved area %p-%p\n", ptr, (char *)ptr + size );
-@@ -2321,8 +4836,55 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
+@@ -2321,8 +4840,55 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
              if ((ptr = anon_mmap_alloc( view_size, unix_prot )) == MAP_FAILED)
              {
                  status = (errno == ENOMEM) ? STATUS_NO_MEMORY : STATUS_INVALID_PARAMETER;
@@ -2992,7 +2998,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
                  return status;
              }
              TRACE( "got mem with anon mmap %p-%p\n", ptr, (char *)ptr + size );
-@@ -2334,6 +4896,12 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
+@@ -2334,6 +4900,12 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
          ptr = unmap_extra_space( ptr, view_size, host_size, align_mask );
      }
  done:
@@ -3005,7 +3011,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      status = create_view( view_ret, ptr, size, vprot );
      if (status != STATUS_SUCCESS) unmap_area( ptr, size );
      return status;
-@@ -2357,6 +4925,12 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
+@@ -2357,6 +4929,12 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
      assert( start < view->size );
      assert( start + size <= view->size );
  
@@ -3018,7 +3024,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (vprot & VPROT_WRITE) flags |= MAP_SHARED;
      else if (vprot & VPROT_WRITECOPY) flags |= MAP_PRIVATE;
      else
-@@ -2480,7 +5054,18 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
+@@ -2480,7 +5058,18 @@ static NTSTATUS decommit_pages( struct file_view *view, char *base, size_t size
      }
      else host_end = ROUND_ADDR( base + size, host_page_mask );
  
@@ -3037,7 +3043,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      set_page_vprot_bits( base, size, 0, VPROT_COMMITTED );
      if (host_start < host_end) kernel_writewatch_register_range( view, host_start, host_end - host_start );
      return STATUS_SUCCESS;
-@@ -2509,6 +5094,12 @@ static NTSTATUS remove_pages_from_view( struct file_view *view, char *base, size
+@@ -2509,6 +5098,12 @@ static NTSTATUS remove_pages_from_view( struct file_view *view, char *base, size
          new_view->base    = base + size;
          new_view->size    = (char *)view->base + view->size - (char *)new_view->base;
          new_view->protect = view->protect;
@@ -3050,7 +3056,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
          unregister_view( view );
          view->size = base - (char *)view->base;
-@@ -2805,16 +5396,60 @@ static void alloc_arm64ec_map(void)
+@@ -2805,16 +5400,60 @@ static void alloc_arm64ec_map(void)
      unsigned int status;
      SIZE_T size = ((ULONG_PTR)address_space_limit + page_size) >> (page_shift + 3);  /* one bit per page */
  
@@ -3112,7 +3118,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
  /***********************************************************************
   *           update_arm64ec_ranges
-@@ -2828,10 +5463,11 @@ static void update_arm64ec_ranges( struct file_view *view, IMAGE_NT_HEADERS *nt,
+@@ -2828,10 +5467,11 @@ static void update_arm64ec_ranges( struct file_view *view, IMAGE_NT_HEADERS *nt,
      const IMAGE_LOAD_CONFIG_DIRECTORY *cfg = (void *)(base + dir->VirtualAddress);
      ULONG i, size = min( dir->Size, cfg->Size );
  
@@ -3126,7 +3132,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      metadata = (void *)(base + (cfg->CHPEMetadataPointer - nt->OptionalHeader.ImageBase));
      *entry_point = redirect_arm64ec_rva( base, nt->OptionalHeader.AddressOfEntryPoint, metadata );
      if (!metadata->CodeMap) return;
-@@ -2894,7 +5530,7 @@ static void update_arm64x_mapping( struct file_view *view, IMAGE_NT_HEADERS *nt,
+@@ -2894,7 +5534,7 @@ static void update_arm64x_mapping( struct file_view *view, IMAGE_NT_HEADERS *nt,
  {
      const IMAGE_DYNAMIC_RELOCATION_TABLE *table;
      const char *ptr, *end;
@@ -3135,7 +3141,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      const IMAGE_LOAD_CONFIG_DIRECTORY *cfg = (void *)(base + dir->VirtualAddress);
      ULONG sec, offset, size = min( dir->Size, cfg->Size );
  
-@@ -3026,6 +5662,50 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
+@@ -3026,6 +5666,50 @@ static IMAGE_BASE_RELOCATION *process_relocation_block( char *page, IMAGE_BASE_R
  }
  
  
@@ -3186,7 +3192,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  /***********************************************************************
   *           map_image_into_view
   *
-@@ -3045,7 +5725,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3045,7 +5729,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
      off_t pos;
      struct stat st;
      char *header_end;
@@ -3196,7 +3202,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      SIZE_T header_size, header_map_size, total_size = view->size;
      SIZE_T align_mask = max( image_info->alignment - 1, page_mask );
      INT_PTR delta;
-@@ -3057,7 +5738,10 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3057,7 +5742,10 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
      fstat( fd, &st );
      header_size = min( image_info->header_size, st.st_size );
      header_map_size = min( image_info->header_map_size, ROUND_SIZE( 0, st.st_size, host_page_mask ));
@@ -3208,7 +3214,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
          return status;
  
      status = STATUS_INVALID_IMAGE_FORMAT;  /* generic error */
-@@ -3098,7 +5782,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3098,7 +5786,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
          }
  
          /* set the image protections */
@@ -3217,7 +3223,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
          /* no relocations are performed on non page-aligned binaries */
          status = STATUS_SUCCESS;
-@@ -3201,7 +5885,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3201,7 +5889,7 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
      {
          if (image_info->machine == IMAGE_FILE_MACHINE_ARM64 &&
              (machine == IMAGE_FILE_MACHINE_AMD64 ||
@@ -3226,7 +3232,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
          {
              update_arm64x_mapping( view, nt, dir, sec );
              /* reload changed machine from NT header */
-@@ -3210,6 +5894,11 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3210,6 +5898,11 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
          if (image_info->machine == IMAGE_FILE_MACHINE_AMD64)
              update_arm64ec_ranges( view, nt, dir, &image_info->entry_point );
      }
@@ -3238,7 +3244,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  #endif
      if (machine && machine != nt->FileHeader.Machine)
      {
-@@ -3241,7 +5930,27 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3241,7 +5934,27 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
  
      /* set the image protections */
  
@@ -3267,7 +3273,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
      for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
      {
-@@ -3257,7 +5966,65 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
+@@ -3257,7 +5970,65 @@ static NTSTATUS map_image_into_view( struct file_view *view, const UNICODE_STRIN
          if (sec[i].Characteristics & IMAGE_SCN_MEM_WRITE)   vprot |= VPROT_WRITECOPY;
          if (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) vprot |= VPROT_EXEC;
  
@@ -3334,7 +3340,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
              ERR( "failed to set %08x protection on %s section %.8s, noexec filesystem?\n",
                   sec[i].Characteristics, debugstr_us(nt_name), sec[i].Name );
      }
-@@ -3338,6 +6105,36 @@ static unsigned int get_mapping_info( HANDLE handle, ACCESS_MASK access, unsigne
+@@ -3338,6 +6109,36 @@ static unsigned int get_mapping_info( HANDLE handle, ACCESS_MASK access, unsigne
   *
   * Map a view for a PE image at an appropriate address.
   */
@@ -3371,7 +3377,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_info *image_info, SIZE_T size,
                                  ULONG_PTR limit_low, ULONG_PTR limit_high, ULONG alloc_type )
  {
-@@ -3351,6 +6148,73 @@ static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_inf
+@@ -3351,6 +6152,73 @@ static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_inf
      limit_low = max( limit_low, (ULONG_PTR)address_space_start );  /* make sure the DOS area remains free */
      if (!limit_high) limit_high = (ULONG_PTR)user_space_limit;
  
@@ -3445,7 +3451,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      /* first try the specified base */
  
      if (image_info->map_addr)
-@@ -3367,7 +6231,17 @@ static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_inf
+@@ -3367,7 +6235,17 @@ static NTSTATUS map_image_view( struct file_view **view_ret, struct pe_image_inf
      {
          status = map_view( view_ret, base, size, alloc_type, vprot, limit_low, limit_high, 0 );
          if (!status) return status;
@@ -3463,7 +3469,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
      /* then some appropriate address range */
  
-@@ -3438,9 +6312,17 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
+@@ -3438,9 +6316,17 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
  
      server_enter_uninterrupted_section( &virtual_mutex, &sigset );
  
@@ -3481,7 +3487,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      status = map_image_into_view( view, &pe_mapping->nt_name, unix_fd, &pe_mapping->image,
                                    machine, shared_fd, needs_close );
      if (status == STATUS_SUCCESS)
-@@ -3735,7 +6617,7 @@ void virtual_init(void)
+@@ -3735,7 +6621,7 @@ void virtual_init(void)
   */
  ULONG_PTR get_system_affinity_mask(void)
  {
@@ -3490,7 +3496,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (num_cpus >= sizeof(ULONG_PTR) * 8) return ~(ULONG_PTR)0;
      return ((ULONG_PTR)1 << num_cpus) - 1;
  }
-@@ -3789,7 +6671,7 @@ void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 )
+@@ -3789,7 +6675,7 @@ void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 )
      info->AllocationGranularity   = granularity_mask + 1;
      info->LowestUserAddress       = (void *)0x10000;
      info->ActiveProcessorsAffinityMask = get_system_affinity_mask();
@@ -3499,7 +3505,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (wow64) info->HighestUserAddress = (char *)get_wow_user_space_limit() - 1;
      else info->HighestUserAddress = (char *)user_space_limit - 1;
  }
-@@ -3965,6 +6847,21 @@ NTSTATUS virtual_relocate_module( void *module )
+@@ -3965,6 +6851,21 @@ NTSTATUS virtual_relocate_module( void *module )
  
      if (!(relocs = get_data_dir( nt, total_size, IMAGE_DIRECTORY_ENTRY_BASERELOC ))) return STATUS_SUCCESS;
  
@@ -3521,7 +3527,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (!(protect_old = malloc( nt->FileHeader.NumberOfSections * sizeof(*protect_old ))))
          return STATUS_NO_MEMORY;
  
-@@ -4003,7 +6900,7 @@ static TEB *init_teb( void *ptr, BOOL is_wow )
+@@ -4003,7 +6904,7 @@ static TEB *init_teb( void *ptr, BOOL is_wow )
  
  #ifdef _WIN64
      teb = (TEB *)teb64;
@@ -3530,7 +3536,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      teb32->Tib.Self = PtrToUlong( teb32 );
      teb32->Tib.ExceptionList = ~0u;
      teb32->Tib.FiberData = 0x1e00;
-@@ -4020,7 +6917,7 @@ static TEB *init_teb( void *ptr, BOOL is_wow )
+@@ -4020,7 +6921,7 @@ static TEB *init_teb( void *ptr, BOOL is_wow )
      teb = (TEB *)teb32;
      teb32->Tib.ExceptionList = ~0u;
      teb32->Tib.FiberData = 0x1e00;
@@ -3539,7 +3545,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      teb64->Tib.Self = PtrToUlong( teb64 );
      teb64->Tib.ExceptionList = PtrToUlong( teb32 );
      teb64->Tib.FiberData = 0x1e00;
-@@ -4037,7 +6934,7 @@ static TEB *init_teb( void *ptr, BOOL is_wow )
+@@ -4037,7 +6938,7 @@ static TEB *init_teb( void *ptr, BOOL is_wow )
          teb32->WowTebOffset  = -teb_offset;
      }
  #endif
@@ -3548,7 +3554,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      teb->Tib.Self = &teb->Tib;
      teb->Tib.StackBase = (void *)~0ul;
      teb->Tib.FiberData = (void *)0x1e00;
-@@ -4062,21 +6959,74 @@ TEB *virtual_alloc_first_teb(void)
+@@ -4062,21 +6963,74 @@ TEB *virtual_alloc_first_teb(void)
      SIZE_T total = 32 * block_size;
      struct thread_data *thread_data;
  
@@ -3625,7 +3631,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      peb = (PEB *)((char *)teb_block + 31 * block_size + (is_win64 ? 0 : page_size));
      teb = init_teb( ptr, FALSE );
  
-@@ -4150,7 +7100,13 @@ struct thread_data *virtual_alloc_thread_data(void)
+@@ -4150,7 +7104,13 @@ struct thread_data *virtual_alloc_thread_data(void)
      SIZE_T size = signal_stack_mask + 1 + kernel_stack_size;
  
      server_enter_uninterrupted_section( &virtual_mutex, &sigset );
@@ -3639,7 +3645,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (!status)
      {
          data = view->base;
-@@ -4180,6 +7136,12 @@ void virtual_free_thread_data( struct thread_data *data )
+@@ -4180,6 +7140,12 @@ void virtual_free_thread_data( struct thread_data *data )
      sigset_t sigset;
      WOW_TEB *wow_teb;
  
@@ -3652,7 +3658,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (!(teb = data->teb)) goto done;
  
      if (teb->DeallocationStack)
-@@ -4246,8 +7208,8 @@ WORD ldt_update_entry( WORD sel, LDT_ENTRY entry )
+@@ -4246,8 +7212,8 @@ WORD ldt_update_entry( WORD sel, LDT_ENTRY entry )
                        VPROT_COMMITTED | VPROT_READ | VPROT_WRITE,
                        is_win64 ? limit_2g : 0, limit_4g, 0 )) return 0;
          ldt_copy = view->base;
@@ -3663,7 +3669,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      }
  
      ldt_set_entry( sel, entry );
-@@ -4270,7 +7232,7 @@ NTSTATUS ldt_get_entry( WORD sel, CLIENT_ID client_id, LDT_ENTRY *entry )
+@@ -4270,7 +7236,7 @@ NTSTATUS ldt_get_entry( WORD sel, CLIENT_ID client_id, LDT_ENTRY *entry )
      struct ldt_bits bits = { 0 };
      unsigned int idx = sel >> 3;
  
@@ -3672,7 +3678,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      {
          if (ldt_copy)
          {
-@@ -4367,6 +7329,7 @@ NTSTATUS virtual_clear_tls_index( ULONG index )
+@@ -4367,6 +7333,7 @@ NTSTATUS virtual_clear_tls_index( ULONG index )
          LIST_FOR_EACH_ENTRY( data, &teb_list, struct thread_data, entry )
          {
              TEB *teb = data->teb;
@@ -3680,7 +3686,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  #ifdef _WIN64
              WOW_TEB *wow_teb = get_wow_teb( teb );
              if (wow_teb) wow_teb->TlsSlots[index] = 0;
-@@ -4379,12 +7342,13 @@ NTSTATUS virtual_clear_tls_index( ULONG index )
+@@ -4379,12 +7346,13 @@ NTSTATUS virtual_clear_tls_index( ULONG index )
      else
      {
          index -= TLS_MINIMUM_AVAILABLE;
@@ -3695,7 +3701,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  #ifdef _WIN64
              WOW_TEB *wow_teb = get_wow_teb( teb );
              if (wow_teb)
-@@ -4413,8 +7377,8 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
+@@ -4413,8 +7381,8 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
      sigset_t sigset;
      SIZE_T size;
  
@@ -3706,7 +3712,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
      size = max( reserve_size, commit_size );
      if (size < 1024 * 1024) size = 1024 * 1024;  /* Xlib needs a large stack */
-@@ -4422,8 +7386,14 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
+@@ -4422,8 +7390,14 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR limit_low, UL
  
      server_enter_uninterrupted_section( &virtual_mutex, &sigset );
  
@@ -3721,7 +3727,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (status != STATUS_SUCCESS) goto done;
  
  #ifdef VALGRIND_STACK_REGISTER
-@@ -4518,7 +7488,7 @@ void virtual_init_user_shared_data(void)
+@@ -4518,7 +7492,7 @@ void virtual_init_user_shared_data(void)
      data->SystemCall            = 1;
      data->NumberOfPhysicalPages = info.MmNumberOfPhysicalPages;
      data->NXSupportPolicy       = NX_SUPPORT_POLICY_OPTIN;
@@ -3730,7 +3736,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      data->ActiveGroupCount      = 1;
  
      switch (native_machine)
-@@ -4613,6 +7583,47 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+@@ -4613,6 +7587,47 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
      BYTE vprot;
  
      mutex_lock( &virtual_mutex );  /* no need for signal masking inside signal handler */
@@ -3778,7 +3784,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      vprot = get_host_page_vprot( page );
  
  #ifdef __APPLE__
-@@ -4669,6 +7680,17 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
+@@ -4669,6 +7684,17 @@ NTSTATUS virtual_handle_fault( struct thread_data *data, EXCEPTION_RECORD *rec,
   */
  void *virtual_setup_exception( struct thread_data *data, void *stack_ptr, size_t size, EXCEPTION_RECORD *rec )
  {
@@ -3796,7 +3802,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      char *stack = stack_ptr;
      struct thread_stack_info stack_info;
  
-@@ -4691,8 +7713,13 @@ void *virtual_setup_exception( struct thread_data *data, void *stack_ptr, size_t
+@@ -4691,8 +7717,13 @@ void *virtual_setup_exception( struct thread_data *data, void *stack_ptr, size_t
      {
          /* stack overflow on last page, unrecoverable */
          UINT diff = stack_info.start + host_page_size - stack;
@@ -3812,7 +3818,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
          abort_thread(1);
      }
      else if (stack < stack_info.limit)
-@@ -5096,16 +8123,16 @@ void virtual_set_large_address_space(void)
+@@ -5096,16 +8127,16 @@ void virtual_set_large_address_space(void)
          {
              address_space_start = (void *)0x10000;
  #ifndef __APPLE__  /* don't free the zerofill section on macOS */
@@ -3834,7 +3840,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
          free_reserved_memory( (char *)0x80000000, address_space_limit );
      }
      user_space_limit = working_set_limit = address_space_limit;
-@@ -5117,6 +8144,164 @@ void virtual_set_large_address_space(void)
+@@ -5117,6 +8148,164 @@ void virtual_set_large_address_space(void)
   *
   * NtAllocateVirtualMemory[Ex] implementation.
   */
@@ -3999,7 +4005,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG type, ULONG protect,
                                           ULONG_PTR limit_low, ULONG_PTR limit_high,
                                           ULONG_PTR align, ULONG attributes )
-@@ -5128,6 +8313,9 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+@@ -5128,6 +8317,9 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
      sigset_t sigset;
      SIZE_T size = *size_ptr;
      NTSTATUS status = STATUS_SUCCESS;
@@ -4009,7 +4015,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
      /* Round parameters to a page boundary */
  
-@@ -5184,24 +8372,160 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+@@ -5184,24 +8376,160 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
  
              if (vprot & VPROT_WRITECOPY) status = STATUS_INVALID_PAGE_PROTECTION;
              else if (is_dos_memory) status = allocate_dos_memory( &view, vprot );
@@ -4174,7 +4180,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
          else if (view->protect & SEC_FILE) status = STATUS_ALREADY_COMMITTED;
          else if (view->protect & VPROT_FREE_PLACEHOLDER) status = STATUS_CONFLICTING_ADDRESSES;
          else if (!(status = set_protection( view, base, size, protect )) && (view->protect & SEC_RESERVE))
-@@ -5217,13 +8541,13 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+@@ -5217,13 +8545,13 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
          }
      }
  
@@ -4190,7 +4196,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
      server_leave_uninterrupted_section( &virtual_mutex, &sigset );
  
-@@ -5232,13 +8556,76 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
+@@ -5232,13 +8560,76 @@ static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG typ
          *ret = base;
          *size_ptr = size;
      }
@@ -4268,7 +4274,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  /***********************************************************************
   *             NtAllocateVirtualMemory   (NTDLL.@)
   *             ZwAllocateVirtualMemory   (NTDLL.@)
-@@ -5491,6 +8878,14 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
+@@ -5491,6 +8882,14 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
  #endif
          status = STATUS_INVALID_PARAMETER;
      }
@@ -4283,7 +4289,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      else if (!(view = find_view( base, 0 ))) status = STATUS_MEMORY_NOT_ALLOCATED;
      else if (!is_view_valloc( view )) status = STATUS_INVALID_PARAMETER;
      else if (!size && base != view->base) status = STATUS_FREE_VM_NOT_AT_BASE;
-@@ -5591,9 +8986,12 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T
+@@ -5591,9 +8990,12 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T
          }
          else status = STATUS_NOT_COMMITTED;
      }
@@ -4297,7 +4303,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  
      server_leave_uninterrupted_section( &virtual_mutex, &sigset );
  
-@@ -5683,6 +9081,68 @@ static struct file_view *get_memory_region_size( char *base, char **region_start
+@@ -5683,6 +9085,68 @@ static struct file_view *get_memory_region_size( char *base, char **region_start
  }
  
  
@@ -4366,7 +4372,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  static unsigned int fill_basic_memory_info( const void *addr, MEMORY_BASIC_INFORMATION *info )
  {
      char *base, *alloc_base, *alloc_end;
-@@ -5704,6 +9164,18 @@ static unsigned int fill_basic_memory_info( const void *addr, MEMORY_BASIC_INFOR
+@@ -5704,6 +9168,18 @@ static unsigned int fill_basic_memory_info( const void *addr, MEMORY_BASIC_INFOR
      info->BaseAddress = base;
      info->RegionSize  = alloc_end - base;
  
@@ -4385,7 +4391,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
      if (!view)
      {
          if (fake_reserved)
-@@ -6171,6 +9643,24 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
+@@ -6171,6 +9647,24 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
          case MemoryImageInformation:
              return get_memory_image_info( process, addr, buffer, len, res_len );
  
@@ -4410,7 +4416,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
          case MemoryWineLoadUnixLib:
          case MemoryWineLoadUnixLibWow64:
              if (len != sizeof(unixlib_handle_t)) return STATUS_INFO_LENGTH_MISMATCH;
-@@ -6375,8 +9865,19 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
+@@ -6375,8 +9869,19 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
          return result.map_view.status;
      }
  
@@ -4432,7 +4438,7 @@ index db820a89525ac4eb54134c675c5c1ee64592763d..9ed1782a4afc59da1886c05c7d2df7a3
  }
  
  /***********************************************************************
-@@ -6992,6 +10493,8 @@ NTSTATUS WINAPI NtFlushInstructionCache( HANDLE handle, const void *addr, SIZE_T
+@@ -6992,6 +10497,8 @@ NTSTATUS WINAPI NtFlushInstructionCache( HANDLE handle, const void *addr, SIZE_T
  {
  #if defined(__x86_64__) || defined(__i386__)
      /* no-op */

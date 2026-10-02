@@ -5,9 +5,12 @@ them (WINE_IOS_NO_ROUTE_SOCKET, WINE_NSI_KEV_EVENTS), reports an empty
 route table and stubs if_get_physical. nsi calls nsiproxy in-process
 when there is no \\.\Nsi device; 11-wine-ios.sh installs nsiproxy.so
 as nsi.so for that.
+
+The in-process fallback is adapted from Madeira's Wine fork
+(willfaust/wine d3d5a179a5, and 5c4d1f7a6f by 125hz).
 ---
 diff --git a/dlls/nsi/nsi.c b/dlls/nsi/nsi.c
-index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340f11e8edb 100644
+index 14be842871a9e9a205c52a530ab62d8423ac7afb..7546dd1cf283e730cc02959874ab2f9295e7fd3a 100644
 --- a/dlls/nsi/nsi.c
 +++ b/dlls/nsi/nsi.c
 @@ -17,6 +17,8 @@
@@ -19,7 +22,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
  #include "winsock2.h"
  #include "winternl.h"
  #include "ws2ipdef.h"
-@@ -26,11 +28,38 @@
+@@ -26,11 +28,42 @@
  #include "netiodef.h"
  #include "wine/nsi.h"
  #include "wine/debug.h"
@@ -29,6 +32,10 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
  
  static HANDLE nsi_device = INVALID_HANDLE_VALUE;
  static HANDLE nsi_device_async = INVALID_HANDLE_VALUE;
++/* The in-process fallback below is adapted from Madeira's Wine fork:
++ * nsi_unix_fallback from willfaust/wine d3d5a179a5, Copyright (C) 2026
++ * Will Faust, and remembering the missing device from 5c4d1f7a6f,
++ * Copyright (C) 2026 125hz. Both LGPL-2.1-or-later. */
 +/* Kitsune: set once \\.\Nsi has been found missing. nsiproxy runs in
 + * process here (nsi_unix_fallback), so the device never appears, and
 + * retrying the open cost every NSI call a failing CreateFileW. */
@@ -58,7 +65,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
  
  BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
  {
-@@ -54,10 +83,21 @@ static inline HANDLE get_nsi_device( BOOL async )
+@@ -54,10 +87,21 @@ static inline HANDLE get_nsi_device( BOOL async )
  
      if (*cached_device == INVALID_HANDLE_VALUE)
      {
@@ -82,7 +89,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
              CloseHandle( device );
      }
      return *cached_device;
-@@ -123,6 +163,15 @@ DWORD WINAPI NsiCancelChangeNotification( OVERLAPPED *ovr )
+@@ -123,6 +167,15 @@ DWORD WINAPI NsiCancelChangeNotification( OVERLAPPED *ovr )
      TRACE( "%p.\n", ovr );
  
      if (!ovr) return ERROR_NOT_FOUND;
@@ -98,7 +105,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
      if (!CancelIoEx(  get_nsi_device( TRUE ), ovr ))
          err = GetLastError();
  
-@@ -168,7 +217,12 @@ DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *pa
+@@ -168,7 +221,12 @@ DWORD WINAPI NsiEnumerateObjectsAllParametersEx( struct nsi_enumerate_all_ex *pa
      struct nsiproxy_enumerate_all in;
      BYTE *out, *ptr;
  
@@ -112,7 +119,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
  
      out_size = sizeof(DWORD) +
          (params->key_size + params->rw_size + params->dynamic_size + params->static_size) * params->count;
-@@ -251,7 +305,12 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
+@@ -251,7 +309,12 @@ DWORD WINAPI NsiGetAllParametersEx( struct nsi_get_all_parameters_ex *params )
      DWORD err = ERROR_SUCCESS;
      BYTE *out, *ptr;
  
@@ -126,7 +133,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
  
      in = malloc( in_size );
      out = malloc( out_size );
-@@ -318,7 +377,12 @@ DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
+@@ -318,7 +381,12 @@ DWORD WINAPI NsiGetParameterEx( struct nsi_get_parameter_ex *params )
      ULONG in_size = FIELD_OFFSET( struct nsiproxy_get_parameter, key[params->key_size] ), received;
      DWORD err = ERROR_SUCCESS;
  
@@ -140,7 +147,7 @@ index 14be842871a9e9a205c52a530ab62d8423ac7afb..f6882a862a1fed53b7cdf5af60394340
  
      in = malloc( in_size );
      if (!in) return ERROR_OUTOFMEMORY;
-@@ -365,6 +429,27 @@ DWORD WINAPI NsiRequestChangeNotificationEx( struct nsi_request_change_notificat
+@@ -365,6 +433,27 @@ DWORD WINAPI NsiRequestChangeNotificationEx( struct nsi_request_change_notificat
  
      if (params->unk) FIXME( "unknown parameter %#lx.\n", params->unk );
  

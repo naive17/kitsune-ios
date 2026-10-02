@@ -23,10 +23,14 @@ constant-buffer argument layout are shared. Ship both or neither.
 0003  bcdec v0.985 (MIT), unmodified
 0004  etcpak's encoder (BSD-3-Clause)
 0005  iOS: Managed storage as Shared, swapchains across the app's processes,
-      MSAA clamped to what the GPU has, DXGI notifications unsupported
+      MSAA clamped to what the GPU has, DXGI notifications unsupported; the
+      storage remap after Madeira's DXMT fork (willfaust/dxmt d7ffd08)
 0006  constant-buffer reads bounded by the bound length (shader cache 19)
-0007  BC textures decoded on the CPU, mip capping with logical descriptors
+0007  BC textures decoded on the CPU, mip capping with logical descriptors;
+      decoding at upload after Madeira's DXMT fork (willfaust/dxmt bc6d4c7)
 0008  frames without a drawable dropped instead of aborting
 0009  winemetal on iOS GPUs: ETC2/EAC storage, nil drawables, GPU debug mask,
-      frame cap, present count, GPU time and allocation totals for the app
+      frame cap, present count, GPU time and allocation totals for the app;
+      the BC fallback and upload pitch check after Madeira's DXMT fork
+      (willfaust/dxmt ec30e12)
 0010  staging and dynamic-buffer memory bounded during level loads

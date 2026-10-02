@@ -16,7 +16,7 @@ EXPECT_HASH="2236d88fe5618cef"
 EXPECT_SEH="OK checksum=94a514d4d6110800"
 fails=0
 
-for f in hello64 seh64 sehcross64 inputprobe fpsprobe d3d11_rb d3d11_swap d3d11_swap64 d3d11_texload xinput_reload64; do
+for f in hello64 seh64 sehcross64 qpc64 inputprobe fpsprobe d3d11_rb d3d11_swap d3d11_swap64 d3d11_texload xinput_reload64; do
   [ -f "$PE/$f.exe" ] || die "no $f.exe in $PE; run 20-test-layout.sh"
 done
 for f in process-parent-arm64 process-parent-x64 child-pool-x64; do
@@ -77,6 +77,11 @@ for mode in normal forced; do
   check "x86 handler across EC boundary [$mode]" "seh-cross: OK handler reached" "$out"
 done
 unset KITSUNE_FORCE_KERNEL_MAP
+
+# QueryPerformanceCounter reads the timer in user mode: four threads never see
+# it go backwards, and it stays within 1 ms of the system call it replaces.
+out=$(run qpc env WINEDEBUG=-all "$HOST" "$PE/qpc64.exe")
+check "QueryPerformanceCounter in user mode" "QPC PASS" "$out"
 
 # --- child processes, run as threads the way the app runs them ---------------
 # The child also loads an API set and a system directory path, which name no

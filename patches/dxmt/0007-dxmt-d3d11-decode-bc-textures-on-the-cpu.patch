@@ -4,6 +4,9 @@ Apple's A-series GPUs have no BC formats. Uploads to a BC texture are
 decoded with bcdec, to RGBA8 or, for BC1 with KITSUNE_BC_16BIT, 16 bits per
 texel. Large BC textures lose their top mips (d3d11.mipClampBC,
 d3d11.bcMaxDim) while the application keeps its own descriptor.
+
+Decoding at upload and IsBCFormat follow Madeira's DXMT fork
+(willfaust/dxmt bc6d4c7).
 ---
 diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
 index a087dad4f0738d6ca99ce55ca24064918aa781d1..efddc73fe5dfdeeb95990c64d1adf9c01cfb14db 100644

@@ -6,6 +6,9 @@ ios_compat.h and ios_mach_vm.h supply what the iOS SDK lacks (VLNK and
 D_DISK constants, the mach_vm prototypes); cdrom.c builds as a non-Apple
 target; server/sock.c uses Apple's TCPS values. file.c corrects the case
 of the app container's path under HOME.
+
+The TCPS numbering is after Madeira's Wine fork (willfaust/wine
+d3d5a179a5).
 ---
 diff --git a/configure b/configure
 index aa3c65e1f81a41247f1edd53459d25c2fb753d35..ee14f76e794e92c46c3f45c659395b1c59510da9 100755

@@ -9,6 +9,8 @@
 #                                      and execution resumes, twice
 #   sehcross64.exe  x64-seh-cross.c    a fault in ARM64EC code reaches the
 #                                      handler of the x86 frame that called it
+#   qpc64.exe       x64-qpc.c          QueryPerformanceCounter never goes back
+#                                      and tracks the system call it replaces
 #
 # All are -nostdlib with a custom entry point on purpose: the first x86
 # instruction executed is then one we can point at, and a failure cannot be
@@ -26,7 +28,7 @@ CC="$MINGW_BIN/x86_64-w64-mingw32-clang"
 OUTDIR="$BUILD/x64-guests"
 mkdir -p "$OUTDIR"
 
-for pair in hello64:x64-hello seh64:x64-seh-resume sehcross64:x64-seh-cross; do
+for pair in hello64:x64-hello seh64:x64-seh-resume sehcross64:x64-seh-cross qpc64:x64-qpc; do
   name="${pair%%:*}"
   src="$ROOT/src/fex/${pair#*:}.c"
   rm -f "$OUTDIR/$name.exe"
