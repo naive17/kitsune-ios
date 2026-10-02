@@ -10,6 +10,8 @@ name: Release IPA
 on:
   push:
     tags: ['v*']
+    # Every push to ci-test runs the build, to test this workflow on its own branch.
+    branches: ['ci-test']
   workflow_dispatch:
 
 permissions:
@@ -36,7 +38,7 @@ env:
 
 jobs:
   toolchain:
-    runs-on: ${{ vars.KITSUNE_RUNNER || 'xcode-27' }}
+    runs-on: ${{ vars.KITSUNE_RUNNER || 'macos-26' }}
     timeout-minutes: 360
     outputs:
       key: ${{ steps.key.outputs.key }}
@@ -67,7 +69,7 @@ jobs:
 
   ipa:
     needs: toolchain
-    runs-on: ${{ vars.KITSUNE_RUNNER || 'xcode-27' }}
+    runs-on: ${{ vars.KITSUNE_RUNNER || 'macos-26' }}
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v5
@@ -81,9 +83,9 @@ jobs:
       - name: Package
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}" name="kitsune-$GITHUB_REF_NAME.ipa"
+            version="${GITHUB_REF_NAME#v}" name="Kitsune-$version.ipa"
           else
-            version="" name="kitsune-$(git rev-parse --short HEAD).ipa"
+            version="" name="Kitsune-$(git rev-parse --short HEAD).ipa"
           fi
           KITSUNE_VERSION="$version" scripts/app.sh ipa "build/$name"
           echo "IPA=build/$name" >> "$GITHUB_ENV"
